@@ -17,3 +17,8 @@ app/release/
 *.ap_
 *.dm
 output-metadata.json
+
+# Release signing (never commit keys or their passwords)
+keystore.properties
+*.jks
+*.keystore

@@ -53,10 +53,12 @@ Notes:
 
 ## Installing
 
-1. Go to the GitHub **Releases** page: [OnDevice Studio v1.0.6](https://github.com/nikunjsingh93/ondevice-studio/releases/tag/v1.0.6)
+1. Go to the GitHub **Releases** page: [OnDevice Studio v1.0.7](https://github.com/nikunjsingh93/ondevice-studio/releases/tag/v1.0.7)
 2. Download the latest APK from the most recent release.
 3. Open the APK on your Android device and install it.
 4. Launch **OnDevice Studio**.
+
+Upgrading from v1.0.6 or earlier: v1.0.7 is signed with a new key, so it installs as a separate app next to the old one. Export any projects you want to keep from the old app (Files → Save ZIP), then uninstall it.
 
 ## Using the App
 
@@ -107,9 +109,14 @@ GGUF models (the format used by apps like PocketPal) run on the CPU through llam
 
 Current app version:
 
-- `versionName`: `1.0.6`
+- `versionName`: `1.0.7`
+- `applicationId`: `com.nikunj.ondevicestudio`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.
+
+### Signing Release Builds
+
+Release builds are signed when `keystore.properties` exists at the project root (it is gitignored). Copy `keystore.properties.example`, point `storeFile` at your keystore, and fill in the passwords. Without it, `assembleRelease` produces an unsigned APK. Keep the keystore and its password backed up outside the repo: every future update must be signed with the same key.
 
 ## License
 

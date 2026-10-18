@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -6,17 +7,45 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Release signing reads keystore.properties at the project root (gitignored; see
+// keystore.properties.example). Without it, release builds are produced unsigned.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val hasReleaseKey = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    .all { !keystoreProperties.getProperty(it).isNullOrBlank() }
+
 android {
     namespace = "com.nikunj.gemmabuilder"
     compileSdk = 35
     ndkVersion = "28.2.13676358"
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.nikunj.gemmabuilder"
+        // Changed from com.nikunj.gemmabuilder in 1.0.7: the original signing key was lost, so this
+        // ships as a new app that installs next to 1.0.6 instead of failing to update it.
+        applicationId = "com.nikunj.ondevicestudio"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.6"
+        versionCode = 7
+        versionName = "1.0.7"
 
         ndk {
             // On-device models only run on 64-bit Arm phones; this also drops the x86/armv7 copies
