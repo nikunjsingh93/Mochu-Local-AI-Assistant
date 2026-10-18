@@ -95,27 +95,36 @@ fun saveCodeFontScale(context: Context, scale: Float) {
         .apply()
 }
 
-fun savedContextSizeChars(context: Context): Int {
-    val allowed = setOf(12000, 24000, 48000, 96000)
-    val value = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        .getInt("contextSizeChars", 24000)
-    return if (value in allowed) value else 24000
+/** Context window choices in Settings (tokens the model can hold: prompt plus reply). */
+val CONTEXT_TOKEN_OPTIONS = listOf(4096, 8192, 16384, 32768)
+
+fun savedContextTokens(context: Context): Int {
+    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    val saved = prefs.getInt("contextTokens", -1)
+    if (saved in CONTEXT_TOKEN_OPTIONS) return saved
+    // Earlier versions stored a character budget; map it to the window it used to load.
+    return when (prefs.getInt("contextSizeChars", 24000)) {
+        12000 -> 8192
+        48000, 96000 -> 32768
+        else -> 16384
+    }
 }
 
-fun saveContextSizeChars(context: Context, contextSizeChars: Int) {
-    val allowed = setOf(12000, 24000, 48000, 96000)
-    val normalized = if (contextSizeChars in allowed) contextSizeChars else 24000
+fun saveContextTokens(context: Context, tokens: Int) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         .edit()
-        .putInt("contextSizeChars", normalized)
+        .putInt("contextTokens", if (tokens in CONTEXT_TOKEN_OPTIONS) tokens else 16384)
         .apply()
 }
 
-/** KV-cache size (prompt + output tokens) for a file-context setting, capped at the 32K the .litertlm build supports. */
-fun maxNumTokensForContext(contextSizeChars: Int): Int = when {
-    contextSizeChars <= 12000 -> 8192
-    contextSizeChars <= 24000 -> 16384
-    else -> 32768
+/**
+ * Characters of project snapshot (index.html, other files, recent chat) that fit in a window of
+ * [windowTokens], after the system prompt and room for the reply (~3 characters per token).
+ */
+fun snapshotCharBudget(windowTokens: Int): Int {
+    val replyReserve = minOf(windowTokens / 2, 4096)
+    val systemPrompt = 900
+    return ((windowTokens - replyReserve - systemPrompt).coerceAtLeast(1024)) * 3
 }
 
 // GPU is the default; LiteRtGemmaEngine falls back to CPU when the device can't run it.

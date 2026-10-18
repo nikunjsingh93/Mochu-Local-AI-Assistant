@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import java.io.File
 import java.util.Locale
@@ -33,6 +34,9 @@ class BuilderViewModel : ViewModel() {
     private var sessionFingerprint: String? = null
     // Context window the loaded model actually got (may be below the setting to fit in memory).
     private var activeTokenWindow = 8192
+    // Decode tokens and time across every model call in the current turn (retries, continuations).
+    private var turnOutputTokens = 0
+    private var turnDecodeSeconds = 0.0
 
     fun prepare(context: Context) {
         if (prepared) return
@@ -61,7 +65,7 @@ class BuilderViewModel : ViewModel() {
                 modelReady = hasModel,
                 chatFontScale = savedChatFontScale(context),
                 codeFontScale = savedCodeFontScale(context),
-                contextSizeChars = savedContextSizeChars(context),
+                contextTokens = savedContextTokens(context),
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
                 allowMobileDataDownloads = savedAllowMobileDataDownloads(context),
@@ -133,6 +137,7 @@ class BuilderViewModel : ViewModel() {
         }
         engine.close()
         engine = DemoBuilderEngine()
+        _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
         sessionFingerprint = null
         saveModelName(appContext, model.fileName)
         saveActiveModelPath(appContext, file.absolutePath)
@@ -162,6 +167,7 @@ class BuilderViewModel : ViewModel() {
             }
             engine.close()
             engine = DemoBuilderEngine()
+            _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
             sessionFingerprint = null
             saveActiveModelPath(appContext, null)
             saveModelName(appContext, "")
@@ -217,21 +223,24 @@ class BuilderViewModel : ViewModel() {
         _uiState.update { it.copy(codeFontScale = scale) }
     }
 
-    fun setContextSizeChars(context: Context, contextSizeChars: Int) {
-        val previousTokenWindow = maxNumTokensForContext(uiState.value.contextSizeChars)
-        saveContextSizeChars(context, contextSizeChars)
-        val saved = savedContextSizeChars(context)
-        val needsReload = maxNumTokensForContext(saved) != previousTokenWindow && uiState.value.gemmaLoaded
+    fun setContextTokens(context: Context, tokens: Int) {
+        if (tokens == uiState.value.contextTokens) return
+        saveContextTokens(context, tokens)
+        val saved = savedContextTokens(context)
+        // The window is fixed when the model loads, so a loaded model has to be reloaded.
+        val needsReload = uiState.value.gemmaLoaded
         _uiState.update {
             if (needsReload) {
                 it.copy(
-                    contextSizeChars = saved,
+                    contextTokens = saved,
                     gemmaLoaded = false,
                     engineLabel = "Not loaded",
+                    contextWindowTokens = null,
+                    contextUsedTokens = null,
                     status = "Context window updated. Send a message to reload model."
                 )
             } else {
-                it.copy(contextSizeChars = saved)
+                it.copy(contextTokens = saved)
             }
         }
         refreshWorkspace(context)
@@ -417,6 +426,7 @@ class BuilderViewModel : ViewModel() {
             // The loaded engine may be memory-mapping the file we are about to overwrite or delete.
             engine.close()
             engine = DemoBuilderEngine()
+            _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
             sessionFingerprint = null
             val result = runCatching {
                 withContext(Dispatchers.IO) {
@@ -528,8 +538,9 @@ class BuilderViewModel : ViewModel() {
         // Free the previous model before loading the next so two copies never sit in RAM/GPU memory.
         engine.close()
         engine = DemoBuilderEngine()
+        _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
         sessionFingerprint = null
-        val requestedTokens = maxNumTokensForContext(uiState.value.contextSizeChars)
+        val requestedTokens = uiState.value.contextTokens
         val maxNumTokens = safeTokenWindow(context, file, requestedTokens)
         activeTokenWindow = maxNumTokens
         val windowNote = if (maxNumTokens < requestedTokens) ", ${formatTokens(maxNumTokens)}-token context to fit in memory" else ""
@@ -567,7 +578,9 @@ class BuilderViewModel : ViewModel() {
                     modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
                     multimodalBackendReady = multimodalEngine?.isReady() == true,
                     activeRoutingMode = "text",
-                    status = "${savedModelName(context)} loaded on $backendLabel$note$windowNote. Sending message..."
+                    status = "${savedModelName(context)} loaded on $backendLabel$note$windowNote. Sending message...",
+                    contextWindowTokens = maxNumTokens,
+                    contextUsedTokens = 0
                 )
             } else {
                 it.copy(
@@ -629,6 +642,8 @@ class BuilderViewModel : ViewModel() {
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
+                turnOutputTokens = 0
+                turnDecodeSeconds = 0.0
                 val generationStartedAtMs = System.currentTimeMillis()
                 var firstTokenAtMs: Long? = null
 
@@ -707,7 +722,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     }
 
                     val result = runCatching {
-                        engine.generate(sessionKey, attemptPrompt).collect { chunk ->
+                        engine.generate(sessionKey, attemptPrompt).onCompletion { absorbGenerationStats() }.collect { chunk ->
                             if (firstTokenAtMs == null && chunk.isNotBlank()) {
                                 firstTokenAtMs = System.currentTimeMillis()
                             }
@@ -875,6 +890,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                 generationInProgress = false
                 generationJob = null
                 _uiState.update { it.copy(isBusy = false) }
+                refreshContextUsage()
             }
         }
     }
@@ -994,7 +1010,7 @@ Your previous response was incomplete. If the user asked a question, return one 
         val modelNameNow = savedModelName(context)
         val estimatedFileContextChars = estimateFileContextChars(
             root = root,
-            maxTotalChars = uiState.value.contextSizeChars
+            maxTotalChars = snapshotCharBudget(activeTokenWindow)
         )
         _uiState.update {
             it.copy(
@@ -1058,21 +1074,26 @@ Your previous response was incomplete. If the user asked a question, return one 
         preferredAttachmentPaths: List<String> = emptyList()
     ): String {
         val root = activeProjectRoot(context)
-        val current = htmlContextForModel(File(root, "index.html").takeIf { it.exists() }?.readText().orEmpty())
+        // Everything below has to share one budget so the snapshot always fits the loaded window.
+        val budget = snapshotCharBudget(activeTokenWindow)
+        val recent = messages.takeLast(8).joinToString("\n") { msg ->
+            "${msg.role}: ${msg.text.take(1000)}"
+        }.takeLast(budget / 6)
+        val current = htmlContextForModel(
+            File(root, "index.html").takeIf { it.exists() }?.readText().orEmpty(),
+            maxChars = minOf(12000, budget / 2)
+        )
         val fileContext = buildProjectContextForModel(
             context = context,
             root = root,
             preferredPaths = preferredAttachmentPaths,
             onlyPreferredWhenProvided = preferredAttachmentPaths.isNotEmpty(),
-            maxTotalChars = uiState.value.contextSizeChars
+            maxTotalChars = (budget - recent.length - current.length).coerceAtLeast(0)
         )
         val multimodalHint = if (uiState.value.modelSupportsMultimodal) {
             "Model capability routing: multimodal-capable model detected. Prioritize attached image/audio understanding first, then use extracted file text."
         } else {
             "Model capability routing: text-only model path. Use extracted OCR/transcript/file text provided by the app."
-        }
-        val recent = messages.takeLast(8).joinToString("\n") { msg ->
-            "${msg.role}: ${msg.text.take(1000)}"
         }
         // BUILD_SYSTEM_PROMPT is already the conversation's system instruction, so it isn't repeated here.
         return """
@@ -1151,7 +1172,7 @@ Continue exactly where that reply stopped. Return one reply action containing on
             val output = StringBuilder()
             var lastUiUpdate = 0L
             val result = runCatching {
-                engine.generate(sessionKey, prompt).collect { chunk ->
+                engine.generate(sessionKey, prompt).onCompletion { absorbGenerationStats() }.collect { chunk ->
                     if (firstTokenAtMs() == null && chunk.isNotBlank()) {
                         setFirstTokenAtMs(System.currentTimeMillis())
                     }
@@ -1237,7 +1258,7 @@ Rules:
             val output = StringBuilder()
             var lastUiUpdate = 0L
             val result = runCatching {
-                engine.generate(sessionKey, prompt).collect { chunk ->
+                engine.generate(sessionKey, prompt).onCompletion { absorbGenerationStats() }.collect { chunk ->
                     if (firstTokenAtMs() == null && chunk.isNotBlank()) {
                         setFirstTokenAtMs(System.currentTimeMillis())
                     }
@@ -1321,7 +1342,27 @@ Rules:
         val elapsedSec = elapsedMs / 1000.0
         val ttftMs = (firstTokenAtMs?.minus(startedAtMs) ?: elapsedMs).coerceAtLeast(1L)
         val ttftSec = ttftMs / 1000.0
-        return "• ${String.format(Locale.US, "%.2f", elapsedSec)}s • ~${String.format(Locale.US, "%.2f", ttftSec)}s TTFT"
+        val base = "• ${String.format(Locale.US, "%.2f", elapsedSec)}s • ~${String.format(Locale.US, "%.2f", ttftSec)}s TTFT"
+        val tokensPerSecond = turnTokensPerSecond() ?: return base
+        _uiState.update { it.copy(lastTokensPerSecond = tokensPerSecond) }
+        return "$base • ${String.format(Locale.US, "%.1f", tokensPerSecond)} tok/s"
+    }
+
+    private fun absorbGenerationStats() {
+        val stats = engine.takeGenerationStats() ?: return
+        turnOutputTokens += stats.outputTokens
+        turnDecodeSeconds += stats.decodeSeconds
+    }
+
+    private fun turnTokensPerSecond(): Double? =
+        if (turnOutputTokens > 0 && turnDecodeSeconds > 0.05) turnOutputTokens / turnDecodeSeconds else null
+
+    /** How much of the loaded model's window the active chat's session currently holds. */
+    private fun refreshContextUsage() {
+        val window = uiState.value.contextWindowTokens ?: return
+        val sessionKey = uiState.value.activeConversationId.orEmpty()
+        val used = engine.remainingTokens(sessionKey)?.let { (window - it).coerceIn(0, window) } ?: 0
+        _uiState.update { it.copy(contextUsedTokens = used) }
     }
 
     private fun conversationInfos(): List<ConversationInfo> = conversations

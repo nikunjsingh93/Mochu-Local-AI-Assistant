@@ -330,15 +330,12 @@ fun BuilderApp(
             MainBuilderContent(
                 state = state,
                 compact = compact,
-                themeMode = themeMode,
-                onThemeModeChange = onThemeModeChange,
                 onOpenSettings = { settingsScreenOpen = true },
                 onOpenModels = {
                     vm.refreshModelDownloads(context.applicationContext)
                     modelsScreenOpen = true
                 },
                 onToggleSidebar = { vm.toggleSidebar() },
-                onImportModel = { modelPicker.launch(arrayOf("*/*")) },
                 onImportFiles = { fileImporter.launch(arrayOf("*/*")) },
                 onPromptChange = vm::setPrompt,
                 onGenerate = { vm.generate(context.applicationContext) },
@@ -360,12 +357,15 @@ fun BuilderApp(
                 SettingsScreen(
                     chatFontScale = state.chatFontScale,
                     codeFontScale = state.codeFontScale,
-                    contextSizeChars = state.contextSizeChars,
+                    contextTokens = state.contextTokens,
+                    activeContextTokens = state.contextWindowTokens,
+                    themeMode = themeMode,
                     backendPreference = state.backendPreference,
                     speculativeDecodingEnabled = state.speculativeDecodingEnabled,
                     onChatFontScale = { vm.setChatFontScale(context.applicationContext, it) },
                     onCodeFontScale = { vm.setCodeFontScale(context.applicationContext, it) },
-                    onContextSizeChange = { vm.setContextSizeChars(context.applicationContext, it) },
+                    onContextTokensChange = { vm.setContextTokens(context.applicationContext, it) },
+                    onThemeModeChange = onThemeModeChange,
                     onBackendPreferenceChange = { vm.setBackendPreference(context.applicationContext, it) },
                     onSpeculativeDecodingChange = { vm.setSpeculativeDecodingEnabled(context.applicationContext, it) },
                     onDismiss = { settingsScreenOpen = false }
@@ -431,12 +431,9 @@ fun BuilderApp(
 fun MainBuilderContent(
     state: BuilderUiState,
     compact: Boolean,
-    themeMode: String,
-    onThemeModeChange: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenModels: () -> Unit,
     onToggleSidebar: () -> Unit,
-    onImportModel: () -> Unit,
     onImportFiles: () -> Unit,
     onPromptChange: (String) -> Unit,
     onGenerate: () -> Unit,
@@ -480,12 +477,9 @@ fun MainBuilderContent(
     ) {
         Header(
             state = state,
-            themeMode = themeMode,
-            onThemeModeChange = onThemeModeChange,
             onOpenSettings = onOpenSettings,
             onOpenModels = onOpenModels,
-            onToggleSidebar = onToggleSidebar,
-            onImportModel = onImportModel
+            onToggleSidebar = onToggleSidebar
         )
         Spacer(Modifier.height(10.dp))
         if (compact) {
@@ -682,12 +676,9 @@ fun FullscreenCodePane(state: BuilderUiState) {
 @Composable
 fun Header(
     state: BuilderUiState,
-    themeMode: String,
-    onThemeModeChange: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenModels: () -> Unit,
-    onToggleSidebar: () -> Unit,
-    onImportModel: () -> Unit
+    onToggleSidebar: () -> Unit
 ) {
     var settingsOpen by remember { mutableStateOf(false) }
     Surface(
@@ -753,22 +744,6 @@ fun Header(
                         text = { Text("Download models") },
                         onClick = { settingsOpen = false; onOpenModels() }
                     )
-                    DropdownMenuItem(
-                        text = { Text("Import model file") },
-                        onClick = { settingsOpen = false; onImportModel() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (themeMode == "system") "✓ System theme" else "System theme") },
-                        onClick = { onThemeModeChange("system"); settingsOpen = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (themeMode == "light") "✓ Light theme" else "Light theme") },
-                        onClick = { onThemeModeChange("light"); settingsOpen = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (themeMode == "dark") "✓ Dark theme" else "Dark theme") },
-                        onClick = { onThemeModeChange("dark"); settingsOpen = false }
-                    )
                 }
             }
         }
@@ -792,12 +767,10 @@ fun ConversationsSidebar(
             title = { Text("Delete chat?") },
             text = { Text("Delete \"${chat.title}\" and its generated files? This cannot be undone.") },
             confirmButton = {
-                Button(
-                    onClick = {
-                        pendingDelete = null
-                        onDelete(chat.id)
-                    }
-                ) { Text("Delete") }
+                DangerButton("Delete") {
+                    pendingDelete = null
+                    onDelete(chat.id)
+                }
             },
             dismissButton = {
                 OutlinedButton(onClick = { pendingDelete = null }) { Text("Cancel") }
@@ -1509,6 +1482,7 @@ class LiteRtGemmaEngine(
     private var conversation: Conversation? = null
     private var conversationKey: String? = null
     private var tokenLimit: Int? = null
+    @Volatile private var lastStats: GenerationStats? = null
 
     /** Backend the model actually loaded on, e.g. "GPU" or "CPU". */
     var activeBackend: String = backendPreference.uppercase(Locale.US)
@@ -1549,9 +1523,12 @@ class LiteRtGemmaEngine(
             val result = runCatching {
                 try {
                     ExperimentalFlags.enableSpeculativeDecoding = attempt.speculativeDecoding
+                    // Benchmark counters give exact decode token counts and speed per reply.
+                    ExperimentalFlags.enableBenchmark = true
                     candidate.initialize()
                 } finally {
                     ExperimentalFlags.enableSpeculativeDecoding = null
+                    ExperimentalFlags.enableBenchmark = false
                 }
             }
             if (result.isSuccess) {
@@ -1594,16 +1571,32 @@ class LiteRtGemmaEngine(
             }
         }
         var finished = false
+        var chunks = 0
+        var firstChunkAt = 0L
+        lastStats = null
         try {
             active.sendMessageAsync(message).collect { token ->
+                if (chunks++ == 0) firstChunkAt = System.nanoTime()
                 emit(token.toString())
             }
             finished = true
+            @OptIn(ExperimentalApi::class)
+            val benchmark = runCatching { active.getBenchmarkInfo() }.getOrNull()
+            lastStats = if (benchmark != null && benchmark.lastDecodeTokensPerSecond > 0) {
+                GenerationStats(benchmark.lastDecodeTokenCount, benchmark.lastDecodeTokenCount / benchmark.lastDecodeTokensPerSecond)
+            } else if (chunks > 1) {
+                // Without benchmark counters, one streamed chunk is roughly one token.
+                GenerationStats(chunks, (System.nanoTime() - firstChunkAt) / 1e9)
+            } else {
+                null
+            }
         } finally {
             // A failed or cancelled turn leaves a partial reply in the KV cache, so start over next time.
             if (!finished) resetSession()
         }
     }
+
+    override fun takeGenerationStats(): GenerationStats? = lastStats.also { lastStats = null }
 
     override fun remainingTokens(sessionKey: String): Int? {
         val limit = tokenLimit ?: return null
@@ -2460,7 +2453,7 @@ private fun decodeScaledBitmap(path: String, maxSide: Int): Bitmap? {
     return BitmapFactory.decodeFile(path, opts)
 }
 
-fun htmlContextForModel(html: String): String {
+fun htmlContextForModel(html: String, maxChars: Int = 12000): String {
     if (html.isBlank()) return ""
     val compact = html
         .replace(Regex("(?is)<script[^>]+src=[\"'][^\"']+[\"'][^>]*></script>"), "")
@@ -2469,11 +2462,11 @@ fun htmlContextForModel(html: String): String {
         .replace(Regex("[ \t]{2,}"), " ")
         .trim()
 
-    val maxChars = 12000
     if (compact.length <= maxChars) return compact
 
-    val head = compact.take(8000)
-    val tail = compact.takeLast(3000)
+    // Keep the start (head, styles, layout) and the end (scripts) of the page.
+    val head = compact.take(maxChars * 2 / 3)
+    val tail = compact.takeLast(maxChars / 4)
     return """
 $head
 

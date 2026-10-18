@@ -55,12 +55,15 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     chatFontScale: Float,
     codeFontScale: Float,
-    contextSizeChars: Int,
+    contextTokens: Int,
+    activeContextTokens: Int?,
+    themeMode: String,
     backendPreference: String,
     speculativeDecodingEnabled: Boolean,
     onChatFontScale: (Float) -> Unit,
     onCodeFontScale: (Float) -> Unit,
-    onContextSizeChange: (Int) -> Unit,
+    onContextTokensChange: (Int) -> Unit,
+    onThemeModeChange: (String) -> Unit,
     onBackendPreferenceChange: (String) -> Unit,
     onSpeculativeDecodingChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
@@ -162,19 +165,42 @@ fun SettingsScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    val contextOptions = listOf(12000, 24000, 48000, 96000)
-                    val contextIndex = contextOptions.indexOf(contextSizeChars).let { if (it >= 0) it else 1 }
-                    Text("Context size: ${String.format(Locale.US, "%,d", contextSizeChars)} chars")
+                    Text("Theme")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                            OutlinedButton(
+                                onClick = { onThemeModeChange(mode) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (themeMode == mode) "✓ $label" else label)
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                    val contextOptions = CONTEXT_TOKEN_OPTIONS
+                    // Follow the thumb while dragging; save only when it's released.
+                    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+                    val savedIndex = contextOptions.indexOf(contextTokens).let { if (it >= 0) it else 2 }
+                    val shownTokens = contextOptions[draggingIndex ?: savedIndex]
+                    Text("Context window: ${String.format(Locale.US, "%,d", shownTokens)} tokens")
                     Text(
-                        "Model window: ${String.format(Locale.US, "%,d", maxNumTokensForContext(contextSizeChars))} tokens. Larger windows use more memory.",
+                        if (activeContextTokens != null && activeContextTokens < shownTokens) {
+                            "The loaded model is using ${String.format(Locale.US, "%,d", activeContextTokens)} tokens so it fits in this phone's memory."
+                        } else {
+                            "How much of your project and chat the model can see at once. Bigger windows use more memory."
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Slider(
-                        value = contextIndex.toFloat(),
-                        onValueChange = { raw ->
-                            val idx = raw.roundToInt().coerceIn(0, contextOptions.lastIndex)
-                            onContextSizeChange(contextOptions[idx])
+                    ThumbOnlySlider(
+                        value = (draggingIndex ?: savedIndex).toFloat(),
+                        onValueChange = { raw -> draggingIndex = raw.roundToInt().coerceIn(0, contextOptions.lastIndex) },
+                        onValueChangeFinished = {
+                            draggingIndex?.let { onContextTokensChange(contextOptions[it]) }
+                            draggingIndex = null
                         },
                         valueRange = 0f..contextOptions.lastIndex.toFloat(),
                         steps = contextOptions.size - 2
@@ -185,9 +211,9 @@ fun SettingsScreen(
                     ) {
                         contextOptions.forEach { value ->
                             Text(
-                                text = "${value / 1000}k",
+                                text = "${value / 1024}K",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (value == contextSizeChars) {
+                                color = if (value == shownTokens) {
                                     MaterialTheme.colorScheme.onSurface
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -196,9 +222,9 @@ fun SettingsScreen(
                         }
                     }
                     Text("Chat font size: ${"%.2f".format(Locale.US, chatFontScale)}x")
-                    Slider(value = chatFontScale, onValueChange = onChatFontScale, valueRange = 0.8f..1.8f)
+                    ThumbOnlySlider(value = chatFontScale, onValueChange = onChatFontScale, valueRange = 0.8f..1.8f)
                     Text("Code font size: ${"%.2f".format(Locale.US, codeFontScale)}x")
-                    Slider(value = codeFontScale, onValueChange = onCodeFontScale, valueRange = 0.8f..1.8f)
+                    ThumbOnlySlider(value = codeFontScale, onValueChange = onCodeFontScale, valueRange = 0.8f..1.8f)
                     Text("Backend")
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -271,10 +297,10 @@ fun FilesPane(
             title = { Text("Delete file?") },
             text = { Text("Delete \"$file\" from this chat workspace?") },
             confirmButton = {
-                Button(onClick = {
+                DangerButton("Delete") {
                     pendingDelete = null
                     onDeleteFile(file)
-                }) { Text("Delete") }
+                }
             },
             dismissButton = {
                 OutlinedButton(onClick = { pendingDelete = null }) { Text("Cancel") }

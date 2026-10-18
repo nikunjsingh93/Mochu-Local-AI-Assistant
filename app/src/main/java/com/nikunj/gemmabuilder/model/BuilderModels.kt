@@ -83,7 +83,7 @@ data class BuilderUiState(
     val workPanelCollapsed: Boolean = false,
     val chatFontScale: Float = 1.2f,
     val codeFontScale: Float = 1f,
-    val contextSizeChars: Int = 24000,
+    val contextTokens: Int = 16384,
     val backendPreference: String = "gpu",
     val speculativeDecodingEnabled: Boolean = false,
     val estimatedFileContextChars: Int = 0,
@@ -94,7 +94,13 @@ data class BuilderUiState(
     val allowMobileDataDownloads: Boolean = false,
     val activeModelPath: String? = null,
     /** Shown once after the system killed the app for low memory. */
-    val memoryNotice: String? = null
+    val memoryNotice: String? = null,
+    /** Window the loaded model actually got; null when no model is loaded. */
+    val contextWindowTokens: Int? = null,
+    /** Tokens held in the current chat session, when the engine can tell. */
+    val contextUsedTokens: Int? = null,
+    /** Generation speed of the most recent reply. */
+    val lastTokensPerSecond: Double? = null
 )
 
 enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }
@@ -108,6 +114,9 @@ data class ModelDownloadState(
 
 data class WriteFileAction(val path: String, val content: String)
 
+/** Tokens produced while decoding a reply (excluding prompt processing) and the time it took. */
+data class GenerationStats(val outputTokens: Int, val decodeSeconds: Double)
+
 interface BuilderEngine {
     /** Streams a reply to [message], continuing the open session for [sessionKey] if there is one. */
     fun generate(sessionKey: String, message: String): Flow<String>
@@ -115,5 +124,7 @@ interface BuilderEngine {
     fun remainingTokens(sessionKey: String): Int? = null
     /** Drops the open session so the next [generate] starts a fresh conversation. */
     fun resetSession() {}
+    /** Speed of the last completed [generate] call, cleared once read; null if unknown. */
+    fun takeGenerationStats(): GenerationStats? = null
     fun close() {}
 }

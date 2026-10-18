@@ -52,6 +52,7 @@ class LlamaCppEngine(
     @Volatile private var handle = 0L
     @Volatile private var sessionKey: String? = null
     @Volatile private var usedTokens = 0
+    @Volatile private var lastStats: GenerationStats? = null
     private var contextSize = 0
 
     /** e.g. "qwen3 4B Q4_K - Medium · android_armv8.6_1". */
@@ -89,18 +90,24 @@ class LlamaCppEngine(
                 LlamaCppNative.SEND_TEMPLATE_FAILED -> error("This model's chat template could not be applied.")
                 else -> error("llama.cpp failed while reading the prompt.")
             }
+            val decodeStart = System.nanoTime()
+            var tokens = 0
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val bytes = LlamaCppNative.nativeNextToken(h) ?: break
+                tokens++
                 if (bytes.isNotEmpty()) emit(String(bytes, Charsets.UTF_8))
             }
             finished = true
+            lastStats = GenerationStats(tokens, (System.nanoTime() - decodeStart) / 1e9)
         } finally {
             usedTokens = LlamaCppNative.nativeTokenCount(h)
             // Same contract as LiteRtGemmaEngine: a failed or cancelled turn starts over next time.
             if (!finished) this@LlamaCppEngine.sessionKey = null
         }
     }.flowOn(dispatcher)
+
+    override fun takeGenerationStats(): GenerationStats? = lastStats.also { lastStats = null }
 
     override fun remainingTokens(sessionKey: String): Int? {
         if (handle == 0L || this.sessionKey != sessionKey) return null

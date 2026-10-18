@@ -150,7 +150,7 @@ fun ModelDownloadsScreen(
             title = { Text("Delete ${model.name}?") },
             text = { Text("This frees ${formatBytes(model.sizeBytes)}. You can download it again later.") },
             confirmButton = {
-                Button(onClick = { onDelete(model.id); pendingDelete = null }) { Text("Delete") }
+                DangerButton("Delete") { onDelete(model.id); pendingDelete = null }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
@@ -172,10 +172,12 @@ private fun ModelSection(
 ) {
     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     models.forEach { model ->
+        val isActive = state.activeModelPath?.endsWith("/${model.fileName}") == true
         ModelCard(
             model = model,
             download = state.modelDownloads[model.id] ?: ModelDownloadState(),
-            isActive = state.activeModelPath?.endsWith("/${model.fileName}") == true,
+            isActive = isActive,
+            usage = if (isActive) state else null,
             lowRam = ramGb + 0.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
             onCancel = { onCancel(model.id) },
@@ -190,6 +192,7 @@ private fun ModelCard(
     model: CatalogModel,
     download: ModelDownloadState,
     isActive: Boolean,
+    usage: BuilderUiState?,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -211,6 +214,7 @@ private fun ModelCard(
                 )
             }
             Text(model.summary, style = MaterialTheme.typography.bodySmall)
+            usage?.let { ModelUsage(it) }
             if (lowRam) {
                 Text(
                     "Needs about ${model.minRamGb} GB of RAM; it may not load on this phone.",
@@ -252,10 +256,35 @@ private fun ModelCard(
                     DownloadPhase.Verifying -> Unit
                     DownloadPhase.Downloaded -> {
                         if (!isActive) Button(onClick = onUse) { Text("Use") }
-                        OutlinedButton(onClick = onDelete) { Text("Delete") }
+                        DangerOutlinedButton("Delete", onDelete)
                     }
                 }
             }
         }
+    }
+}
+
+/** Context use and speed for the model in use. */
+@Composable
+private fun ModelUsage(state: BuilderUiState) {
+    val window = state.contextWindowTokens
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    if (!state.gemmaLoaded || window == null) {
+        Text("Loads when you send a message.", style = MaterialTheme.typography.labelSmall, color = muted)
+        return
+    }
+    val used = (state.contextUsedTokens ?: 0).coerceIn(0, window)
+    Text(
+        "Context: ${formatTokens(used)} used · ${formatTokens(window - used)} left of ${formatTokens(window)} tokens",
+        style = MaterialTheme.typography.labelSmall,
+        color = muted
+    )
+    LinearProgressIndicator(progress = { used.toFloat() / window }, modifier = Modifier.fillMaxWidth())
+    state.lastTokensPerSecond?.let { speed ->
+        Text(
+            "Last reply: ${String.format(Locale.US, "%.1f", speed)} tokens/s",
+            style = MaterialTheme.typography.labelSmall,
+            color = muted
+        )
     }
 }
