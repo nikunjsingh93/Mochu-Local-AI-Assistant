@@ -20,6 +20,9 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+// Messages a fresh model session always sees verbatim; older ones are folded into the chat summary.
+private const val RECENT_MESSAGES_KEPT = 6
+
 class BuilderViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(BuilderUiState())
     val uiState = _uiState.asStateFlow()
@@ -58,6 +61,7 @@ class BuilderViewModel : ViewModel() {
                 conversations = conversationInfos(),
                 activeConversationId = active.id,
                 messages = active.messages,
+                chatSummarized = active.summary.isNotBlank(),
                 modelName = savedModelName(context),
                 modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
                 multimodalBackendReady = false,
@@ -75,6 +79,7 @@ class BuilderViewModel : ViewModel() {
         cancelLegacySystemDownloads(context)
         learnFromLowMemoryKill(context)?.let { notice -> _uiState.update { it.copy(memoryNotice = notice) } }
         refreshModelDownloads(context)
+        refreshPredictedWindow(context)
         // The download service lives outside this ViewModel; mirror its progress into the UI state.
         viewModelScope.launch {
             ModelDownloadTracker.states.collect { refreshModelDownloads(context) }
@@ -137,7 +142,7 @@ class BuilderViewModel : ViewModel() {
         }
         engine.close()
         engine = DemoBuilderEngine()
-        _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
+        _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
         sessionFingerprint = null
         saveModelName(appContext, model.fileName)
         saveActiveModelPath(appContext, file.absolutePath)
@@ -153,6 +158,7 @@ class BuilderViewModel : ViewModel() {
                 status = "${model.name} selected. Send a message to load it."
             )
         }
+        refreshPredictedWindow(appContext)
     }
 
     fun deleteDownloadedModel(context: Context, id: String) {
@@ -167,7 +173,7 @@ class BuilderViewModel : ViewModel() {
             }
             engine.close()
             engine = DemoBuilderEngine()
-            _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
+            _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
             sessionFingerprint = null
             saveActiveModelPath(appContext, null)
             saveModelName(appContext, "")
@@ -185,6 +191,7 @@ class BuilderViewModel : ViewModel() {
             }
         }
         refreshModelDownloads(appContext)
+        refreshPredictedWindow(appContext)
     }
 
     fun refreshModelDownloads(context: Context) {
@@ -244,6 +251,7 @@ class BuilderViewModel : ViewModel() {
             }
         }
         refreshWorkspace(context)
+        refreshPredictedWindow(context)
     }
 
     fun setBackendPreference(context: Context, backendPreference: String) {
@@ -280,6 +288,8 @@ class BuilderViewModel : ViewModel() {
             it.copy(
                 activeConversationId = conv.id,
                 messages = emptyList(),
+                chatSummarized = false,
+                contextUsedTokens = it.contextWindowTokens?.let { 0 },
                 prompt = "",
                 conversations = conversationInfos(),
                 sidebarOpen = false,
@@ -300,6 +310,8 @@ class BuilderViewModel : ViewModel() {
             it.copy(
                 activeConversationId = conv.id,
                 messages = conv.messages,
+                chatSummarized = conv.summary.isNotBlank(),
+                contextUsedTokens = it.contextWindowTokens?.let { 0 },
                 prompt = "",
                 conversations = conversationInfos(),
                 sidebarOpen = false,
@@ -336,6 +348,8 @@ class BuilderViewModel : ViewModel() {
             it.copy(
                 activeConversationId = next.id,
                 messages = next.messages,
+                chatSummarized = next.summary.isNotBlank(),
+                contextUsedTokens = it.contextWindowTokens?.let { 0 },
                 prompt = "",
                 conversations = conversationInfos(),
                 sidebarOpen = true,
@@ -426,7 +440,7 @@ class BuilderViewModel : ViewModel() {
             // The loaded engine may be memory-mapping the file we are about to overwrite or delete.
             engine.close()
             engine = DemoBuilderEngine()
-            _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
+            _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
             sessionFingerprint = null
             val result = runCatching {
                 withContext(Dispatchers.IO) {
@@ -458,6 +472,7 @@ class BuilderViewModel : ViewModel() {
                     )
                 }
             }
+            refreshPredictedWindow(context)
         }
     }
 
@@ -538,7 +553,7 @@ class BuilderViewModel : ViewModel() {
         // Free the previous model before loading the next so two copies never sit in RAM/GPU memory.
         engine.close()
         engine = DemoBuilderEngine()
-        _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
+        _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
         sessionFingerprint = null
         val requestedTokens = uiState.value.contextTokens
         val maxNumTokens = safeTokenWindow(context, file, requestedTokens)
@@ -685,9 +700,11 @@ class BuilderViewModel : ViewModel() {
                     "$sessionKey|${workspaceFingerprint(activeProjectRoot(context))}"
                 }
                 var cachedSnapshotPrompt: String? = null
-                suspend fun snapshotPrompt(): String = cachedSnapshotPrompt
-                    ?: withContext(Dispatchers.IO) { buildPrompt(context, prompt, pendingMessages, userMessage.attachments) }
-                        .also { cachedSnapshotPrompt = it }
+                suspend fun snapshotPrompt(): String = cachedSnapshotPrompt ?: run {
+                    // A fresh session only sees recent messages, so fold anything older into the summary first.
+                    compactHistoryIfNeeded(context, pendingMessages)
+                    withContext(Dispatchers.IO) { buildPrompt(context, prompt, pendingMessages, userMessage.attachments) }
+                }.also { cachedSnapshotPrompt = it }
                 val turnPrompt = buildTurnPrompt(prompt)
                 val continuesSession = workspaceKey == sessionFingerprint && hasRoomForTurn(sessionKey, turnPrompt)
                 if (!continuesSession) engine.resetSession()
@@ -697,6 +714,13 @@ class BuilderViewModel : ViewModel() {
                 var assistantReply: String? = null
                 var lastError: Throwable? = null
                 val maxAttempts = 4
+                var retryNote: String? = null
+                var editedPaths = emptySet<String>()
+                var editCount = 0
+                // False when the app changed the model's files (e.g. merged them), so its history is out of date.
+                var actionsMatchModel = true
+                // Edited files already existed, so they skip the "is this a complete page" check.
+                fun readyToWrite(action: WriteFileAction) = action.path in editedPaths || isCompleteEnoughForWriting(action)
 
                 for (attempt in 1..maxAttempts) {
                     val output = StringBuilder()
@@ -710,7 +734,7 @@ class BuilderViewModel : ViewModel() {
 ${snapshotPrompt()}
 
 RETRY ATTEMPT $attempt OF $maxAttempts:
-Your previous response was incomplete. If the user asked a question, return one complete XML reply action. If file changes are needed, return complete XML write_file action(s). Close every opened tag, including </content> and </action>. Do not stream explanations outside XML.
+${retryNote ?: "Your previous response was incomplete. If the user asked a question, return one complete XML reply action. If file changes are needed, return complete XML write_file or edit_file action(s). Close every opened tag. Do not stream explanations outside XML."}
                         """.trimIndent()
                     }
 
@@ -760,7 +784,26 @@ Your previous response was incomplete. If the user asked a question, return one 
                             streamingCode = extractStreamingCode(responseText)
                         )
                     }
-                    actions = normalizeWriteActions(recoverWriteFileActions(responseText))
+                    val editActions = parseEditFileActions(responseText)
+                    // With edits present, take write_file actions literally rather than guessing at HTML.
+                    val rawWrites = if (editActions.isEmpty()) recoverWriteFileActions(responseText) else parseWriteFileActions(responseText)
+                    val writes = normalizeWriteActions(rawWrites)
+                    val edited = withContext(Dispatchers.IO) { applyEditActions(activeProjectRoot(context), editActions, writes) }
+                    if (edited.missing != null) {
+                        val (path, snippet) = edited.missing
+                        retryNote = "Your edit_file <find> text was not found in $path:\n${snippet.take(300)}\n" +
+                            "Return write_file with the complete updated $path instead."
+                        actions = emptyList()
+                        assistantReply = null
+                        if (attempt < maxAttempts) {
+                            _uiState.update { it.copy(status = "Edit didn't match the file. Retrying ${attempt + 1}/$maxAttempts...") }
+                        }
+                        continue
+                    }
+                    actions = writes.filterNot { w -> edited.writes.any { it.path == w.path } } + edited.writes
+                    editedPaths = edited.writes.map { it.path }.toSet()
+                    editCount = edited.editCount
+                    actionsMatchModel = rawWrites == writes
                     val recoveredReply = if (actions.isEmpty()) recoverAssistantReplyContent(responseText) else null
                     assistantReply = if (recoveredReply != null) {
                         continueAssistantReplyIfNeeded(
@@ -774,7 +817,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     } else {
                         recoverAssistantReply(responseText)
                     }
-                    if (actions.isNotEmpty() && actions.all { isCompleteEnoughForWriting(it) }) {
+                    if (actions.isNotEmpty() && actions.all { readyToWrite(it) }) {
                         break
                     }
                     if (!assistantReply.isNullOrBlank()) {
@@ -805,7 +848,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     return@launch
                 }
 
-                if (actions.isEmpty() || actions.any { !isCompleteEnoughForWriting(it) }) {
+                if (actions.isEmpty() || actions.any { !readyToWrite(it) }) {
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     val message = if (lastError != null) {
                         "Generation failed after $maxAttempts attempts. The previous working project was kept. Try a shorter request."
@@ -842,12 +885,12 @@ Your previous response was incomplete. If the user asked a question, return one 
                     refreshWorkspace(context)
                     // If the app rewrote the model's actions (e.g. merged files), its history no longer
                     // matches the workspace, so the next turn starts from a fresh snapshot.
-                    sessionFingerprint = if (recoverWriteFileActions(responseText) == actions) {
+                    sessionFingerprint = if (actionsMatchModel) {
                         withContext(Dispatchers.IO) { "$sessionKey|${workspaceFingerprint(activeProjectRoot(context))}" }
                     } else {
                         null
                     }
-                    val assistantText = assistantReply?.takeIf { it.isNotBlank() }?.trim() ?: "Updated preview."
+                    val assistantText = assistantReply?.takeIf { it.isNotBlank() }?.trim() ?: if (editCount > 0) "Edited ${editedPaths.joinToString()} ($editCount change${if (editCount == 1) "" else "s"})." else "Updated preview."
                     val assistantMessage = ChatMessage("assistant", assistantText, statsInline = metrics)
                     val finalMessages = uiState.value.messages + assistantMessage
                     val preferredPath = actions.firstOrNull { it.path.equals("index.html", ignoreCase = true) }?.path
@@ -1076,9 +1119,14 @@ Your previous response was incomplete. If the user asked a question, return one 
         val root = activeProjectRoot(context)
         // Everything below has to share one budget so the snapshot always fits the loaded window.
         val budget = snapshotCharBudget(activeTokenWindow)
-        val recent = messages.takeLast(8).joinToString("\n") { msg ->
-            "${msg.role}: ${msg.text.take(1000)}"
-        }.takeLast(budget / 6)
+        val conversation = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
+        val summarized = conversation?.summarizedCount?.coerceAtMost(messages.size) ?: 0
+        val summary = conversation?.summary.orEmpty().takeIf { summarized > 0 }.orEmpty()
+        val recentMessages = messages.drop(summarized).takeLast(RECENT_MESSAGES_KEPT + 2)
+        val recent = buildString {
+            if (summary.isNotBlank()) append("Summary of the earlier conversation:\n$summary\n\nLatest messages:\n")
+            append(recentMessages.joinToString("\n") { msg -> "${msg.role}: ${msg.text.take(1000)}" })
+        }.takeLast(budget / 5)
         val current = htmlContextForModel(
             File(root, "index.html").takeIf { it.exists() }?.readText().orEmpty(),
             maxChars = minOf(12000, budget / 2)
@@ -1348,6 +1396,50 @@ Rules:
         return "$base • ${String.format(Locale.US, "%.1f", tokensPerSecond)} tok/s"
     }
 
+    /**
+     * Folds messages older than the last [RECENT_MESSAGES_KEPT] into the chat's running summary,
+     * like ChatGPT's memory of earlier conversation. Runs a short extra model call; on failure the
+     * chat just keeps its previous summary.
+     */
+    private suspend fun compactHistoryIfNeeded(context: Context, messages: List<ChatMessage>) {
+        val id = uiState.value.activeConversationId ?: return
+        val conversation = conversations.firstOrNull { it.id == id } ?: return
+        val foldEnd = messages.size - RECENT_MESSAGES_KEPT
+        if (foldEnd <= conversation.summarizedCount) return
+
+        _uiState.update { it.copy(status = "Summarizing earlier messages…") }
+        val transcript = messages.subList(conversation.summarizedCount, foldEnd)
+            .joinToString("\n") { "${it.role}: ${it.text.take(1200)}" }
+            .takeLast(snapshotCharBudget(activeTokenWindow) / 2)
+        val prompt = """
+Update the running summary of this chat so work on the project can continue without the old messages.
+
+Previous summary:
+${conversation.summary.ifBlank { "(none yet)" }}
+
+Messages to add to the summary:
+$transcript
+
+Write at most 120 words: what the user is building, requirements and preferences they stated, decisions made, and anything still pending. Do not include code. Return one reply action containing only the summary.
+        """.trimIndent()
+
+        val output = StringBuilder()
+        val ok = runCatching { engine.generate("summary:$id", prompt).collect { output.append(it) } }.isSuccess
+        engine.takeGenerationStats() // keep the summary call out of the reply's tokens/s
+        engine.resetSession()
+        if (!ok) return
+        val summary = (recoverAssistantReply(output.toString()) ?: cleanGeneratedFileContent(output.toString()))
+            .trim()
+            .take(1500)
+        if (summary.isBlank() || summary.startsWith("<")) return
+
+        val updated = (conversations.firstOrNull { it.id == id } ?: conversation)
+            .copy(summary = summary, summarizedCount = foldEnd)
+        conversations = conversations.map { if (it.id == id) updated else it }.toMutableList()
+        withContext(Dispatchers.IO) { saveConversationFile(context, updated) }
+        _uiState.update { it.copy(chatSummarized = true) }
+    }
+
     private fun absorbGenerationStats() {
         val stats = engine.takeGenerationStats() ?: return
         turnOutputTokens += stats.outputTokens
@@ -1356,6 +1448,14 @@ Rules:
 
     private fun turnTokensPerSecond(): Double? =
         if (turnOutputTokens > 0 && turnDecodeSeconds > 0.05) turnOutputTokens / turnDecodeSeconds else null
+
+    /** Before a model loads, show the window it will get so the chat's context meter is visible. */
+    private fun refreshPredictedWindow(context: Context) {
+        if (uiState.value.gemmaLoaded) return
+        val file = modelFile(context)
+        val window = if (file.exists()) safeTokenWindow(context, file, uiState.value.contextTokens) else null
+        _uiState.update { it.copy(contextWindowTokens = window, contextUsedTokens = window?.let { 0 }) }
+    }
 
     /** How much of the loaded model's window the active chat's session currently holds. */
     private fun refreshContextUsage() {

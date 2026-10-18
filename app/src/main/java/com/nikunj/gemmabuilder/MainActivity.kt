@@ -719,7 +719,7 @@ fun Header(
                     text = when {
                         state.isBusy -> state.status
                         state.gemmaLoaded -> "${state.modelName} ready"
-                        state.modelReady -> "${state.modelName} imported - tap Send"
+                        state.modelReady -> "${state.modelName} selected - tap Send"
                         else -> "Get a model from the ⋮ menu"
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -939,6 +939,7 @@ fun ChatPanel(
                 }
                 Spacer(Modifier.height(6.dp))
             }
+            ContextMeter(state)
             var addMenuOpen by remember { mutableStateOf(false) }
             Row(
                 modifier = Modifier
@@ -2491,13 +2492,23 @@ Treat that as authoritative local file content (including text the app extracted
 
 The first message of a chat contains a project snapshot. Later messages may contain only the user's request; the project files are then exactly what your earlier write_file actions produced.
 
-Allowed action:
+Allowed actions:
 
 <action name="write_file">
 <path>relative/path/from/project/root</path>
 <content>
 FULL FILE CONTENT HERE
 </content>
+</action>
+
+<action name="edit_file">
+<path>relative/path/from/project/root</path>
+<find>
+EXACT LINES COPIED FROM THE CURRENT FILE
+</find>
+<replace>
+THE NEW LINES THAT REPLACE THEM
+</replace>
 </action>
 
 <action name="reply">
@@ -2507,7 +2518,9 @@ ASSISTANT REPLY HERE
 </action>
 
 Rules:
-- You may return one or more write_file actions.
+- For a small change to a file that already exists, use edit_file instead of rewriting the whole file. Copy each <find> block exactly from the current file, keep it short (just the lines that change plus a little context), and repeat <find>/<replace> pairs for several changes.
+- Use write_file for new files, a different app, or changes to most of a file.
+- You may return one or more write_file or edit_file actions.
 - Use reply action when the user is asking a normal question and no file changes are required; do not modify files then.
 - For edits, update only the needed files and keep paths relative to the project root.
 - If the user asks for a different app, replace the current app completely. Do not keep the previous UI unless the user asks.

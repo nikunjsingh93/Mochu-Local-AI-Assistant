@@ -45,7 +45,10 @@ data class ChatConversation(
     val id: String,
     val title: String,
     val updatedAt: Long,
-    val messages: List<ChatMessage>
+    val messages: List<ChatMessage>,
+    /** Model-written summary of the first [summarizedCount] messages, used once they no longer fit. */
+    val summary: String = "",
+    val summarizedCount: Int = 0
 )
 
 data class ConversationInfo(
@@ -100,7 +103,9 @@ data class BuilderUiState(
     /** Tokens held in the current chat session, when the engine can tell. */
     val contextUsedTokens: Int? = null,
     /** Generation speed of the most recent reply. */
-    val lastTokensPerSecond: Double? = null
+    val lastTokensPerSecond: Double? = null,
+    /** True when older messages of the active chat were folded into a summary. */
+    val chatSummarized: Boolean = false
 )
 
 enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }

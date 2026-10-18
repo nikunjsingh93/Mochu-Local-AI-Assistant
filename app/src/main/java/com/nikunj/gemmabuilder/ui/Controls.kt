@@ -5,12 +5,17 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -120,4 +125,46 @@ fun ThumbOnlySlider(
             drawCircle(activeColor, radius = thumbRadius, center = Offset(thumbX, y))
         }
     }
+}
+
+/** Compact "context used / window" readout shown above the chat input whenever a model is selected. */
+@Composable
+fun ContextMeter(state: BuilderUiState, modifier: Modifier = Modifier) {
+    val window = state.contextWindowTokens ?: return
+    val used = (state.contextUsedTokens ?: 0).coerceIn(0, window)
+    val fraction = used.toFloat() / window
+    val nearlyFull = fraction >= 0.8f
+    val color = if (nearlyFull) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier.fillMaxWidth().padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "Context ${compactTokens(used)} / ${compactTokens(window)} · ${compactTokens(window - used)} left",
+                style = MaterialTheme.typography.labelSmall,
+                color = color
+            )
+            Text(
+                when {
+                    nearlyFull -> "Older chat will be summarized"
+                    state.chatSummarized -> "Earlier chat summarized"
+                    else -> "${(fraction * 100).roundToInt()}%"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = color
+            )
+        }
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.fillMaxWidth().height(3.dp),
+            color = if (nearlyFull) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            drawStopIndicator = {}
+        )
+    }
+}
+
+/** 3210 -> "3.2K", 16384 -> "16K". */
+fun compactTokens(tokens: Int): String = when {
+    tokens >= 10_000 -> "${tokens / 1000}K"
+    tokens >= 1000 -> String.format(java.util.Locale.US, "%.1fK", tokens / 1000.0)
+    else -> tokens.toString()
 }

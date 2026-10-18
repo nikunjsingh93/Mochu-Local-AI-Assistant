@@ -31,12 +31,16 @@ fun loadConversations(context: Context): List<ChatConversation> {
 
 fun readConversationFile(file: File): ChatConversation {
     var title = "New chat"
+    var summary = ""
+    var summarizedCount = 0
     var updatedAt = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis()
     val messages = mutableListOf<ChatMessage>()
     file.readLines().forEach { line ->
         when {
             line.startsWith("title\t") -> title = decodeText(line.substringAfter("title\t"))
             line.startsWith("updated\t") -> updatedAt = line.substringAfter("updated\t").toLongOrNull() ?: updatedAt
+            line.startsWith("summary\t") -> summary = decodeText(line.substringAfter("summary\t"))
+            line.startsWith("summarized\t") -> summarizedCount = line.substringAfter("summarized\t").toIntOrNull() ?: 0
             line.startsWith("msg	") -> {
                 val parts = line.split("	", limit = 6)
                 when {
@@ -62,7 +66,14 @@ fun readConversationFile(file: File): ChatConversation {
             }
         }
     }
-    return ChatConversation(file.nameWithoutExtension, title, updatedAt, messages)
+    return ChatConversation(
+        id = file.nameWithoutExtension,
+        title = title,
+        updatedAt = updatedAt,
+        messages = messages,
+        summary = summary,
+        summarizedCount = summarizedCount.coerceIn(0, messages.size)
+    )
 }
 
 fun saveConversationFile(context: Context, conversation: ChatConversation) {
@@ -72,6 +83,10 @@ fun saveConversationFile(context: Context, conversation: ChatConversation) {
     val text = buildString {
         appendLine("title\t${encodeText(conversation.title)}")
         appendLine("updated\t${conversation.updatedAt}")
+        if (conversation.summary.isNotBlank()) {
+            appendLine("summary\t${encodeText(conversation.summary)}")
+            appendLine("summarized\t${conversation.summarizedCount}")
+        }
         conversation.messages.forEach { msg ->
             val attachmentsEncoded = encodeText(msg.attachments.joinToString("|"))
             val statsEncoded = encodeText(msg.statsInline.orEmpty())

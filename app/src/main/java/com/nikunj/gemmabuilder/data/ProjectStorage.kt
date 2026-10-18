@@ -205,3 +205,33 @@ fun copyModel(resolver: ContentResolver, uri: Uri, outFile: File) {
         outFile.outputStream().use { output -> input.copyTo(output) }
     }
 }
+
+data class EditOutcome(
+    val writes: List<WriteFileAction>,
+    val editCount: Int,
+    /** (path, find text) of the first edit that didn't match, or null when every edit applied. */
+    val missing: Pair<String, String>? = null
+)
+
+/**
+ * Applies edit_file actions to the project, returning the edited files as full writes. An edit to a
+ * file that a write_file in the same reply also creates is applied on top of that new content.
+ */
+fun applyEditActions(root: File, edits: List<EditFileAction>, writes: List<WriteFileAction>): EditOutcome {
+    val current = mutableMapOf<String, String>()
+    var count = 0
+    for (action in edits) {
+        val base = current[action.path]
+            ?: writes.lastOrNull { it.path == action.path }?.content
+            ?: runCatching { safeResolve(root, action.path).takeIf { it.exists() }?.readText() }.getOrNull()
+            ?: return EditOutcome(emptyList(), 0, action.path to "(file does not exist)")
+        when (val result = applyFileEdits(base, action.edits)) {
+            is EditResult.Applied -> {
+                current[action.path] = result.text
+                count += action.edits.size
+            }
+            is EditResult.Missing -> return EditOutcome(emptyList(), 0, action.path to result.find)
+        }
+    }
+    return EditOutcome(current.map { (path, text) -> WriteFileAction(path, text) }, count)
+}
