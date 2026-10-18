@@ -53,12 +53,12 @@ Notes:
 
 ## Installing
 
-1. Go to the GitHub **Releases** page: [OnDevice Studio v1.0.7](https://github.com/nikunjsingh93/ondevice-studio/releases/tag/v1.0.7)
+1. Go to the GitHub **Releases** page: [OnDevice Studio v1.0.8](https://github.com/nikunjsingh93/ondevice-studio/releases/tag/v1.0.8)
 2. Download the latest APK from the most recent release.
 3. Open the APK on your Android device and install it.
 4. Launch **OnDevice Studio**.
 
-Upgrading from v1.0.6 or earlier: v1.0.7 is signed with a new key, so it installs as a separate app next to the old one. Export any projects you want to keep from the old app (Files → Save ZIP), then uninstall it.
+Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so they install as a separate app next to the old one. Export any projects you want to keep from the old app (Files → Save ZIP), then uninstall it.
 
 ## Using the App
 
@@ -109,7 +109,7 @@ GGUF models (the format used by apps like PocketPal) run on the CPU through llam
 
 Current app version:
 
-- `versionName`: `1.0.7`
+- `versionName`: `1.0.8`
 - `applicationId`: `com.nikunj.ondevicestudio`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.

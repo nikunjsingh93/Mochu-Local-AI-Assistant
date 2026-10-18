@@ -44,8 +44,8 @@ android {
         applicationId = "com.nikunj.ondevicestudio"
         minSdk = 31
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.0.7"
+        versionCode = 8
+        versionName = "1.0.8"
 
         ndk {
             // On-device models only run on 64-bit Arm phones; this also drops the x86/armv7 copies
