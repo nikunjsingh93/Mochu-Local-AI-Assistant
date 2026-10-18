@@ -18,7 +18,7 @@ val hasReleaseKey = listOf("storeFile", "storePassword", "keyAlias", "keyPasswor
 
 android {
     namespace = "com.nikunj.gemmabuilder"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "28.2.13676358"
 
     signingConfigs {
@@ -43,7 +43,8 @@ android {
         // ships as a new app that installs next to 1.0.6 instead of failing to update it.
         applicationId = "com.nikunj.ondevicestudio"
         minSdk = 31
-        targetSdk = 35
+        // Google Play requires API 36 for new apps and updates from August 31, 2026.
+        targetSdk = 36
         versionCode = 8
         versionName = "1.0.8"
 
@@ -98,15 +99,16 @@ kotlin {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
-    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.webkit:webkit:1.12.1")
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.navigation:navigation-compose:2.9.7")
+    implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
     implementation("com.google.mlkit:text-recognition:16.0.1")
