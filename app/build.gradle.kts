@@ -9,6 +9,7 @@ plugins {
 android {
     namespace = "com.nikunj.gemmabuilder"
     compileSdk = 35
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.nikunj.gemmabuilder"
@@ -16,6 +17,38 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.6"
+
+        ndk {
+            // On-device models only run on 64-bit Arm phones; this also drops the x86/armv7 copies
+            // of every native library from the APK.
+            abiFilters += "arm64-v8a"
+        }
+        externalNativeBuild {
+            cmake {
+                // llama.cpp is always built optimized; a debug build is far too slow to be usable.
+                arguments += "-DCMAKE_BUILD_TYPE=Release"
+                arguments += "-DBUILD_SHARED_LIBS=ON"
+                arguments += "-DLLAMA_BUILD_COMMON=ON"
+                arguments += "-DLLAMA_BUILD_TESTS=OFF"
+                arguments += "-DLLAMA_BUILD_TOOLS=OFF"
+                arguments += "-DLLAMA_BUILD_EXAMPLES=OFF"
+                arguments += "-DLLAMA_BUILD_SERVER=OFF"
+                arguments += "-DLLAMA_BUILD_APP=OFF"
+                arguments += "-DLLAMA_OPENSSL=OFF"
+                arguments += "-DLLAMA_CURL=OFF"
+                arguments += "-DGGML_NATIVE=OFF"
+                arguments += "-DGGML_BACKEND_DL=ON"
+                arguments += "-DGGML_CPU_ALL_VARIANTS=ON"
+                arguments += "-DGGML_LLAMAFILE=OFF"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
     }
 
     buildFeatures {
@@ -53,7 +86,7 @@ dependencies {
 
     // LiteRT-LM Android runtime for .litertlm Gemma models.
     // If Android Studio warns about this version, change it to latest.release.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

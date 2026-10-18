@@ -133,6 +133,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.tasks.Tasks
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
@@ -140,6 +141,7 @@ import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.text.TextRecognition
@@ -289,6 +291,7 @@ fun BuilderApp(
 
     var pendingExportPath by remember { mutableStateOf<String?>(null) }
     var settingsScreenOpen by remember { mutableStateOf(false) }
+    var modelsScreenOpen by remember { mutableStateOf(false) }
     val fileSaver = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/html"),
         onResult = { uri ->
@@ -330,6 +333,10 @@ fun BuilderApp(
                 themeMode = themeMode,
                 onThemeModeChange = onThemeModeChange,
                 onOpenSettings = { settingsScreenOpen = true },
+                onOpenModels = {
+                    vm.refreshModelDownloads(context.applicationContext)
+                    modelsScreenOpen = true
+                },
                 onToggleSidebar = { vm.toggleSidebar() },
                 onImportModel = { modelPicker.launch(arrayOf("*/*")) },
                 onImportFiles = { fileImporter.launch(arrayOf("*/*")) },
@@ -362,6 +369,21 @@ fun BuilderApp(
                     onBackendPreferenceChange = { vm.setBackendPreference(context.applicationContext, it) },
                     onSpeculativeDecodingChange = { vm.setSpeculativeDecodingEnabled(context.applicationContext, it) },
                     onDismiss = { settingsScreenOpen = false }
+                )
+            }
+            if (modelsScreenOpen) {
+                ModelDownloadsScreen(
+                    state = state,
+                    onDownload = { vm.downloadModel(context.applicationContext, it) },
+                    onCancel = { vm.cancelModelDownload(context.applicationContext, it) },
+                    onUse = { vm.useDownloadedModel(context.applicationContext, it) },
+                    onDelete = { vm.deleteDownloadedModel(context.applicationContext, it) },
+                    onAllowMobileDataChange = { vm.setAllowMobileDataDownloads(context.applicationContext, it) },
+                    onImportFile = {
+                        modelsScreenOpen = false
+                        modelPicker.launch(arrayOf("*/*"))
+                    },
+                    onDismiss = { modelsScreenOpen = false }
                 )
             }
 
@@ -404,6 +426,7 @@ fun MainBuilderContent(
     themeMode: String,
     onThemeModeChange: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenModels: () -> Unit,
     onToggleSidebar: () -> Unit,
     onImportModel: () -> Unit,
     onImportFiles: () -> Unit,
@@ -452,6 +475,7 @@ fun MainBuilderContent(
             themeMode = themeMode,
             onThemeModeChange = onThemeModeChange,
             onOpenSettings = onOpenSettings,
+            onOpenModels = onOpenModels,
             onToggleSidebar = onToggleSidebar,
             onImportModel = onImportModel
         )
@@ -653,6 +677,7 @@ fun Header(
     themeMode: String,
     onThemeModeChange: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenModels: () -> Unit,
     onToggleSidebar: () -> Unit,
     onImportModel: () -> Unit
 ) {
@@ -696,7 +721,7 @@ fun Header(
                         state.isBusy -> state.status
                         state.gemmaLoaded -> "${state.modelName} ready"
                         state.modelReady -> "${state.modelName} imported - tap Send"
-                        else -> "Import model from ⋮ menu"
+                        else -> "Get a model from the ⋮ menu"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -717,7 +742,11 @@ fun Header(
                         onClick = { settingsOpen = false; onOpenSettings() }
                     )
                     DropdownMenuItem(
-                        text = { Text(if (state.modelReady) "Change model" else "Import model") },
+                        text = { Text("Download models") },
+                        onClick = { settingsOpen = false; onOpenModels() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Import model file") },
                         onClick = { settingsOpen = false; onImportModel() }
                     )
                     DropdownMenuItem(
@@ -881,14 +910,15 @@ fun ChatPanel(
                         }
                     } else {
                         androidx.compose.ui.text.buildAnnotatedString {
-                            append("Please import a ")
+                            append("Get a model first: open the ⋮ menu and choose ")
                             pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                            append(".litertlm")
+                            append("Download models")
                             pop()
-                            append(" model first from the ⋮ menu. Preferred model: ")
+                            append(". Recommended: ")
                             pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                            append("gemma-4-E2B-it.litertlm")
+                            append("Gemma 4 E2B")
                             pop()
+                            append(". You can also import your own .litertlm or .gguf file.")
                         }
                     }
                     Text(
@@ -1462,71 +1492,130 @@ class LiteRtGemmaEngine(
     private val context: Context,
     private val modelPath: String,
     private val backendPreference: String,
-    private val speculativeDecodingEnabled: Boolean
+    private val speculativeDecodingEnabled: Boolean,
+    private val maxNumTokens: Int
 ) : BuilderEngine {
+    private data class LoadAttempt(val backend: String, val speculativeDecoding: Boolean, val maxNumTokens: Int?)
+
     private var engine: Engine? = null
-    private var conversationConfig: ConversationConfig? = null
-    @Volatile
-    private var activeConversationStopper: (() -> Unit)? = null
+    private var conversation: Conversation? = null
+    private var conversationKey: String? = null
+    private var tokenLimit: Int? = null
+
+    /** Backend the model actually loaded on, e.g. "GPU" or "CPU". */
+    var activeBackend: String = backendPreference.uppercase(Locale.US)
+        private set
+
+    /** Why the preferred setup was not used, or null when it loaded as configured. */
+    var fallbackReason: String? = null
+        private set
 
     @OptIn(ExperimentalApi::class)
     suspend fun load() = withContext(Dispatchers.IO) {
-        val backend: Backend = (when (backendPreference.lowercase(Locale.US)) {
-            "cpu" -> Backend.CPU()
-            "gpu" -> Backend.GPU()
-            "npu" -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
-            else -> Backend.CPU()
-        }) ?: Backend.CPU()
-        val config = EngineConfig(
-            modelPath = modelPath,
-            backend = backend,
-            cacheDir = context.cacheDir.absolutePath
-        )
-        val loadedEngine = Engine(config)
-        try {
-            ExperimentalFlags.enableSpeculativeDecoding = speculativeDecodingEnabled
-            loadedEngine.initialize()
-        } finally {
-            ExperimentalFlags.enableSpeculativeDecoding = false
-        }
-        conversationConfig = ConversationConfig(
-            systemInstruction = Contents.of(BUILD_SYSTEM_PROMPT),
-            samplerConfig = SamplerConfig(
-                topK = 20,
-                topP = 0.9,
-                temperature = 0.35
+        val preferred = backendPreference.lowercase(Locale.US)
+        // Try the requested setup first, then progressively safer ones: without speculative decoding,
+        // with the model's default context window, and finally on CPU.
+        val attempts = buildList {
+            add(LoadAttempt(preferred, speculativeDecodingEnabled, maxNumTokens))
+            add(LoadAttempt(preferred, false, maxNumTokens))
+            add(LoadAttempt(preferred, false, null))
+            if (preferred != "cpu") {
+                add(LoadAttempt("cpu", false, maxNumTokens))
+                add(LoadAttempt("cpu", false, null))
+            }
+        }.distinct()
+
+        var firstError: Throwable? = null
+        for (attempt in attempts) {
+            val config = EngineConfig(
+                modelPath = modelPath,
+                backend = when (attempt.backend) {
+                    "gpu" -> Backend.GPU()
+                    "npu" -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
+                    else -> Backend.CPU()
+                },
+                maxNumTokens = attempt.maxNumTokens,
+                cacheDir = context.cacheDir.absolutePath
             )
-        )
-        engine = loadedEngine
+            val candidate = Engine(config)
+            val result = runCatching {
+                try {
+                    ExperimentalFlags.enableSpeculativeDecoding = attempt.speculativeDecoding
+                    candidate.initialize()
+                } finally {
+                    ExperimentalFlags.enableSpeculativeDecoding = null
+                }
+            }
+            if (result.isSuccess) {
+                engine = candidate
+                tokenLimit = attempt.maxNumTokens
+                activeBackend = attempt.backend.uppercase(Locale.US)
+                fallbackReason = if (attempt == attempts.first()) null else firstError?.message ?: "unknown error"
+                return@withContext
+            }
+            if (firstError == null) firstError = result.exceptionOrNull()
+            runCatching { if (candidate.isInitialized()) candidate.close() }
+        }
+        throw firstError ?: IllegalStateException("Model load failed.")
     }
 
-    override fun generate(prompt: String): Flow<String> = flow {
+    private fun newConversationConfig() = ConversationConfig(
+        systemInstruction = Contents.of(BUILD_SYSTEM_PROMPT),
+        samplerConfig = SamplerConfig(
+            topK = 20,
+            topP = 0.9,
+            temperature = 0.35
+        ),
+        // Leave the other half of the window for the prompt and earlier turns.
+        maxOutputToken = tokenLimit?.let { it / 2 },
+        // Thinking models (e.g. Qwen3) otherwise spend the output budget in a hidden reasoning
+        // channel the app never shows, which looks like a stuck "0 chars" generation.
+        thinkingConfig = ThinkingConfig(enableThinking = false)
+    )
+
+    override fun generate(sessionKey: String, message: String): Flow<String> = flow {
         val loadedEngine = engine ?: run {
             emit("Model is not loaded.")
             return@flow
         }
-        val configConversation = conversationConfig ?: ConversationConfig(
-            systemInstruction = Contents.of(BUILD_SYSTEM_PROMPT),
-            samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.35)
-        )
-        val requestConversation = loadedEngine.createConversation(configConversation)
-        activeConversationStopper = { runCatching { requestConversation.close() } }
+        val active = conversation?.takeIf { conversationKey == sessionKey && it.isAlive } ?: run {
+            resetSession()
+            loadedEngine.createConversation(newConversationConfig()).also {
+                conversation = it
+                conversationKey = sessionKey
+            }
+        }
+        var finished = false
         try {
-            requestConversation.sendMessageAsync(prompt).collect { token ->
+            active.sendMessageAsync(message).collect { token ->
                 emit(token.toString())
             }
+            finished = true
         } finally {
-            runCatching { requestConversation.close() }
-            activeConversationStopper = null
+            // A failed or cancelled turn leaves a partial reply in the KV cache, so start over next time.
+            if (!finished) resetSession()
         }
     }
 
+    override fun remainingTokens(sessionKey: String): Int? {
+        val limit = tokenLimit ?: return null
+        val active = conversation?.takeIf { conversationKey == sessionKey && it.isAlive } ?: return null
+        return runCatching { limit - active.getTokenCount() }.getOrNull()
+    }
+
+    override fun resetSession() {
+        conversation?.let { open ->
+            runCatching { open.cancelProcess() }
+            runCatching { open.close() }
+        }
+        conversation = null
+        conversationKey = null
+    }
+
     override fun close() {
-        runCatching { activeConversationStopper?.invoke() }
-        activeConversationStopper = null
+        resetSession()
         runCatching { engine?.close() }
         engine = null
-        conversationConfig = null
     }
 }
 
@@ -1541,12 +1630,12 @@ class MediaPipeMultimodalEngine(
 }
 
 class DemoBuilderEngine : BuilderEngine {
-    override fun generate(prompt: String): Flow<String> = flow {
-        val lower = prompt.lowercase(Locale.US)
+    override fun generate(sessionKey: String, message: String): Flow<String> = flow {
+        val lower = message.lowercase(Locale.US)
         val html = when {
             "calculator" in lower -> calculatorHtml()
             "racing" in lower || "ps1" in lower || "game" in lower -> racingMenuHtml()
-            else -> genericAppHtml(prompt)
+            else -> genericAppHtml(message)
         }
         emit(
             """
@@ -2397,7 +2486,9 @@ The host app may include extracted local file contents in the prompt using marke
 <<<FILE:path>>>
 ...content...
 <<<END_FILE>>>
-Treat that as authoritative local file content. Do not claim you cannot read local files.
+Treat that as authoritative local file content (including text the app extracted from PDF/image/DOCX/audio). Do not claim you cannot read local files.
+
+The first message of a chat contains a project snapshot. Later messages may contain only the user's request; the project files are then exactly what your earlier write_file actions produced.
 
 Allowed action:
 
@@ -2416,11 +2507,12 @@ ASSISTANT REPLY HERE
 
 Rules:
 - You may return one or more write_file actions.
-- Use reply action when the user is asking a normal question and no file changes are required.
-- For edits, update only the needed files.
-- If the user asks for a different app, replace the current app completely.
+- Use reply action when the user is asking a normal question and no file changes are required; do not modify files then.
+- For edits, update only the needed files and keep paths relative to the project root.
+- If the user asks for a different app, replace the current app completely. Do not keep the previous UI unless the user asks.
 - By default, generate a single self-contained index.html that includes CSS in <style> and JavaScript in <script>.
 - Only split into separate files (for example styles.css/app.js) when the user explicitly asks for separate files.
+- If index.html references local files (for example styles.css or app.js), write each referenced file in the same response.
 - Never place JavaScript in styles.css.
 - No external links.
 - No CDN.
@@ -2431,9 +2523,10 @@ Rules:
 - Center the main app content by default unless the user asks for a top/header layout.
 - Use min-height:100vh and grid/flex centering for standalone generated apps.
 - Use width:min(92vw, ...px) or similar responsive sizing instead of fixed wide layouts.
-- Keep the code simple and complete.
+- Keep the code simple, complete, and compact for mobile: no unnecessary comments, huge CSS blocks, or repeated code.
+- Never reference missing functions or variables.
 - Do not write markdown or explanations outside XML actions.
-- The XML must be complete and must end with </action>.
+- Never stop inside an XML action. The XML must be complete and must end with </content> and </action>.
 """
 
 fun welcomeHtml(): String = """

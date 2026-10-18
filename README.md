@@ -61,10 +61,11 @@ Notes:
 ## Using the App
 
 1. Open OnDevice Studio on your device.
-2. Import a compatible `.litertlm` model from the menu.
+2. Import a compatible `.litertlm` or `.gguf` model from the menu.
 Model setup: This repository does **not** include model files, so download one first and then import it in-app.
 Recommended model family: `litert-community/gemma-4-E2B-it.litertlm`
 Model source: [Hugging Face - litert-community/gemma-4-E2B-it-litert-lm](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/tree/main)
+GGUF models (the format used by apps like PocketPal) run on the CPU through llama.cpp. A 4-bit quant (`Q4_K_M` or `Q4_0`) of a 1–4B instruct model is a good fit for phones.
 3. Enter a prompt (example: `Build a calculator app with a clean UI`).
 4. Generate and review the live preview.
 5. Refine with follow-up prompts.
@@ -83,7 +84,8 @@ Model source: [Hugging Face - litert-community/gemma-4-E2B-it-litert-lm](https:/
 - Kotlin
 - Jetpack Compose (Material 3)
 - Android WebView
-- LiteRT-LM Android runtime
+- LiteRT-LM Android runtime (`.litertlm` models, CPU/GPU/NPU)
+- llama.cpp via JNI (`.gguf` models, CPU)
 - ML Kit (OCR / labeling helpers)
 
 ### Requirements
@@ -91,6 +93,8 @@ Model source: [Hugging Face - litert-community/gemma-4-E2B-it-litert-lm](https:/
 - Android Studio (recent stable)
 - JDK 17+
 - Android SDK matching project config
+- Android NDK 28.2 and CMake 3.31.6 (install from Android Studio's SDK Manager)
+- The llama.cpp submodule: clone with `git clone --recurse-submodules`, or run `git submodule update --init` in an existing checkout
 
 ### Project Structure
 

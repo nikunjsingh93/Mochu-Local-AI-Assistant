@@ -29,6 +29,8 @@ class BuilderViewModel : ViewModel() {
     private var conversations: MutableList<ChatConversation> = mutableListOf()
     private var generationInProgress = false
     private var generationJob: Job? = null
+    // "<chat id>|<workspace fingerprint>" the open model session was last in sync with.
+    private var sessionFingerprint: String? = null
 
     fun prepare(context: Context) {
         if (prepared) return
@@ -60,9 +62,138 @@ class BuilderViewModel : ViewModel() {
                 contextSizeChars = savedContextSizeChars(context),
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
-                status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Import a .litertlm model from the ⋮ menu."
+                allowMobileDataDownloads = savedAllowMobileDataDownloads(context),
+                status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Download or import a model from the ⋮ menu."
             )
         }
+        cancelLegacySystemDownloads(context)
+        refreshModelDownloads(context)
+        // The download service lives outside this ViewModel; mirror its progress into the UI state.
+        viewModelScope.launch {
+            ModelDownloadTracker.states.collect { refreshModelDownloads(context) }
+        }
+        viewModelScope.launch {
+            ModelDownloadTracker.completed.collect { id ->
+                refreshModelDownloads(context)
+                if (!generationInProgress && !uiState.value.isBusy) useDownloadedModel(context, id)
+            }
+        }
+    }
+
+    fun setAllowMobileDataDownloads(context: Context, allow: Boolean) {
+        saveAllowMobileDataDownloads(context, allow)
+        _uiState.update { it.copy(allowMobileDataDownloads = allow) }
+    }
+
+    fun downloadModel(context: Context, id: String) {
+        val appContext = context.applicationContext
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        val needed = model.sizeBytes - partialBytes(appContext, model) + 200L * 1024 * 1024
+        val free = runCatching { freeBytesForDownloads(appContext) }.getOrDefault(0L)
+        if (free < needed) {
+            ModelDownloadTracker.set(
+                id,
+                ModelDownloadState(DownloadPhase.Failed, message = "Not enough storage: needs ${formatBytes(needed)}, ${formatBytes(free)} free.")
+            )
+            return
+        }
+        runCatching { ModelDownloadService.start(appContext, id) }.onFailure {
+            ModelDownloadTracker.set(id, ModelDownloadState(DownloadPhase.Failed, message = "Could not start download: ${it.message ?: "unknown error"}"))
+        }
+    }
+
+    fun cancelModelDownload(context: Context, id: String) {
+        val appContext = context.applicationContext
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        if (ModelDownloadTracker.states.value[id]?.phase in ACTIVE_DOWNLOAD_PHASES) {
+            ModelDownloadService.cancel(appContext, id)
+        } else {
+            // Nothing running: just discard the paused or failed partial file.
+            partialModelFile(appContext, model).delete()
+            ModelDownloadTracker.set(id, null)
+        }
+        refreshModelDownloads(appContext)
+    }
+
+    fun useDownloadedModel(context: Context, id: String) {
+        val appContext = context.applicationContext
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        val file = downloadedModelFile(appContext, model)
+        if (!file.exists()) return
+        if (generationInProgress || uiState.value.isBusy) {
+            _uiState.update { it.copy(status = "Wait for the model to finish before switching models.") }
+            return
+        }
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        saveModelName(appContext, model.fileName)
+        saveActiveModelPath(appContext, file.absolutePath)
+        _uiState.update {
+            it.copy(
+                modelName = model.fileName,
+                modelSupportsMultimodal = isLikelyMultimodalModel(model.fileName),
+                multimodalBackendReady = false,
+                modelReady = true,
+                gemmaLoaded = false,
+                engineLabel = "Not loaded",
+                activeModelPath = file.absolutePath,
+                status = "${model.name} selected. Send a message to load it."
+            )
+        }
+    }
+
+    fun deleteDownloadedModel(context: Context, id: String) {
+        val appContext = context.applicationContext
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        val file = downloadedModelFile(appContext, model)
+        val wasActive = savedActiveModelPath(appContext) == file.absolutePath
+        if (wasActive) {
+            if (generationInProgress || uiState.value.isBusy) {
+                _uiState.update { it.copy(status = "Wait for the model to finish before deleting it.") }
+                return
+            }
+            engine.close()
+            engine = DemoBuilderEngine()
+            sessionFingerprint = null
+            saveActiveModelPath(appContext, null)
+            saveModelName(appContext, "")
+        }
+        file.delete()
+        if (wasActive) {
+            _uiState.update {
+                it.copy(
+                    modelName = savedModelName(appContext),
+                    modelReady = modelFile(appContext).exists(),
+                    gemmaLoaded = false,
+                    engineLabel = "Not loaded",
+                    status = "Deleted ${model.name}."
+                )
+            }
+        }
+        refreshModelDownloads(appContext)
+    }
+
+    fun refreshModelDownloads(context: Context) {
+        val appContext = context.applicationContext
+        val live = ModelDownloadTracker.states.value
+        val states = MODEL_CATALOG.associate { model ->
+            model.id to (live[model.id] ?: storedDownloadState(appContext, model))
+        }
+        _uiState.update { it.copy(modelDownloads = states, activeModelPath = savedActiveModelPath(appContext)) }
+    }
+
+    /** State for a model with no download in progress, from what is on disk. */
+    private fun storedDownloadState(context: Context, model: CatalogModel): ModelDownloadState {
+        if (downloadedModelFile(context, model).exists()) return ModelDownloadState(DownloadPhase.Downloaded, 1f)
+        val partial = partialBytes(context, model)
+        if (partial <= 0) return ModelDownloadState()
+        return ModelDownloadState(
+            phase = DownloadPhase.NotDownloaded,
+            progress = (partial.toFloat() / model.sizeBytes).coerceIn(0f, 1f),
+            message = "Paused · ${formatBytes(partial)} of ${formatBytes(model.sizeBytes)}",
+            partialBytes = partial
+        )
     }
 
     fun toggleSidebar() {
@@ -80,8 +211,22 @@ class BuilderViewModel : ViewModel() {
     }
 
     fun setContextSizeChars(context: Context, contextSizeChars: Int) {
+        val previousTokenWindow = maxNumTokensForContext(uiState.value.contextSizeChars)
         saveContextSizeChars(context, contextSizeChars)
-        _uiState.update { it.copy(contextSizeChars = savedContextSizeChars(context)) }
+        val saved = savedContextSizeChars(context)
+        val needsReload = maxNumTokensForContext(saved) != previousTokenWindow && uiState.value.gemmaLoaded
+        _uiState.update {
+            if (needsReload) {
+                it.copy(
+                    contextSizeChars = saved,
+                    gemmaLoaded = false,
+                    engineLabel = "Not loaded",
+                    status = "Context window updated. Send a message to reload model."
+                )
+            } else {
+                it.copy(contextSizeChars = saved)
+            }
+        }
         refreshWorkspace(context)
     }
 
@@ -244,13 +389,13 @@ class BuilderViewModel : ViewModel() {
     fun importModel(context: Context, uri: Uri) {
         viewModelScope.launch {
             val importedName = displayNameForUri(context.contentResolver, uri).ifBlank { "Gemma model" }
-            val isLiteRtLm = importedName.lowercase(Locale.US).endsWith(".litertlm")
-            if (!isLiteRtLm) {
+            val isSupported = importedName.lowercase(Locale.US).endsWith(".litertlm") || isGgufModel(importedName)
+            if (!isSupported) {
                 _uiState.update {
                     it.copy(
                         isBusy = false,
-                        status = "Only .litertlm models are supported. Selected: $importedName",
-                        messages = it.messages + ChatMessage("assistant", "Model import blocked: only .litertlm files are allowed. Selected: $importedName")
+                        status = "Only .litertlm and .gguf models are supported. Selected: $importedName",
+                        messages = it.messages + ChatMessage("assistant", "Model import blocked: only .litertlm or .gguf files are allowed. Selected: $importedName")
                     )
                 }
                 return@launch
@@ -262,10 +407,16 @@ class BuilderViewModel : ViewModel() {
                     messages = it.messages + ChatMessage("assistant", "Importing model into app storage...")
                 )
             }
+            // The loaded engine may be memory-mapping the file we are about to overwrite or delete.
+            engine.close()
+            engine = DemoBuilderEngine()
+            sessionFingerprint = null
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    copyModel(context.contentResolver, uri, modelFile(context))
+                    copyModel(context.contentResolver, uri, modelFileFor(context, importedName))
                     saveModelName(context, importedName)
+                    saveActiveModelPath(context, null)
+                    deleteOtherModelFormats(context, importedName)
                 }
             }
             _uiState.update {
@@ -363,33 +514,49 @@ class BuilderViewModel : ViewModel() {
     private suspend fun loadGemmaInternal(context: Context): Boolean {
         val file = modelFile(context)
         if (!file.exists()) {
-            _uiState.update { it.copy(isBusy = false, status = "Import a .litertlm model from the ⋮ menu first.") }
+            _uiState.update { it.copy(isBusy = false, status = "Import a .litertlm or .gguf model from the ⋮ menu first.") }
             return false
         }
         _uiState.update { it.copy(isBusy = true, status = "Loading model. First load can take several seconds...") }
+        // Free the previous model before loading the next so two copies never sit in RAM/GPU memory.
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        val maxNumTokens = maxNumTokensForContext(uiState.value.contextSizeChars)
+        // Returns (where it runs, optional status note).
         val result = runCatching {
-            val newEngine = LiteRtGemmaEngine(
-                context = context.applicationContext,
-                modelPath = file.absolutePath,
-                backendPreference = uiState.value.backendPreference,
-                speculativeDecodingEnabled = uiState.value.speculativeDecodingEnabled
-            )
-            newEngine.load()
-            engine.close()
-            engine = newEngine
-            ensureMultimodalBackend(context)
+            if (isGgufModel(savedModelName(context))) {
+                val newEngine = LlamaCppEngine(context.applicationContext, file.absolutePath, maxNumTokens)
+                newEngine.load()
+                engine = newEngine
+                "llama.cpp CPU" to " (${newEngine.description})"
+            } else {
+                val newEngine = LiteRtGemmaEngine(
+                    context = context.applicationContext,
+                    modelPath = file.absolutePath,
+                    backendPreference = uiState.value.backendPreference,
+                    speculativeDecodingEnabled = uiState.value.speculativeDecodingEnabled,
+                    maxNumTokens = maxNumTokens
+                )
+                newEngine.load()
+                engine = newEngine
+                ensureMultimodalBackend(context)
+                newEngine.activeBackend to newEngine.fallbackReason?.let { reason -> " (fallback: $reason)" }.orEmpty()
+            }
         }
         _uiState.update {
-            if (result.isSuccess) {
+            val loaded = result.getOrNull()
+            if (loaded != null) {
+                val (backendLabel, note) = loaded
                 it.copy(
                     isBusy = false,
                     gemmaLoaded = true,
-                    engineLabel = savedModelName(context),
+                    engineLabel = "${savedModelName(context)} · $backendLabel",
                     modelName = savedModelName(context),
                     modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
                     multimodalBackendReady = multimodalEngine?.isReady() == true,
                     activeRoutingMode = "text",
-                    status = "${savedModelName(context)} loaded. Sending message..."
+                    status = "${savedModelName(context)} loaded on $backendLabel$note. Sending message..."
                 )
             } else {
                 it.copy(
@@ -419,7 +586,7 @@ class BuilderViewModel : ViewModel() {
         generationJob = viewModelScope.launch {
             try {
                 if (!uiState.value.modelReady) {
-                    _uiState.update { it.copy(status = "Import a .litertlm model from the ⋮ menu first.") }
+                    _uiState.update { it.copy(status = "Import a .litertlm or .gguf model from the ⋮ menu first.") }
                     return@launch
                 }
                 if (!uiState.value.gemmaLoaded) {
@@ -485,7 +652,20 @@ class BuilderViewModel : ViewModel() {
                     }
                 }
 
-                val basePrompt = withContext(Dispatchers.IO) { buildPrompt(context, prompt, pendingMessages, userMessage.attachments) }
+                // Keep the chat's model session (and its KV cache) when nothing changed the workspace behind
+                // the model's back; otherwise start over from a full project snapshot.
+                val sessionKey = uiState.value.activeConversationId.orEmpty()
+                val workspaceKey = withContext(Dispatchers.IO) {
+                    "$sessionKey|${workspaceFingerprint(activeProjectRoot(context))}"
+                }
+                var cachedSnapshotPrompt: String? = null
+                suspend fun snapshotPrompt(): String = cachedSnapshotPrompt
+                    ?: withContext(Dispatchers.IO) { buildPrompt(context, prompt, pendingMessages, userMessage.attachments) }
+                        .also { cachedSnapshotPrompt = it }
+                val turnPrompt = buildTurnPrompt(prompt)
+                val continuesSession = workspaceKey == sessionFingerprint && hasRoomForTurn(sessionKey, turnPrompt)
+                if (!continuesSession) engine.resetSession()
+                val basePrompt = if (continuesSession) turnPrompt else snapshotPrompt()
                 var responseText = ""
                 var actions: List<WriteFileAction> = emptyList()
                 var assistantReply: String? = null
@@ -498,8 +678,10 @@ class BuilderViewModel : ViewModel() {
                     val attemptPrompt = if (attempt == 1) {
                         basePrompt
                     } else {
+                        // The failed attempt is still in the session's history; retry from a clean snapshot.
+                        engine.resetSession()
                         """
-$basePrompt
+${snapshotPrompt()}
 
 RETRY ATTEMPT $attempt OF $maxAttempts:
 Your previous response was incomplete. If the user asked a question, return one complete XML reply action. If file changes are needed, return complete XML write_file action(s). Close every opened tag, including </content> and </action>. Do not stream explanations outside XML.
@@ -514,7 +696,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     }
 
                     val result = runCatching {
-                        engine.generate(attemptPrompt).collect { chunk ->
+                        engine.generate(sessionKey, attemptPrompt).collect { chunk ->
                             if (firstTokenAtMs == null && chunk.isNotBlank()) {
                                 firstTokenAtMs = System.currentTimeMillis()
                             }
@@ -540,6 +722,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     }
 
                     responseText = continueRawResponseIfNeeded(
+                        sessionKey = sessionKey,
                         initialResponse = output.toString(),
                         firstTokenAtMs = { firstTokenAtMs },
                         setFirstTokenAtMs = { firstTokenAtMs = it }
@@ -555,6 +738,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     val recoveredReply = if (actions.isEmpty()) recoverAssistantReplyContent(responseText) else null
                     assistantReply = if (recoveredReply != null) {
                         continueAssistantReplyIfNeeded(
+                            sessionKey = sessionKey,
                             initialReply = recoveredReply,
                             fullResponse = responseText,
                             updateResponse = { responseText = it },
@@ -580,6 +764,7 @@ Your previous response was incomplete. If the user asked a question, return one 
                     val reply = assistantReply!!.trim()
                     val finalMessages = uiState.value.messages + ChatMessage("assistant", reply, statsInline = metrics)
                     persistActiveConversation(context, finalMessages)
+                    sessionFingerprint = workspaceKey
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -597,12 +782,14 @@ Your previous response was incomplete. If the user asked a question, return one 
                 if (actions.isEmpty() || actions.any { !isCompleteEnoughForWriting(it) }) {
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     val message = if (lastError != null) {
-                        "Generation failed after 3 retries. The previous working project was kept. Try a shorter request."
+                        "Generation failed after $maxAttempts attempts. The previous working project was kept. Try a shorter request."
                     } else {
-                        "The model stopped before finishing write actions after 3 retries. The previous working project was kept. Try asking for a shorter complete rewrite."
+                        "The model stopped before finishing write actions after $maxAttempts attempts. The previous working project was kept. Try asking for a shorter complete rewrite."
                     }
                     val finalMessages = uiState.value.messages + ChatMessage("assistant", message, statsInline = metrics)
                     persistActiveConversation(context, finalMessages)
+                    engine.resetSession()
+                    sessionFingerprint = null
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -627,6 +814,13 @@ Your previous response was incomplete. If the user asked a question, return one 
                 if (written.isSuccess) {
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     refreshWorkspace(context)
+                    // If the app rewrote the model's actions (e.g. merged files), its history no longer
+                    // matches the workspace, so the next turn starts from a fresh snapshot.
+                    sessionFingerprint = if (recoverWriteFileActions(responseText) == actions) {
+                        withContext(Dispatchers.IO) { "$sessionKey|${workspaceFingerprint(activeProjectRoot(context))}" }
+                    } else {
+                        null
+                    }
                     val assistantText = assistantReply?.takeIf { it.isNotBlank() }?.trim() ?: "Updated preview."
                     val assistantMessage = ChatMessage("assistant", assistantText, statsInline = metrics)
                     val finalMessages = uiState.value.messages + assistantMessage
@@ -653,6 +847,8 @@ Your previous response was incomplete. If the user asked a question, return one 
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     val finalMessages = uiState.value.messages + ChatMessage("assistant", "I generated a complete file, but the app could not save it.", statsInline = metrics)
                     persistActiveConversation(context, finalMessages)
+                    engine.resetSession()
+                    sessionFingerprint = null
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -867,8 +1063,9 @@ Your previous response was incomplete. If the user asked a question, return one 
         val recent = messages.takeLast(8).joinToString("\n") { msg ->
             "${msg.role}: ${msg.text.take(1000)}"
         }
+        // BUILD_SYSTEM_PROMPT is already the conversation's system instruction, so it isn't repeated here.
         return """
-$BUILD_SYSTEM_PROMPT
+Project snapshot (this replaces anything earlier in the chat):
 
 Recent chat:
 $recent
@@ -883,32 +1080,36 @@ $fileContext
 
 $multimodalHint
 
-Important instructions for this turn:
-- The app has already provided readable content from local imported files above (including extracted text from PDF/image/DOCX when available).
-- Do not say you cannot access local files. Use the provided file context directly.
-- If the user asks a question or asks for explanation only, return one reply action and do not modify files.
-- Return one or more write_file action(s) when file changes are needed.
-- Never include explanations or markdown before or after the XML action.
-- Never stop inside the XML action. Always finish with </content> and </action>.
-- Keep the generated file compact enough for mobile. Avoid unnecessary comments, huge CSS blocks, or repeated code.
-- Do not put the XML action in a chat message; the app will parse it silently.
-- If the user asks for a completely different app or design, replace the current app completely.
-- Do not preserve the old calculator or previous UI unless the user explicitly asks to keep it.
-- You may create multiple files (for example index.html, styles.css, app.js, data.json, assets/*) when useful.
-- If index.html references local files (for example styles.css or app.js), include write_file actions for each referenced file in the same response.
-- Center the generated app/page by default using a full viewport layout such as min-height:100vh and display:grid/place-items:center or flexbox centering.
-- Make the layout responsive for phone screens, avoid fixed desktop-only widths, and use width:min(92vw, ...px) for main cards.
-- Avoid referencing missing functions or variables; make the generated app fully runnable offline from local files.
-- If editing an existing project, update only the files needed and keep paths relative to the project root.
+${buildTurnPrompt(userRequest)}
+        """.trimIndent()
+    }
 
+    /** Prompt for a turn that continues an open session, where the model already holds the project in its history. */
+    private fun buildTurnPrompt(userRequest: String): String = """
 User request:
 $userRequest
 
 Return the XML action(s) now.
-        """.trimIndent()
+    """.trimIndent()
+
+    private fun hasRoomForTurn(sessionKey: String, turnPrompt: String): Boolean {
+        val remaining = engine.remainingTokens(sessionKey) ?: return false
+        val outputReserve = minOf(maxNumTokensForContext(uiState.value.contextSizeChars) / 2, 4096)
+        // ~3 chars per token is a conservative estimate for code-heavy prompts.
+        return remaining - turnPrompt.length / 3 > outputReserve
     }
 
+    /** Changes whenever a project file is added, removed, or modified. */
+    private fun workspaceFingerprint(root: File): String = root.walkTopDown()
+        .filter { it.isFile }
+        .map { "${it.relativeTo(root).path}:${it.length()}:${it.lastModified()}" }
+        .sorted()
+        .joinToString("|")
+        .hashCode()
+        .toString()
+
     private suspend fun continueAssistantReplyIfNeeded(
+        sessionKey: String,
         initialReply: AssistantReplyContent,
         fullResponse: String,
         updateResponse: (String) -> Unit,
@@ -939,7 +1140,7 @@ Continue exactly where that reply stopped. Return one reply action containing on
             val output = StringBuilder()
             var lastUiUpdate = 0L
             val result = runCatching {
-                engine.generate(prompt).collect { chunk ->
+                engine.generate(sessionKey, prompt).collect { chunk ->
                     if (firstTokenAtMs() == null && chunk.isNotBlank()) {
                         setFirstTokenAtMs(System.currentTimeMillis())
                     }
@@ -992,6 +1193,7 @@ Continue exactly where that reply stopped. Return one reply action containing on
     }
 
     private suspend fun continueRawResponseIfNeeded(
+        sessionKey: String,
         initialResponse: String,
         firstTokenAtMs: () -> Long?,
         setFirstTokenAtMs: (Long) -> Unit
@@ -1024,7 +1226,7 @@ Rules:
             val output = StringBuilder()
             var lastUiUpdate = 0L
             val result = runCatching {
-                engine.generate(prompt).collect { chunk ->
+                engine.generate(sessionKey, prompt).collect { chunk ->
                     if (firstTokenAtMs() == null && chunk.isNotBlank()) {
                         setFirstTokenAtMs(System.currentTimeMillis())
                     }

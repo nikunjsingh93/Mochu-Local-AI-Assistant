@@ -50,10 +50,12 @@ fun savedModelName(context: Context): String =
     context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         .getString("modelName", null)
         ?.takeIf { it.isNotBlank() }
-        ?: modelFile(context).takeIf { it.exists() }?.name
+        ?: liteRtModelFile(context).takeIf { it.exists() }?.name
         ?: "Gemma model"
 
 fun isLikelyMultimodalModel(name: String): Boolean {
+    // Image/audio input is only wired up for LiteRT-LM models.
+    if (isGgufModel(name)) return false
     val lower = name.lowercase(Locale.US)
     return lower.contains("multimodal") ||
         lower.contains("vision") ||
@@ -109,17 +111,25 @@ fun saveContextSizeChars(context: Context, contextSizeChars: Int) {
         .apply()
 }
 
+/** KV-cache size (prompt + output tokens) for a file-context setting, capped at the 32K the .litertlm build supports. */
+fun maxNumTokensForContext(contextSizeChars: Int): Int = when {
+    contextSizeChars <= 12000 -> 8192
+    contextSizeChars <= 24000 -> 16384
+    else -> 32768
+}
+
+// GPU is the default; LiteRtGemmaEngine falls back to CPU when the device can't run it.
 fun savedBackendPreference(context: Context): String =
     context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        .getString("backendPreference", "cpu")
+        .getString("backendPreference", "gpu")
         ?.lowercase(Locale.US)
         ?.takeIf { it in setOf("cpu", "gpu", "npu") }
-        ?: "cpu"
+        ?: "gpu"
 
 fun saveBackendPreference(context: Context, backendPreference: String) {
     val normalized = backendPreference.lowercase(Locale.US).takeIf {
         it in setOf("cpu", "gpu", "npu")
-    } ?: "cpu"
+    } ?: "gpu"
     context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         .edit()
         .putString("backendPreference", normalized)
@@ -147,7 +157,37 @@ fun displayNameForUri(resolver: ContentResolver, uri: Uri, fallback: String = "G
     return uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { fallback } ?: fallback
 }
 
-fun modelFile(context: Context): File = File(context.filesDir, "models/gemma-4-e2b.litertlm")
+// Keeps the original file name so existing installs find their imported model.
+private fun liteRtModelFile(context: Context): File = File(context.filesDir, "models/gemma-4-e2b.litertlm")
+
+private fun ggufModelFile(context: Context): File = File(context.filesDir, "models/model.gguf")
+
+/** Where a model with this display name is stored; one slot per format. */
+fun modelFileFor(context: Context, modelName: String): File =
+    if (isGgufModel(modelName)) ggufModelFile(context) else liteRtModelFile(context)
+
+/** The model to load: a downloaded model when one is selected, otherwise the imported model slot. */
+fun modelFile(context: Context): File =
+    savedActiveModelPath(context)?.let(::File)?.takeIf { it.exists() }
+        ?: modelFileFor(context, savedModelName(context))
+
+/** Absolute path of the selected downloaded model, or null when the imported model is used. */
+fun savedActiveModelPath(context: Context): String? =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("activeModelPath", null)
+
+fun saveActiveModelPath(context: Context, path: String?) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().apply {
+        if (path == null) remove("activeModelPath") else putString("activeModelPath", path)
+    }.apply()
+}
+
+/** Deletes the stored model of the other format so only one multi-GB model takes up space. */
+fun deleteOtherModelFormats(context: Context, keepModelName: String) {
+    val keep = modelFileFor(context, keepModelName)
+    listOf(liteRtModelFile(context), ggufModelFile(context))
+        .filter { it != keep }
+        .forEach { it.delete() }
+}
 
 fun copyModel(resolver: ContentResolver, uri: Uri, outFile: File) {
     outFile.parentFile?.mkdirs()

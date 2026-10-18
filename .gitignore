@@ -4,6 +4,7 @@ local.properties
 .idea/
 *.iml
 app/build/
+app/.cxx/
 
 # macOS / Finder
 .DS_Store

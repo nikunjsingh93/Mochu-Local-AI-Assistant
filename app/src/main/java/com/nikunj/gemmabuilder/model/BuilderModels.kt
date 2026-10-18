@@ -62,7 +62,7 @@ data class BuilderUiState(
     val activeConversationId: String? = null,
     val sidebarOpen: Boolean = false,
     val engineLabel: String = "Not loaded",
-    val status: String = "Import a .litertlm model to begin.",
+    val status: String = "Import a .litertlm or .gguf model to begin.",
     val modelName: String = "Gemma model",
     val modelSupportsMultimodal: Boolean = false,
     val multimodalBackendReady: Boolean = false,
@@ -84,17 +84,34 @@ data class BuilderUiState(
     val chatFontScale: Float = 1.2f,
     val codeFontScale: Float = 1f,
     val contextSizeChars: Int = 24000,
-    val backendPreference: String = "cpu",
+    val backendPreference: String = "gpu",
     val speculativeDecodingEnabled: Boolean = false,
     val estimatedFileContextChars: Int = 0,
     val pendingAttachments: List<String> = emptyList(),
     val generationMetrics: String? = null,
-    val previewImagePath: String? = null
+    val previewImagePath: String? = null,
+    val modelDownloads: Map<String, ModelDownloadState> = emptyMap(),
+    val allowMobileDataDownloads: Boolean = false,
+    val activeModelPath: String? = null
+)
+
+enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }
+
+data class ModelDownloadState(
+    val phase: DownloadPhase = DownloadPhase.NotDownloaded,
+    val progress: Float = 0f,
+    val message: String? = null,
+    val partialBytes: Long = 0L
 )
 
 data class WriteFileAction(val path: String, val content: String)
 
 interface BuilderEngine {
-    fun generate(prompt: String): Flow<String>
+    /** Streams a reply to [message], continuing the open session for [sessionKey] if there is one. */
+    fun generate(sessionKey: String, message: String): Flow<String>
+    /** Tokens left in the open session for [sessionKey], or null when no reusable session is open. */
+    fun remainingTokens(sessionKey: String): Int? = null
+    /** Drops the open session so the next [generate] starts a fresh conversation. */
+    fun resetSession() {}
     fun close() {}
 }

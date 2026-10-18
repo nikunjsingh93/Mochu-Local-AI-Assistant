@@ -147,6 +147,7 @@ fun SettingsScreen(
                     Text("• AndroidX WebKit — Apache-2.0")
                     Text("• Google ML Kit — Google SDK Terms")
                     Text("• LiteRT / LiteRT-LM Android — Google terms and licenses")
+                    Text("• llama.cpp / ggml — MIT")
                     Text("• PDFBox-Android — Apache-2.0")
                     Text(
                         "See each upstream project/release for full license text and notices.",
@@ -164,6 +165,11 @@ fun SettingsScreen(
                     val contextOptions = listOf(12000, 24000, 48000, 96000)
                     val contextIndex = contextOptions.indexOf(contextSizeChars).let { if (it >= 0) it else 1 }
                     Text("Context size: ${String.format(Locale.US, "%,d", contextSizeChars)} chars")
+                    Text(
+                        "Model window: ${String.format(Locale.US, "%,d", maxNumTokensForContext(contextSizeChars))} tokens. Larger windows use more memory.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Slider(
                         value = contextIndex.toFloat(),
                         onValueChange = { raw ->
@@ -208,6 +214,11 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    Text(
+                        "GPU is fastest on most phones. If the selected backend can't load, the app falls back to CPU.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
