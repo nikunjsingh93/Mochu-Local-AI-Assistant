@@ -10,11 +10,12 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-fun newBlankConversation(): ChatConversation = ChatConversation(
+fun newBlankConversation(kind: String = CHAT_KIND_STUDIO): ChatConversation = ChatConversation(
     id = UUID.randomUUID().toString(),
     title = "New chat",
     updatedAt = System.currentTimeMillis(),
-    messages = emptyList()
+    messages = emptyList(),
+    kind = kind
 )
 
 fun chatsRoot(context: Context): File = File(context.filesDir, "chats")
@@ -33,6 +34,7 @@ fun readConversationFile(file: File): ChatConversation {
     var title = "New chat"
     var summary = ""
     var summarizedCount = 0
+    var kind = CHAT_KIND_STUDIO
     var updatedAt = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis()
     val messages = mutableListOf<ChatMessage>()
     file.readLines().forEach { line ->
@@ -40,6 +42,7 @@ fun readConversationFile(file: File): ChatConversation {
             line.startsWith("title\t") -> title = decodeText(line.substringAfter("title\t"))
             line.startsWith("updated\t") -> updatedAt = line.substringAfter("updated\t").toLongOrNull() ?: updatedAt
             line.startsWith("summary\t") -> summary = decodeText(line.substringAfter("summary\t"))
+            line.startsWith("kind\t") -> kind = line.substringAfter("kind\t").ifBlank { CHAT_KIND_STUDIO }
             line.startsWith("summarized\t") -> summarizedCount = line.substringAfter("summarized\t").toIntOrNull() ?: 0
             line.startsWith("msg	") -> {
                 val parts = line.split("	", limit = 6)
@@ -72,7 +75,8 @@ fun readConversationFile(file: File): ChatConversation {
         updatedAt = updatedAt,
         messages = messages,
         summary = summary,
-        summarizedCount = summarizedCount.coerceIn(0, messages.size)
+        summarizedCount = summarizedCount.coerceIn(0, messages.size),
+        kind = kind
     )
 }
 
@@ -83,6 +87,7 @@ fun saveConversationFile(context: Context, conversation: ChatConversation) {
     val text = buildString {
         appendLine("title\t${encodeText(conversation.title)}")
         appendLine("updated\t${conversation.updatedAt}")
+        appendLine("kind\t${conversation.kind}")
         if (conversation.summary.isNotBlank()) {
             appendLine("summary\t${encodeText(conversation.summary)}")
             appendLine("summarized\t${conversation.summarizedCount}")

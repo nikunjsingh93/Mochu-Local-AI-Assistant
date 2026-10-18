@@ -151,6 +151,7 @@ fun SettingsScreen(
                     Text("• Google ML Kit — Google SDK Terms")
                     Text("• LiteRT / LiteRT-LM Android — Google terms and licenses")
                     Text("• llama.cpp / ggml — MIT")
+                    Text("• Inter typeface — SIL Open Font License 1.1")
                     Text("• PDFBox-Android — Apache-2.0")
                     Text(
                         "See each upstream project/release for full license text and notices.",

@@ -48,7 +48,7 @@ class BuilderViewModel : ViewModel() {
 
         conversations = loadConversations(context).toMutableList()
         if (conversations.isEmpty()) {
-            val blank = newBlankConversation()
+            val blank = newBlankConversation(CHAT_KIND_ASSISTANT)
             conversations.add(blank)
             saveConversationFile(context, blank)
         }
@@ -62,6 +62,7 @@ class BuilderViewModel : ViewModel() {
                 activeConversationId = active.id,
                 messages = active.messages,
                 chatSummarized = active.summary.isNotBlank(),
+                activeKind = active.kind,
                 modelName = savedModelName(context),
                 modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
                 multimodalBackendReady = false,
@@ -73,7 +74,7 @@ class BuilderViewModel : ViewModel() {
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
                 allowMobileDataDownloads = savedAllowMobileDataDownloads(context),
-                status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Download or import a model from the ⋮ menu."
+                status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Download a model from the Models tab."
             )
         }
         cancelLegacySystemDownloads(context)
@@ -278,8 +279,15 @@ class BuilderViewModel : ViewModel() {
         }
     }
 
-    fun newConversation(context: Context) {
-        val conv = newBlankConversation()
+    /** Switches between the Chat and Studio spaces, reopening that space's most recent chat. */
+    fun openSpace(context: Context, kind: String) {
+        if (uiState.value.activeKind == kind) return
+        val recent = conversations.filter { it.kind == kind }.maxByOrNull { it.updatedAt }
+        if (recent != null) selectConversation(context, recent.id) else newConversation(context, kind)
+    }
+
+    fun newConversation(context: Context, kind: String = uiState.value.activeKind) {
+        val conv = newBlankConversation(kind)
         conversations.add(0, conv)
         saveConversationFile(context, conv)
         ensureProjectForConversation(context, conv.id, migrateLegacy = false)
@@ -289,6 +297,7 @@ class BuilderViewModel : ViewModel() {
                 activeConversationId = conv.id,
                 messages = emptyList(),
                 chatSummarized = false,
+                activeKind = conv.kind,
                 contextUsedTokens = it.contextWindowTokens?.let { 0 },
                 prompt = "",
                 conversations = conversationInfos(),
@@ -311,6 +320,7 @@ class BuilderViewModel : ViewModel() {
                 activeConversationId = conv.id,
                 messages = conv.messages,
                 chatSummarized = conv.summary.isNotBlank(),
+                activeKind = conv.kind,
                 contextUsedTokens = it.contextWindowTokens?.let { 0 },
                 prompt = "",
                 conversations = conversationInfos(),
@@ -331,14 +341,15 @@ class BuilderViewModel : ViewModel() {
         conversations = conversations.filterNot { it.id == id }.toMutableList()
         File(chatsRoot(context), "$id.chat").delete()
         File(projectsRoot(context), id).deleteRecursively()
-        if (conversations.isEmpty()) {
-            val fresh = newBlankConversation()
+        // Stay in the same space: fall back to that space's newest chat, or a fresh one.
+        if (conversations.none { it.kind == deleted.kind }) {
+            val fresh = newBlankConversation(deleted.kind)
             conversations.add(fresh)
             saveConversationFile(context, fresh)
             ensureProjectForConversation(context, fresh.id, migrateLegacy = false)
         }
         val next = if (uiState.value.activeConversationId == id) {
-            conversations.maxByOrNull { it.updatedAt } ?: conversations.first()
+            conversations.filter { it.kind == deleted.kind }.maxByOrNull { it.updatedAt } ?: conversations.first()
         } else {
             conversations.firstOrNull { it.id == uiState.value.activeConversationId } ?: conversations.maxByOrNull { it.updatedAt } ?: conversations.first()
         }
@@ -349,6 +360,7 @@ class BuilderViewModel : ViewModel() {
                 activeConversationId = next.id,
                 messages = next.messages,
                 chatSummarized = next.summary.isNotBlank(),
+                activeKind = next.kind,
                 contextUsedTokens = it.contextWindowTokens?.let { 0 },
                 prompt = "",
                 conversations = conversationInfos(),
@@ -621,11 +633,15 @@ class BuilderViewModel : ViewModel() {
         val prompt = uiState.value.prompt.trim()
         if (prompt.isBlank() || uiState.value.isBusy || generationInProgress) return
         generationInProgress = true
+        if (uiState.value.activeKind == CHAT_KIND_ASSISTANT) {
+            generateAssistantReply(context, prompt)
+            return
+        }
 
         generationJob = viewModelScope.launch {
             try {
                 if (!uiState.value.modelReady) {
-                    _uiState.update { it.copy(status = "Import a .litertlm or .gguf model from the ⋮ menu first.") }
+                    _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
                     return@launch
                 }
                 if (!uiState.value.gemmaLoaded) {
@@ -935,6 +951,109 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 _uiState.update { it.copy(isBusy = false) }
                 refreshContextUsage()
             }
+        }
+    }
+
+    /**
+     * Chat space: a plain conversation. The reply streams into [BuilderUiState.streamingReply] and is
+     * saved as Markdown; no files, XML actions, or retries are involved.
+     */
+    private fun generateAssistantReply(context: Context, prompt: String) {
+        generationJob = viewModelScope.launch {
+            try {
+                if (!uiState.value.modelReady) {
+                    _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
+                    return@launch
+                }
+                if (!uiState.value.gemmaLoaded && !loadGemmaInternal(context.applicationContext)) return@launch
+
+                val pendingMessages = uiState.value.messages + ChatMessage("user", prompt)
+                _uiState.update {
+                    it.copy(
+                        isBusy = true,
+                        prompt = "",
+                        status = "Thinking...",
+                        messages = pendingMessages,
+                        streamingReply = "",
+                        generationMetrics = null
+                    )
+                }
+                persistActiveConversation(context, pendingMessages)
+                turnOutputTokens = 0
+                turnDecodeSeconds = 0.0
+                val startedAtMs = System.currentTimeMillis()
+                var firstTokenAtMs: Long? = null
+
+                // Continue the open session when it still has room; otherwise rebuild from history.
+                val sessionKey = uiState.value.activeConversationId.orEmpty()
+                val continues = hasRoomForTurn(sessionKey, prompt)
+                val message = if (continues) {
+                    prompt
+                } else {
+                    engine.resetSession()
+                    compactHistoryIfNeeded(context, pendingMessages)
+                    buildAssistantSnapshot(pendingMessages)
+                }
+
+                val output = StringBuilder()
+                var lastUiUpdate = 0L
+                val result = runCatching {
+                    engine.generate(sessionKey, message, ASSISTANT_SYSTEM_PROMPT)
+                        .onCompletion { absorbGenerationStats() }
+                        .collect { chunk ->
+                            if (firstTokenAtMs == null && chunk.isNotBlank()) firstTokenAtMs = System.currentTimeMillis()
+                            output.append(chunk)
+                            val now = System.currentTimeMillis()
+                            if (now - lastUiUpdate > 80L) {
+                                lastUiUpdate = now
+                                val text = output.toString()
+                                _uiState.update { it.copy(streamingReply = text, status = "Writing...") }
+                            }
+                        }
+                }
+
+                val reply = output.toString().trim()
+                val text = when {
+                    reply.isNotBlank() -> reply
+                    result.isFailure -> "Sorry, the model stopped with an error: ${result.exceptionOrNull()?.message ?: "unknown error"}"
+                    else -> "The model returned an empty reply. Try asking again."
+                }
+                if (result.isFailure || reply.isBlank()) engine.resetSession()
+                val metrics = buildGenerationMetrics(startedAtMs, firstTokenAtMs)
+                val finalMessages = uiState.value.messages + ChatMessage("assistant", text, statsInline = metrics)
+                persistActiveConversation(context, finalMessages)
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        status = "Answered.",
+                        messages = finalMessages,
+                        streamingReply = null,
+                        generationMetrics = metrics
+                    )
+                }
+            } finally {
+                generationInProgress = false
+                generationJob = null
+                _uiState.update { it.copy(isBusy = false, streamingReply = null) }
+                refreshContextUsage()
+            }
+        }
+    }
+
+    /** Recent history (plus the running summary) as one message, for a chat whose session was reset. */
+    private fun buildAssistantSnapshot(messages: List<ChatMessage>): String {
+        val conversation = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
+        val earlier = messages.dropLast(1)
+        val summarized = conversation?.summarizedCount?.coerceAtMost(earlier.size) ?: 0
+        val summary = conversation?.summary.orEmpty().takeIf { summarized > 0 }.orEmpty()
+        val history = earlier.drop(summarized).takeLast(RECENT_MESSAGES_KEPT)
+            .joinToString("\n\n") { "${if (it.role == "user") "User" else "Assistant"}: ${it.text.take(2000)}" }
+            .takeLast(snapshotCharBudget(activeTokenWindow) * 2 / 3)
+        if (summary.isBlank() && history.isBlank()) return messages.last().text
+        return buildString {
+            if (summary.isNotBlank()) append("Summary of the earlier conversation:\n$summary\n\n")
+            if (history.isNotBlank()) append("Conversation so far:\n$history\n\n")
+            append("Reply to the user's new message:\n${messages.last().text}")
         }
     }
 
@@ -1467,7 +1586,7 @@ Write at most 120 words: what the user is building, requirements and preferences
 
     private fun conversationInfos(): List<ConversationInfo> = conversations
         .sortedByDescending { it.updatedAt }
-        .map { ConversationInfo(it.id, it.title, it.updatedAt, it.messages.size) }
+        .map { ConversationInfo(it.id, it.title, it.updatedAt, it.messages.size, it.kind) }
 
     override fun onCleared() {
         super.onCleared()

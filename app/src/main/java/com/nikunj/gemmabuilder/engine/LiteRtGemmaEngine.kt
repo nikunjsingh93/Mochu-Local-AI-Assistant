@@ -191,6 +191,7 @@ class LiteRtGemmaEngine(
     private var engine: Engine? = null
     private var conversation: Conversation? = null
     private var conversationKey: String? = null
+    private var conversationPrompt: String? = null
     private var tokenLimit: Int? = null
     @Volatile private var lastStats: GenerationStats? = null
 
@@ -254,8 +255,8 @@ class LiteRtGemmaEngine(
         throw firstError ?: IllegalStateException("Model load failed.")
     }
 
-    private fun newConversationConfig() = ConversationConfig(
-        systemInstruction = Contents.of(BUILD_SYSTEM_PROMPT),
+    private fun newConversationConfig(systemPrompt: String) = ConversationConfig(
+        systemInstruction = Contents.of(systemPrompt),
         samplerConfig = SamplerConfig(
             topK = 20,
             topP = 0.9,
@@ -268,16 +269,17 @@ class LiteRtGemmaEngine(
         thinkingConfig = ThinkingConfig(enableThinking = false)
     )
 
-    override fun generate(sessionKey: String, message: String): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String): Flow<String> = flow {
         val loadedEngine = engine ?: run {
             emit("Model is not loaded.")
             return@flow
         }
-        val active = conversation?.takeIf { conversationKey == sessionKey && it.isAlive } ?: run {
+        val active = conversation?.takeIf { conversationKey == sessionKey && conversationPrompt == systemPrompt && it.isAlive } ?: run {
             resetSession()
-            loadedEngine.createConversation(newConversationConfig()).also {
+            loadedEngine.createConversation(newConversationConfig(systemPrompt)).also {
                 conversation = it
                 conversationKey = sessionKey
+                conversationPrompt = systemPrompt
             }
         }
         var finished = false
@@ -341,7 +343,7 @@ class MediaPipeMultimodalEngine(
 }
 
 class DemoBuilderEngine : BuilderEngine {
-    override fun generate(sessionKey: String, message: String): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String): Flow<String> = flow {
         val lower = message.lowercase(Locale.US)
         val html = when {
             "calculator" in lower -> calculatorHtml()

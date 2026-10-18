@@ -48,14 +48,22 @@ data class ChatConversation(
     val messages: List<ChatMessage>,
     /** Model-written summary of the first [summarizedCount] messages, used once they no longer fit. */
     val summary: String = "",
-    val summarizedCount: Int = 0
+    val summarizedCount: Int = 0,
+    /** [CHAT_KIND_ASSISTANT] for general chat, [CHAT_KIND_STUDIO] for a web-app project. */
+    val kind: String = CHAT_KIND_STUDIO
 )
+
+/** A general-purpose assistant chat (the Chat space). */
+const val CHAT_KIND_ASSISTANT = "assistant"
+/** A web-app project with files and a live preview (the Studio space). Chats saved before kinds existed are this kind. */
+const val CHAT_KIND_STUDIO = "studio"
 
 data class ConversationInfo(
     val id: String,
     val title: String,
     val updatedAt: Long,
-    val messageCount: Int
+    val messageCount: Int,
+    val kind: String = CHAT_KIND_STUDIO
 )
 
 data class BuilderUiState(
@@ -105,7 +113,11 @@ data class BuilderUiState(
     /** Generation speed of the most recent reply. */
     val lastTokensPerSecond: Double? = null,
     /** True when older messages of the active chat were folded into a summary. */
-    val chatSummarized: Boolean = false
+    val chatSummarized: Boolean = false,
+    /** Which space the active chat belongs to: [CHAT_KIND_ASSISTANT] or [CHAT_KIND_STUDIO]. */
+    val activeKind: String = CHAT_KIND_ASSISTANT,
+    /** Assistant reply text streamed so far, or null when no assistant reply is being generated. */
+    val streamingReply: String? = null
 )
 
 enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }
@@ -123,8 +135,11 @@ data class WriteFileAction(val path: String, val content: String)
 data class GenerationStats(val outputTokens: Int, val decodeSeconds: Double)
 
 interface BuilderEngine {
-    /** Streams a reply to [message], continuing the open session for [sessionKey] if there is one. */
-    fun generate(sessionKey: String, message: String): Flow<String>
+    /**
+     * Streams a reply to [message], continuing the open session for [sessionKey] if there is one.
+     * A session is tied to its [systemPrompt]: Studio projects and assistant chats use different ones.
+     */
+    fun generate(sessionKey: String, message: String, systemPrompt: String = BUILD_SYSTEM_PROMPT): Flow<String>
     /** Tokens left in the open session for [sessionKey], or null when no reusable session is open. */
     fun remainingTokens(sessionKey: String): Int? = null
     /** Drops the open session so the next [generate] starts a fresh conversation. */

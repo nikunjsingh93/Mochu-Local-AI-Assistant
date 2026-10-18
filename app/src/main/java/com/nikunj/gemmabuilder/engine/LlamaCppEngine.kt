@@ -51,6 +51,7 @@ class LlamaCppEngine(
 
     @Volatile private var handle = 0L
     @Volatile private var sessionKey: String? = null
+    @Volatile private var sessionPrompt: String? = null
     @Volatile private var usedTokens = 0
     @Volatile private var lastStats: GenerationStats? = null
     private var contextSize = 0
@@ -72,14 +73,15 @@ class LlamaCppEngine(
         description = "${LlamaCppNative.nativeDescribe(loaded)} · $cpuLabel"
     }
 
-    override fun generate(sessionKey: String, message: String): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String): Flow<String> = flow {
         val h = handle
         if (h == 0L) {
             emit("Model is not loaded.")
             return@flow
         }
-        if (this@LlamaCppEngine.sessionKey != sessionKey) {
-            LlamaCppNative.nativeStartChat(h, BUILD_SYSTEM_PROMPT)
+        if (this@LlamaCppEngine.sessionKey != sessionKey || sessionPrompt != systemPrompt) {
+            LlamaCppNative.nativeStartChat(h, systemPrompt)
+            sessionPrompt = systemPrompt
             this@LlamaCppEngine.sessionKey = sessionKey
         }
         var finished = false
