@@ -31,6 +31,8 @@ class BuilderViewModel : ViewModel() {
     private var generationJob: Job? = null
     // "<chat id>|<workspace fingerprint>" the open model session was last in sync with.
     private var sessionFingerprint: String? = null
+    // Context window the loaded model actually got (may be below the setting to fit in memory).
+    private var activeTokenWindow = 8192
 
     fun prepare(context: Context) {
         if (prepared) return
@@ -67,6 +69,7 @@ class BuilderViewModel : ViewModel() {
             )
         }
         cancelLegacySystemDownloads(context)
+        learnFromLowMemoryKill(context)?.let { notice -> _uiState.update { it.copy(memoryNotice = notice) } }
         refreshModelDownloads(context)
         // The download service lives outside this ViewModel; mirror its progress into the UI state.
         viewModelScope.launch {
@@ -78,6 +81,10 @@ class BuilderViewModel : ViewModel() {
                 if (!generationInProgress && !uiState.value.isBusy) useDownloadedModel(context, id)
             }
         }
+    }
+
+    fun dismissMemoryNotice() {
+        _uiState.update { it.copy(memoryNotice = null) }
     }
 
     fun setAllowMobileDataDownloads(context: Context, allow: Boolean) {
@@ -522,7 +529,10 @@ class BuilderViewModel : ViewModel() {
         engine.close()
         engine = DemoBuilderEngine()
         sessionFingerprint = null
-        val maxNumTokens = maxNumTokensForContext(uiState.value.contextSizeChars)
+        val requestedTokens = maxNumTokensForContext(uiState.value.contextSizeChars)
+        val maxNumTokens = safeTokenWindow(context, file, requestedTokens)
+        activeTokenWindow = maxNumTokens
+        val windowNote = if (maxNumTokens < requestedTokens) ", ${formatTokens(maxNumTokens)}-token context to fit in memory" else ""
         // Returns (where it runs, optional status note).
         val result = runCatching {
             if (isGgufModel(savedModelName(context))) {
@@ -544,6 +554,7 @@ class BuilderViewModel : ViewModel() {
                 newEngine.activeBackend to newEngine.fallbackReason?.let { reason -> " (fallback: $reason)" }.orEmpty()
             }
         }
+        if (result.isSuccess) recordLoadedModel(context, file, maxNumTokens)
         _uiState.update {
             val loaded = result.getOrNull()
             if (loaded != null) {
@@ -556,7 +567,7 @@ class BuilderViewModel : ViewModel() {
                     modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
                     multimodalBackendReady = multimodalEngine?.isReady() == true,
                     activeRoutingMode = "text",
-                    status = "${savedModelName(context)} loaded on $backendLabel$note. Sending message..."
+                    status = "${savedModelName(context)} loaded on $backendLabel$note$windowNote. Sending message..."
                 )
             } else {
                 it.copy(
@@ -1094,7 +1105,7 @@ Return the XML action(s) now.
 
     private fun hasRoomForTurn(sessionKey: String, turnPrompt: String): Boolean {
         val remaining = engine.remainingTokens(sessionKey) ?: return false
-        val outputReserve = minOf(maxNumTokensForContext(uiState.value.contextSizeChars) / 2, 4096)
+        val outputReserve = minOf(activeTokenWindow / 2, 4096)
         // ~3 chars per token is a conservative estimate for code-heavy prompts.
         return remaining - turnPrompt.length / 3 > outputReserve
     }

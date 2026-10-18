@@ -371,6 +371,14 @@ fun BuilderApp(
                     onDismiss = { settingsScreenOpen = false }
                 )
             }
+            state.memoryNotice?.let { notice ->
+                AlertDialog(
+                    onDismissRequest = { vm.dismissMemoryNotice() },
+                    title = { Text("Ran out of memory") },
+                    text = { Text(notice) },
+                    confirmButton = { Button(onClick = { vm.dismissMemoryNotice() }) { Text("OK") } }
+                )
+            }
             if (modelsScreenOpen) {
                 ModelDownloadsScreen(
                     state = state,

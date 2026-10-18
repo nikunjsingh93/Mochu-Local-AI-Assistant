@@ -92,7 +92,9 @@ data class BuilderUiState(
     val previewImagePath: String? = null,
     val modelDownloads: Map<String, ModelDownloadState> = emptyMap(),
     val allowMobileDataDownloads: Boolean = false,
-    val activeModelPath: String? = null
+    val activeModelPath: String? = null,
+    /** Shown once after the system killed the app for low memory. */
+    val memoryNotice: String? = null
 )
 
 enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }
