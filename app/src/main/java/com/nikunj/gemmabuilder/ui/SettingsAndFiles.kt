@@ -351,7 +351,7 @@ fun SettingsScreen(
             }
 
             Text(
-                text = "OnDevice Studio $appVersionLabel",
+                text = "Mochu AI $appVersionLabel",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

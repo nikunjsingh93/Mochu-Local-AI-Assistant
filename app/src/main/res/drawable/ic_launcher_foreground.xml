@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mochu: a soft blob with a smile. Drawn inside the adaptive icon's 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#F4B8CA" android:pathData="M24,77a30,4 0,1 0,60 0a30,4 0,1 0,-60 0z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M30,74 C27,47 39,28 54,27 C69,28 81,47 78,74 C75,82 33,82 30,74 Z" />
+    <path android:fillColor="#3A2A3A" android:pathData="M43,55a3,3 0,1 0,6 0a3,3 0,1 0,-6 0z" />
+    <path android:fillColor="#3A2A3A" android:pathData="M59,55a3,3 0,1 0,6 0a3,3 0,1 0,-6 0z" />
+    <path android:fillColor="#00000000" android:strokeColor="#3A2A3A" android:strokeWidth="2.2" android:strokeLineCap="round"
+        android:pathData="M50,63 Q54,68 58,63" />
+    <path android:fillColor="#FF9DB8" android:pathData="M36,63a4,4 0,1 0,8 0a4,4 0,1 0,-8 0z" />
+    <path android:fillColor="#FF9DB8" android:pathData="M64,63a4,4 0,1 0,8 0a4,4 0,1 0,-8 0z" />
+    <path android:fillColor="#FFB547" android:pathData="M72,26 L74.5,31.5 L80,34 L74.5,36.5 L72,42 L69.5,36.5 L64,34 L69.5,31.5 Z" />
+</vector>

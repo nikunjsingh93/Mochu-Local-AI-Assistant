@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-color Mochu for Android's themed icons: the blob with its eyes cut out, and the sparkle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
+        android:pathData="M30,74 C27,47 39,28 54,27 C69,28 81,47 78,74 C75,82 33,82 30,74 Z M43,55a3,3 0,1 0,6 0a3,3 0,1 0,-6 0z M59,55a3,3 0,1 0,6 0a3,3 0,1 0,-6 0z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M72,26 L74.5,31.5 L80,34 L74.5,36.5 L72,42 L69.5,36.5 L64,34 L69.5,31.5 Z" />
+</vector>

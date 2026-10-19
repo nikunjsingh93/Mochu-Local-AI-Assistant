@@ -57,6 +57,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -374,11 +377,11 @@ private fun HistoryDrawer(
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
             Spacer(Modifier.height(20.dp))
-            Text(
-                "OnDevice Studio",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(horizontal = 12.dp)
-            )
+            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                MochuLogo(32.dp)
+                Spacer(Modifier.width(12.dp))
+                Text("Mochu AI", style = MaterialTheme.typography.titleLarge)
+            }
             Spacer(Modifier.height(16.dp))
             FilledTonalButton(onClick = { onNew(kind) }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))

@@ -336,23 +336,18 @@ private fun WelcomeState(
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            Icons.Rounded.AutoAwesome,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(36.dp)
-        )
+        MochuLogo(64.dp)
         Spacer(Modifier.height(16.dp))
         Text(
-            if (state.modelReady) "What can I help with?" else "Welcome to OnDevice Studio",
+            if (state.modelReady) "Hi, I'm Mochu! What can I help with?" else "Hi, I'm Mochu!",
             style = MaterialTheme.typography.headlineMedium
         )
         Spacer(Modifier.height(6.dp))
         Text(
             if (state.modelReady) {
-                "Everything runs on your phone. Nothing you type leaves the device."
+                "Your private AI assistant. I run entirely on your phone, so nothing you type leaves the device."
             } else {
-                "A private AI assistant and app builder that runs entirely on your phone. Download a model to get started."
+                "Your private AI assistant that runs entirely on your phone. Download a model to get started."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

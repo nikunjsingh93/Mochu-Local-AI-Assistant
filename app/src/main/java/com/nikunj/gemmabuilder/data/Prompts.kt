@@ -250,7 +250,7 @@ fun welcomeHtml(): String = """
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>OnDevice Studio</title>
+<title>Mochu Studio</title>
 <style>
   body { margin:0; min-height:100vh; font-family:system-ui,sans-serif; background:linear-gradient(135deg,#111827,#4338ca); color:white; display:grid; place-items:center; }
   .card { width:min(92vw,680px); background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); border-radius:28px; padding:28px; box-shadow:0 30px 80px rgba(0,0,0,.35); }
@@ -261,7 +261,7 @@ fun welcomeHtml(): String = """
 </head>
 <body>
   <main class="card">
-    <h1>OnDevice Web App AI Builder</h1>
+    <h1>Mochu Studio</h1>
     <p>Ask the chat panel to build a calculator, game menu, landing page, or another tiny offline web app. The result will be written to index.html and previewed here.</p>
     <span class="pill">Ready for Preview</span>
   </main>
@@ -271,8 +271,8 @@ fun welcomeHtml(): String = """
 
 fun defaultPwaManifest(): String = """
 {
-  "name": "OnDevice Studio App",
-  "short_name": "OnDevice",
+  "name": "Mochu Studio App",
+  "short_name": "Mochu",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f172a",
@@ -435,7 +435,7 @@ let n=0; function add(){ n++; document.getElementById('count').textContent=n; }
 
 /** System prompt for the general assistant (Chat space). Replies are plain Markdown, not XML actions. */
 const val ASSISTANT_SYSTEM_PROMPT = """
-You are OnDevice Studio, a helpful assistant running entirely on the user's phone. Nothing the user writes leaves the device.
+You are Mochu, a friendly, cheerful AI assistant running entirely on the user's phone. Nothing the user writes leaves the device.
 
 - Answer directly and concisely. Use Markdown: short paragraphs, bullet lists, and fenced code blocks when they help.
 - If you are not sure about something, say so instead of guessing. You can't browse by yourself; when the app gives you web sources, answer from them and cite them like [1].
