@@ -120,6 +120,8 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
     }
 
     var newTaskKind by rememberSaveable { mutableStateOf<String?>(null) }
+    // Deleting a reminder or scheduled task asks first; cancelling a running timer doesn't.
+    var pendingDelete by remember { mutableStateOf<ScheduledTask?>(null) }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -223,7 +225,7 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
                     TaskRow(
                         title = reminder.text,
                         subtitle = scheduleLabel(reminder),
-                        onDelete = { TaskAlarms.cancel(app, reminder.id) }
+                        onDelete = { pendingDelete = reminder }
                     )
                 }
 
@@ -251,7 +253,7 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                IconButton(onClick = { TaskAlarms.cancel(app, task.id) }) {
+                                IconButton(onClick = { pendingDelete = task }) {
                                     Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete task", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
@@ -277,6 +279,24 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
         }
     }
 
+    pendingDelete?.let { task ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(if (task.kind == TASK_REMINDER) "Delete reminder?" else "Delete scheduled task?") },
+            text = {
+                Text(
+                    "\"${task.text}\" " + if (task.repeatDaily) "won't run again. Results it already saved stay in your chats." else "will be removed."
+                )
+            },
+            confirmButton = {
+                DangerButton("Delete") {
+                    TaskAlarms.cancel(app, task.id)
+                    pendingDelete = null
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } }
+        )
+    }
     newTaskKind?.let { kind ->
         NewTaskDialog(
             kind = kind,

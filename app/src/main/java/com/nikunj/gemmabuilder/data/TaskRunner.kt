@@ -88,8 +88,13 @@ object TaskAlarms {
         }
     }
 
-    fun cancel(context: Context, id: String) {
+    /** Stops a task's alarm but keeps the task (a one-off that ran early, kept for its result). */
+    fun disarm(context: Context, id: String) {
         context.getSystemService(AlarmManager::class.java).cancel(alarmIntent(context, id))
+    }
+
+    fun cancel(context: Context, id: String) {
+        disarm(context, id)
         TaskRepository.remove(context, id)
         TaskNotifications.cancel(context, id)
     }
@@ -311,7 +316,8 @@ class TaskAlarmReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> TaskAlarms.rescheduleAll(context)
             ACTION_DISMISS -> intent.getStringExtra(EXTRA_TASK_ID)?.let { TaskNotifications.cancel(context, it) }
             ACTION_TASK_ALARM -> {
-                val task = intent.getStringExtra(EXTRA_TASK_ID)?.let { TaskRepository.get(context, it) } ?: return
+                // A one-off task that already ran ("Run now") has nothing left to do.
+                val task = intent.getStringExtra(EXTRA_TASK_ID)?.let { TaskRepository.get(context, it) }?.takeUnless { it.done } ?: return
                 when (task.kind) {
                     TASK_TIMER -> {
                         TaskNotifications.timerDone(context, task)
@@ -475,6 +481,7 @@ class TaskRunnerService : Service() {
                 TaskAlarms.schedule(applicationContext, latest.copy(triggerAt = nextDailyTrigger(latest.triggerAt, now), lastRunAt = now, lastChatId = chat.id))
             } else {
                 TaskRepository.upsert(applicationContext, latest.copy(lastRunAt = now, lastChatId = chat.id, done = true))
+                TaskAlarms.disarm(applicationContext, latest.id)
             }
         } finally {
             ownEngine?.close()
