@@ -596,7 +596,7 @@ private fun LoadingModelRow(modelName: String) {
  * "Thought for 12s" and opens on tap.
  */
 @Composable
-private fun ThinkingSection(thinking: String, seconds: Int, live: Boolean, fontScale: Float) {
+fun ThinkingSection(thinking: String, seconds: Int, live: Boolean, fontScale: Float) {
     // null follows the default: open while thinking, closed once the answer starts.
     var expandedChoice by remember { mutableStateOf<Boolean?>(null) }
     val expanded = expandedChoice ?: live
@@ -641,9 +641,9 @@ private fun ThinkingSection(thinking: String, seconds: Int, live: Boolean, fontS
                 val muted = MaterialTheme.colorScheme.onSurfaceVariant
                 if (live) {
                     // Only the latest lines while it streams, so the card doesn't keep growing.
-                    Text(
+                    RichMarkdown(
                         thinking.lines().filter { it.isNotBlank() }.takeLast(6).joinToString("\n"),
-                        style = MaterialTheme.typography.bodySmall,
+                        fontScale * 0.85f,
                         color = muted,
                         modifier = Modifier.padding(start = 28.dp, top = 4.dp, bottom = 4.dp)
                     )

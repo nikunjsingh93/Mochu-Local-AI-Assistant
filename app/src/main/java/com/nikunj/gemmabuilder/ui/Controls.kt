@@ -22,6 +22,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
@@ -167,4 +170,40 @@ fun compactTokens(tokens: Int): String = when {
     tokens >= 10_000 -> "${tokens / 1000}K"
     tokens >= 1000 -> String.format(java.util.Locale.US, "%.1fK", tokens / 1000.0)
     else -> tokens.toString()
+}
+
+/** Context window picker (4K–32K). Follows the thumb while dragging and reports only on release. */
+@Composable
+fun ContextSlider(tokens: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val options = CONTEXT_TOKEN_OPTIONS
+    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+    val savedIndex = options.indexOf(tokens).let { if (it >= 0) it else 2 }
+    val shown = options[draggingIndex ?: savedIndex]
+    Column(modifier) {
+        Text("Context window: ${shown / 1024}K tokens", style = MaterialTheme.typography.labelLarge)
+        Text(
+            "How much of a chat the model remembers at once. Bigger uses more memory; if the phone runs out, it is lowered automatically.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        ThumbOnlySlider(
+            value = (draggingIndex ?: savedIndex).toFloat(),
+            onValueChange = { raw -> draggingIndex = kotlin.math.round(raw).toInt().coerceIn(0, options.lastIndex) },
+            onValueChangeFinished = {
+                draggingIndex?.let { onChange(options[it]) }
+                draggingIndex = null
+            },
+            valueRange = 0f..options.lastIndex.toFloat(),
+            steps = options.size - 2
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            options.forEach { value ->
+                Text(
+                    "${value / 1024}K",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (value == shown) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }

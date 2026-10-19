@@ -84,6 +84,15 @@ class WebToolsTest {
     }
 
     @Test
+    fun searchesOnlyWhenNeeded() {
+        assertTrue(chatNeedsWeb("What are the latest laptop deals?"))
+        assertTrue(chatNeedsWeb("summarize bestbuy.com for me"))
+        assertTrue(chatNeedsWeb("weather in Boston tomorrow"))
+        assertFalse(chatNeedsWeb("Write a short poem about the sea"))
+        assertFalse(chatNeedsWeb("Explain how a for loop works"))
+    }
+
+    @Test
     fun detectsSearchRequests() {
         assertTrue(looksLikeSearchRequest("search best buy laptop prices"))
         assertTrue(looksLikeSearchRequest("Can you search the web for flights to Lisbon"))

@@ -509,7 +509,7 @@ fun needsWeb(request: String): Boolean =
 private suspend fun loadModelForTask(context: Context): BuilderEngine? {
     val file = modelFile(context)
     if (!file.exists()) return null
-    val window = safeTokenWindow(context, file, savedContextTokens(context))
+    val window = safeTokenWindow(context, file, savedModelContextTokens(context, savedModelName(context)))
     return runCatching {
         if (isGgufModel(savedModelName(context))) {
             LlamaCppEngine(context, file.absolutePath, window).also { it.load() }

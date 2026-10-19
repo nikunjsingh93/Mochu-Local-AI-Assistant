@@ -110,6 +110,17 @@ fun savedContextTokens(context: Context): Int {
     }
 }
 
+/** The context window chosen for one model (by file name); the old app-wide setting is the default. */
+fun savedModelContextTokens(context: Context, modelFileName: String): Int {
+    val saved = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getInt("contextTokens_$modelFileName", -1)
+    return if (saved in CONTEXT_TOKEN_OPTIONS) saved else savedContextTokens(context)
+}
+
+fun saveModelContextTokens(context: Context, modelFileName: String, tokens: Int) {
+    val value = CONTEXT_TOKEN_OPTIONS.lastOrNull { it <= tokens } ?: CONTEXT_TOKEN_OPTIONS.first()
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putInt("contextTokens_$modelFileName", value).apply()
+}
+
 fun saveContextTokens(context: Context, tokens: Int) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         .edit()
@@ -258,4 +269,12 @@ fun savedSpeakVoiceReplies(context: Context): Boolean =
 
 fun saveSpeakVoiceReplies(context: Context, enabled: Boolean) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("speakVoiceReplies", enabled).apply()
+}
+
+/** Chat's web search switch; on by default (Chat still only searches when a question needs it). */
+fun savedWebSearchEnabled(context: Context): Boolean =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("webSearchEnabled", true)
+
+fun saveWebSearchEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("webSearchEnabled", enabled).apply()
 }

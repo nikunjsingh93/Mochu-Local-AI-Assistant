@@ -245,7 +245,11 @@ fun ChatPanel(
                 } else {
                     state.messages.forEach { msg -> MessageBubble(msg, chatFontScale, onOpenImagePreview) }
                     if (state.isBusy) {
-                        ProcessingBubble(state.status, chatFontScale)
+                        val thinking = state.streamingThinking
+                        if (thinking != null) {
+                            ThinkingSection(thinking, seconds = 0, live = state.status.startsWith("Thinking"), fontScale = chatFontScale / 1.2f)
+                        }
+                        if (thinking == null || !state.status.startsWith("Thinking")) ProcessingBubble(state.status, chatFontScale)
                     }
                 }
             }
@@ -332,6 +336,10 @@ fun MessageBubble(message: ChatMessage, chatFontScale: Float, onOpenImagePreview
                 .fillMaxWidth()
                 .padding(horizontal = 2.dp, vertical = 2.dp)
         ) {
+            if (message.thinking.isNotBlank()) {
+                ThinkingSection(message.thinking, message.thinkingSeconds, live = false, fontScale = chatFontScale / 1.2f)
+                Spacer(Modifier.height(8.dp))
+            }
             MarkdownMessageText(
                 text = message.text,
                 fontScale = chatFontScale,

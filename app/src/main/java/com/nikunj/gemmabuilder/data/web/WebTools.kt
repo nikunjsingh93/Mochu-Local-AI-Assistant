@@ -247,3 +247,16 @@ fun webResearchPrompt(request: String, pages: List<PageText>, unread: List<Searc
         append("If the sources don't contain the answer, say what's missing instead of guessing.")
     }
 }
+
+/**
+ * With web search on, Chat searches only when the question needs current information: a website,
+ * news, prices, weather, scores, or words like "latest" and "today". Other messages answer offline.
+ */
+fun chatNeedsWeb(message: String): Boolean {
+    val lower = message.lowercase()
+    val site = Regex("""(?:https?://|www\.|\b[\w-]+\.(?:com|org|net|io|ca|co|uk|dev|ai)\b)""").containsMatchIn(lower)
+    val fresh = Regex(
+        """\b(news|headlines?|weather|forecast|prices?|deals?|sales?|latest|newest|today'?s?|tonight|tomorrow'?s|current(?:ly)?|right now|this (?:week|month|year)|scores?|stocks?|who won|release date|open now|near me|reviews?|20\d\d)\b"""
+    ).containsMatchIn(lower)
+    return site || fresh || looksLikeSearchRequest(message)
+}

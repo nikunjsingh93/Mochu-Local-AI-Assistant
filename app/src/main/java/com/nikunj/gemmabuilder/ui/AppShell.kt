@@ -288,6 +288,7 @@ fun OnDeviceApp(
                         onDelete = { vm.deleteDownloadedModel(app, it) },
                         onAllowMobileDataChange = { vm.setAllowMobileDataDownloads(app, it) },
                         onImportFile = { modelPicker.launch(arrayOf("*/*")) },
+                        onContextChange = { file, tokens -> vm.setModelContextTokens(app, file, tokens) },
                         onDismiss = null
                     )
                 }
@@ -309,8 +310,6 @@ fun OnDeviceApp(
         SettingsScreen(
             chatFontScale = state.chatFontScale,
             codeFontScale = state.codeFontScale,
-            contextTokens = state.contextTokens,
-            activeContextTokens = state.contextWindowTokens,
             themeMode = themeMode,
             dynamicColor = dynamicColor,
             backendPreference = state.backendPreference,
@@ -321,7 +320,6 @@ fun OnDeviceApp(
             speakVoiceReplies = state.speakVoiceReplies,
             onChatFontScale = { vm.setChatFontScale(app, it) },
             onCodeFontScale = { vm.setCodeFontScale(app, it) },
-            onContextTokensChange = { vm.setContextTokens(app, it) },
             onThemeModeChange = onThemeModeChange,
             onDynamicColorChange = onDynamicColorChange,
             onBackendPreferenceChange = { vm.setBackendPreference(app, it) },
@@ -351,7 +349,7 @@ fun OnDeviceApp(
                 Text(
                     "When you search, your search words go to DuckDuckGo and the app loads the top pages from the internet. " +
                         "Your chats and the model stay on this phone, and web pages can only be read, never submitted to. " +
-                        "Web search only runs when you turn it on or ask to search."
+                        "Mochu only searches when a question needs current info (news, prices, weather, a website). Turn it off with the globe button."
                 )
             },
             confirmButton = { Button(onClick = { vm.answerWebConsent(app, true) }) { Text("Allow") } },

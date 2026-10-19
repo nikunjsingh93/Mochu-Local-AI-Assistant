@@ -137,6 +137,8 @@ data class BuilderUiState(
     val streamingThinkingSeconds: Int = 0,
     /** True while a model is being loaded into memory. */
     val modelLoading: Boolean = false,
+    /** Context window chosen per downloaded model (file name → tokens), for the Models page sliders. */
+    val modelContextTokens: Map<String, Int> = emptyMap(),
     /** Photos attached to the Chat message being written (absolute paths in app storage). */
     val chatImages: List<String> = emptyList(),
     /** Facts the user asked Chat to remember, added to its system prompt when [memoryEnabled]. */
@@ -151,7 +153,7 @@ data class BuilderUiState(
     /** Steps of the web research running right now, shown live above the streaming reply. */
     val liveActivity: List<ActivityStep> = emptyList(),
     /** Chat composer's "search the web" toggle. */
-    val webSearchEnabled: Boolean = false,
+    val webSearchEnabled: Boolean = true,
     /** Shows the one-time web access consent dialog. */
     val webConsentPending: Boolean = false,
     /** URL the Browser tab should open next (set by tapping a source link). */

@@ -42,6 +42,8 @@ class BuilderViewModel : ViewModel() {
     private var speaker: Speaker? = null
     /** Set by [sendVoice] so the next Chat reply is read aloud. */
     private var voiceTurnPending = false
+    /** A Chat message waiting for the web consent answer. */
+    private var sendAfterConsent = false
     private var prepared = false
     private var conversations: MutableList<ChatConversation> = mutableListOf()
     private var generationInProgress = false
@@ -89,12 +91,13 @@ class BuilderViewModel : ViewModel() {
                 modelReady = hasModel,
                 chatFontScale = savedChatFontScale(context),
                 codeFontScale = savedCodeFontScale(context),
-                contextTokens = savedContextTokens(context),
+                contextTokens = savedModelContextTokens(context, savedModelName(context)),
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
                 thinkingEnabled = savedThinkingEnabled(context),
                 memories = loadMemories(context),
                 memoryEnabled = savedMemoryEnabled(context),
+                webSearchEnabled = savedWebSearchEnabled(context),
                 speakVoiceReplies = savedSpeakVoiceReplies(context),
                 allowMobileDataDownloads = savedAllowMobileDataDownloads(context),
                 status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Download a model from the Models tab."
@@ -241,7 +244,8 @@ class BuilderViewModel : ViewModel() {
         val states = MODEL_CATALOG.associate { model ->
             model.id to (live[model.id] ?: storedDownloadState(appContext, model))
         }
-        _uiState.update { it.copy(modelDownloads = states, activeModelPath = savedActiveModelPath(appContext)) }
+        val contexts = MODEL_CATALOG.associate { it.fileName to savedModelContextTokens(appContext, it.fileName) }
+        _uiState.update { it.copy(modelDownloads = states, activeModelPath = savedActiveModelPath(appContext), modelContextTokens = contexts) }
     }
 
     /** State for a model with no download in progress, from what is on disk. */
@@ -271,10 +275,17 @@ class BuilderViewModel : ViewModel() {
         _uiState.update { it.copy(codeFontScale = scale) }
     }
 
+    /** The Models page's context slider for one model. */
+    fun setModelContextTokens(context: Context, modelFileName: String, tokens: Int) {
+        saveModelContextTokens(context, modelFileName, tokens)
+        _uiState.update { it.copy(modelContextTokens = it.modelContextTokens + (modelFileName to savedModelContextTokens(context, modelFileName))) }
+        if (modelFileName == savedModelName(context)) setContextTokens(context, savedModelContextTokens(context, modelFileName))
+    }
+
     fun setContextTokens(context: Context, tokens: Int) {
         if (tokens == uiState.value.contextTokens) return
-        saveContextTokens(context, tokens)
-        val saved = savedContextTokens(context)
+        saveModelContextTokens(context, savedModelName(context), tokens)
+        val saved = savedModelContextTokens(context, savedModelName(context))
         // The window is fixed when the model loads, so a loaded model has to be reloaded.
         val needsReload = uiState.value.gemmaLoaded
         _uiState.update {
@@ -614,10 +625,10 @@ class BuilderViewModel : ViewModel() {
         engine = DemoBuilderEngine()
         refreshContextUsage()
         sessionFingerprint = null
-        val requestedTokens = uiState.value.contextTokens
+        val requestedTokens = savedModelContextTokens(context, savedModelName(context))
         val maxNumTokens = safeTokenWindow(context, file, requestedTokens)
         activeTokenWindow = maxNumTokens
-        val windowNote = if (maxNumTokens < requestedTokens) ", ${formatTokens(maxNumTokens)}-token context to fit in memory" else ""
+        val windowNote = ""
         // Returns (where it runs, optional status note).
         val result = runCatching {
             if (isGgufModel(savedModelName(context))) {
@@ -699,6 +710,14 @@ class BuilderViewModel : ViewModel() {
         if (prompt.isBlank() || uiState.value.isBusy || generationInProgress) return
         generationInProgress = true
         if (uiState.value.activeKind == CHAT_KIND_ASSISTANT) {
+            // First web question: ask before anything goes online, then send.
+            val wantsWeb = if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) else looksLikeSearchRequest(prompt)
+            if (wantsWeb && uiState.value.chatImages.isEmpty() && !webConsentGiven(context)) {
+                generationInProgress = false
+                sendAfterConsent = true
+                _uiState.update { it.copy(webConsentPending = true) }
+                return
+            }
             generateAssistantReply(context, prompt)
             return
         }
@@ -798,6 +817,10 @@ class BuilderViewModel : ViewModel() {
                 var retryNote: String? = null
                 var editedPaths = emptySet<String>()
                 var editCount = 0
+                // Reasoning models (Bonsai, Qwen3) think first; shown live and kept with the reply.
+                var studioThinking = ""
+                val window = uiState.value.contextWindowTokens
+                val baseUsed = if (continuesSession) uiState.value.contextUsedTokens ?: 0 else 0
                 // False when the app changed the model's files (e.g. merged them), so its history is out of date.
                 var actionsMatchModel = true
                 // Edited files already existed, so they skip the "is this a complete page" check.
@@ -836,11 +859,15 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                             if (now - lastUiUpdate > 220L || output.length < 1000) {
                                 lastUiUpdate = now
                                 val streamed = output.toString()
+                                val split = splitThinking(streamed)
                                 _uiState.update {
                                     it.copy(
-                                        status = "Thinking... attempt $attempt/$maxAttempts • ${output.length} chars",
+                                        status = (if (split.stillThinking) "Thinking..." else "Writing...") + " attempt $attempt/$maxAttempts • ${output.length} chars",
                                         lastRawResponse = streamed,
-                                        streamingCode = extractStreamingCode(streamed)
+                                        streamingCode = extractStreamingCode(split.answer),
+                                        streamingThinking = split.thinking.takeIf { text -> split.stillThinking || text.isNotEmpty() },
+                                        // The meter rises while the model writes (~4 chars a token).
+                                        contextUsedTokens = window?.let { w -> (baseUsed + (attemptPrompt.length + streamed.length) / 4).coerceAtMost(w) }
                                     )
                                 }
                             }
@@ -858,6 +885,11 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         firstTokenAtMs = { firstTokenAtMs },
                         setFirstTokenAtMs = { firstTokenAtMs = it }
                     )
+                    // Parse only the answer: reasoning can mention tags like <action> that aren't actions.
+                    splitThinking(responseText).let { split ->
+                        if (split.thinking.isNotEmpty()) studioThinking = split.thinking
+                        responseText = split.answer
+                    }
                     _uiState.update {
                         it.copy(
                             status = "Checking generated file...",
@@ -912,7 +944,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 if (actions.isEmpty() && !assistantReply.isNullOrBlank()) {
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     val reply = assistantReply!!.trim()
-                    val finalMessages = uiState.value.messages + ChatMessage("assistant", reply, statsInline = metrics)
+                    val finalMessages = uiState.value.messages + ChatMessage("assistant", reply, statsInline = metrics, thinking = studioThinking)
                     persistActiveConversation(context, finalMessages)
                     sessionFingerprint = workspaceKey
                     _uiState.update {
@@ -936,7 +968,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     } else {
                         "The model stopped before finishing write actions after $maxAttempts attempts. The previous working project was kept. Try asking for a shorter complete rewrite."
                     }
-                    val finalMessages = uiState.value.messages + ChatMessage("assistant", message, statsInline = metrics)
+                    val finalMessages = uiState.value.messages + ChatMessage("assistant", message, statsInline = metrics, thinking = studioThinking)
                     persistActiveConversation(context, finalMessages)
                     engine.resetSession()
                     sessionFingerprint = null
@@ -972,7 +1004,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         null
                     }
                     val assistantText = assistantReply?.takeIf { it.isNotBlank() }?.trim() ?: if (editCount > 0) "Edited ${editedPaths.joinToString()} ($editCount change${if (editCount == 1) "" else "s"})." else "Updated preview."
-                    val assistantMessage = ChatMessage("assistant", assistantText, statsInline = metrics)
+                    val assistantMessage = ChatMessage("assistant", assistantText, statsInline = metrics, thinking = studioThinking)
                     val finalMessages = uiState.value.messages + assistantMessage
                     val preferredPath = actions.firstOrNull { it.path.equals("index.html", ignoreCase = true) }?.path
                         ?: actions.firstOrNull()?.path
@@ -1013,7 +1045,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             } finally {
                 generationInProgress = false
                 generationJob = null
-                _uiState.update { it.copy(isBusy = false) }
+                _uiState.update { it.copy(isBusy = false, streamingThinking = null) }
                 refreshContextUsage()
             }
         }
@@ -1111,7 +1143,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
                 val sessionKey = uiState.value.activeConversationId.orEmpty()
                 val useWeb = presetResearch == null && webConsentGiven(context) &&
-                    (uiState.value.webSearchEnabled || looksLikeSearchRequest(prompt))
+                    (if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) else looksLikeSearchRequest(prompt))
                 // A web turn starts a fresh session anyway; closing the old one first frees its memory
                 // while pages load in the background reader.
                 if (useWeb) engine.resetSession()
@@ -1280,6 +1312,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             _uiState.update { it.copy(webConsentPending = true) }
             return
         }
+        saveWebSearchEnabled(context, enabled)
         _uiState.update { it.copy(webSearchEnabled = enabled) }
     }
 
@@ -1287,7 +1320,13 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         if (allowed) {
             context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("webConsent", true).apply()
         }
+        saveWebSearchEnabled(context, allowed)
         _uiState.update { it.copy(webConsentPending = false, webSearchEnabled = allowed) }
+        // The message that needed the web was held back for this answer; send it now.
+        if (sendAfterConsent) {
+            sendAfterConsent = false
+            generate(context)
+        }
     }
 
     private fun webConsentGiven(context: Context): Boolean =
@@ -2058,7 +2097,7 @@ Write at most 120 words: what the user is building, requirements and preferences
     private fun refreshPredictedWindow(context: Context) {
         if (uiState.value.gemmaLoaded) return
         val file = modelFile(context)
-        val window = if (file.exists()) safeTokenWindow(context, file, uiState.value.contextTokens) else null
+        val window = if (file.exists()) safeTokenWindow(context, file, savedModelContextTokens(context, savedModelName(context))) else null
         _uiState.update { it.copy(contextWindowTokens = window) }
         refreshContextUsage()
     }

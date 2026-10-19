@@ -11,22 +11,11 @@ import java.util.Locale
 // killed by the low-memory killer, so the window is sized to the phone and corrected after a kill.
 
 /**
- * Context window to load [modelFile] with: the user's setting, limited by what this phone's RAM can
- * hold next to the model, and by any smaller limit learned from an earlier low-memory kill.
+ * Context window to load [modelFile] with: the window chosen for it on the Models page. It is only
+ * lowered after the phone actually ran out of memory with it (see [learnFromLowMemoryKill]), and then
+ * the saved choice is lowered too, so the slider always shows what is used.
  */
-fun safeTokenWindow(context: Context, modelFile: File, requested: Int): Int {
-    val modelGb = modelFile.length() / 1_000_000_000.0
-    // Measured on an 11 GB phone: Gemma 4 E4B (3.7 GB) on GPU is killed at 16K tokens but runs at 8K.
-    val headroomGb = deviceRamGb(context) - modelGb * 1.25
-    val ramCap = when {
-        headroomGb >= 9 -> 32768
-        headroomGb >= 7 -> 16384
-        headroomGb >= 4 -> 8192
-        else -> 4096
-    }
-    val learnedCap = savedLearnedTokenCap(context, modelFile.name) ?: Int.MAX_VALUE
-    return minOf(requested, ramCap, learnedCap)
-}
+fun safeTokenWindow(context: Context, modelFile: File, requested: Int): Int = requested
 
 /**
  * Version of how models use memory (precision, where the image encoder runs). Bumped when that changes,
@@ -68,7 +57,7 @@ fun learnFromLowMemoryKill(context: Context): String? {
     if (modelName.isBlank()) return null
     val newCap = maxOf(4096, window / 2)
     if (newCap < window) {
-        prefs.edit().putInt("tokenCap_$modelName", newCap).apply()
+        saveModelContextTokens(context, modelName, newCap)
         return "The phone ran out of memory running $modelName with a ${formatTokens(window)}-token context. " +
             "It will now use ${formatTokens(newCap)} tokens. Closing other apps also helps."
     }
@@ -85,10 +74,5 @@ fun tooLowOnMemoryForWebView(context: Context): Boolean {
     context.getSystemService(ActivityManager::class.java).getMemoryInfo(info)
     return info.lowMemory || info.availMem < 1_500_000_000L
 }
-
-private fun savedLearnedTokenCap(context: Context, modelName: String): Int? =
-    context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        .getInt("tokenCap_$modelName", -1)
-        .takeIf { it > 0 }
 
 fun formatTokens(tokens: Int): String = String.format(Locale.US, "%,d", tokens)

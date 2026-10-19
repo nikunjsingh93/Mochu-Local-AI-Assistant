@@ -50,6 +50,7 @@ fun ModelDownloadsScreen(
     onDelete: (String) -> Unit,
     onAllowMobileDataChange: (Boolean) -> Unit,
     onImportFile: () -> Unit,
+    onContextChange: (String, Int) -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
 ) {
@@ -134,7 +135,8 @@ fun ModelDownloadsScreen(
                     onDownload = startDownload,
                     onCancel = onCancel,
                     onUse = onUse,
-                    onDelete = { pendingDelete = it }
+                    onDelete = { pendingDelete = it },
+                    onContextChange = onContextChange
                 )
                 ModelSection(
                     title = "GGUF · llama.cpp, runs on CPU",
@@ -145,7 +147,8 @@ fun ModelDownloadsScreen(
                     onDownload = startDownload,
                     onCancel = onCancel,
                     onUse = onUse,
-                    onDelete = { pendingDelete = it }
+                    onDelete = { pendingDelete = it },
+                    onContextChange = onContextChange
                 )
             }
         }
@@ -176,7 +179,8 @@ private fun ModelSection(
     onDownload: (String) -> Unit,
     onCancel: (String) -> Unit,
     onUse: (String) -> Unit,
-    onDelete: (CatalogModel) -> Unit
+    onDelete: (CatalogModel) -> Unit,
+    onContextChange: (String, Int) -> Unit
 ) {
     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     models.forEach { model ->
@@ -187,6 +191,8 @@ private fun ModelSection(
             isActive = isActive,
             recommended = model.id == recommended,
             usage = if (isActive) state else null,
+            contextTokens = state.modelContextTokens[model.fileName],
+            onContextChange = { onContextChange(model.fileName, it) },
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
@@ -204,6 +210,8 @@ private fun ModelCard(
     isActive: Boolean,
     recommended: Boolean,
     usage: BuilderUiState?,
+    contextTokens: Int?,
+    onContextChange: (Int) -> Unit,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -236,6 +244,9 @@ private fun ModelCard(
             }
             Text(model.summary, style = MaterialTheme.typography.bodySmall)
             usage?.let { ModelUsage(it) }
+            if (download.phase == DownloadPhase.Downloaded && contextTokens != null) {
+                ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp))
+            }
             if (lowRam) {
                 Text(
                     "Needs about ${model.minRamGb} GB of RAM; it may not load on this phone.",

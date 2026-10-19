@@ -61,8 +61,6 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     chatFontScale: Float,
     codeFontScale: Float,
-    contextTokens: Int,
-    activeContextTokens: Int?,
     themeMode: String,
     dynamicColor: Boolean,
     backendPreference: String,
@@ -73,7 +71,6 @@ fun SettingsScreen(
     speakVoiceReplies: Boolean,
     onChatFontScale: (Float) -> Unit,
     onCodeFontScale: (Float) -> Unit,
-    onContextTokensChange: (Int) -> Unit,
     onThemeModeChange: (String) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
     onBackendPreferenceChange: (String) -> Unit,
@@ -216,47 +213,7 @@ fun SettingsScreen(
                         Switch(checked = dynamicColor, onCheckedChange = onDynamicColorChange)
                     }
                     HorizontalDivider()
-                    val contextOptions = CONTEXT_TOKEN_OPTIONS
-                    // Follow the thumb while dragging; save only when it's released.
-                    var draggingIndex by remember { mutableStateOf<Int?>(null) }
-                    val savedIndex = contextOptions.indexOf(contextTokens).let { if (it >= 0) it else 2 }
-                    val shownTokens = contextOptions[draggingIndex ?: savedIndex]
-                    Text("Context window: ${String.format(Locale.US, "%,d", shownTokens)} tokens")
-                    Text(
-                        if (activeContextTokens != null && activeContextTokens < shownTokens) {
-                            "The loaded model is using ${String.format(Locale.US, "%,d", activeContextTokens)} tokens so it fits in this phone's memory."
-                        } else {
-                            "How much of your project and chat the model can see at once. Bigger windows use more memory."
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    ThumbOnlySlider(
-                        value = (draggingIndex ?: savedIndex).toFloat(),
-                        onValueChange = { raw -> draggingIndex = raw.roundToInt().coerceIn(0, contextOptions.lastIndex) },
-                        onValueChangeFinished = {
-                            draggingIndex?.let { onContextTokensChange(contextOptions[it]) }
-                            draggingIndex = null
-                        },
-                        valueRange = 0f..contextOptions.lastIndex.toFloat(),
-                        steps = contextOptions.size - 2
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        contextOptions.forEach { value ->
-                            Text(
-                                text = "${value / 1024}K",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (value == shownTokens) {
-                                    MaterialTheme.colorScheme.onSurface
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                    }
+                    // The context window is set per model on the Models page.
                     Text("Chat font size: ${"%.2f".format(Locale.US, chatFontScale)}x")
                     ThumbOnlySlider(value = chatFontScale, onValueChange = onChatFontScale, valueRange = 0.8f..1.8f)
                     Text("Code font size: ${"%.2f".format(Locale.US, codeFontScale)}x")
