@@ -198,8 +198,7 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra(EXTRA_OPEN_CHAT)?.let { AppEvents.openChat.value = it }
         if (intent.getBooleanExtra(EXTRA_OPEN_TASKS, false)) AppEvents.openTasks.value = true
         intent.getStringExtra(EXTRA_RUN_TASK)?.let { id ->
-            TaskAlarms.runNow(applicationContext, id)
-            AppEvents.openTasks.value = true
+            TaskAlarms.runNow(applicationContext, id)?.let { AppEvents.openChat.value = it }
         }
         intent.removeExtra(EXTRA_OPEN_CHAT)
         intent.removeExtra(EXTRA_OPEN_TASKS)

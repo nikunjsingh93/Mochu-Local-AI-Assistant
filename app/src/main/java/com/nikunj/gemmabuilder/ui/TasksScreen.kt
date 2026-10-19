@@ -258,7 +258,8 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
                             Row {
                                 TextButton(onClick = {
                                     if (!notificationsAllowed) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    TaskAlarms.runNow(app, task.id)
+                                    // Open the task's chat right away so the answer can be watched as it comes in.
+                                    TaskAlarms.runNow(app, task.id)?.let(onOpenChat)
                                 }) {
                                     Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(4.dp))

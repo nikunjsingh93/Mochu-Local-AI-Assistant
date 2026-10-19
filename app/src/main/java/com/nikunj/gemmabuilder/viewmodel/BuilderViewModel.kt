@@ -109,6 +109,18 @@ class BuilderViewModel : ViewModel() {
         viewModelScope.launch {
             AppEvents.chatAdded.collect { reloadConversations(context) }
         }
+        // A scheduled task running for the open chat shows its steps and answer live.
+        viewModelScope.launch {
+            AppEvents.taskProgress.collect { progress ->
+                if (generationInProgress) return@collect
+                val forThisChat = progress != null && progress.chatId == uiState.value.activeConversationId
+                _uiState.update {
+                    if (forThisChat) it.copy(streamingReply = progress!!.text, liveActivity = progress.steps, status = progress.status)
+                    else if (it.streamingReply != null && !it.isBusy) it.copy(streamingReply = null, liveActivity = emptyList())
+                    else it
+                }
+            }
+        }
         // The download service lives outside this ViewModel; mirror its progress into the UI state.
         viewModelScope.launch {
             ModelDownloadTracker.states.collect { refreshModelDownloads(context) }
@@ -1488,13 +1500,22 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
     /** Re-reads chats from storage after a scheduled task saved one. */
     private fun reloadConversations(context: Context) {
         conversations = loadConversations(context).toMutableList()
-        _uiState.update { it.copy(conversations = conversationInfos()) }
+        // The open chat may be the one a task just wrote its answer to.
+        val active = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
+        _uiState.update {
+            if (active != null && !generationInProgress) it.copy(conversations = conversationInfos(), messages = active.messages)
+            else it.copy(conversations = conversationInfos())
+        }
     }
 
     /** Opens a chat a notification pointed to (a scheduled task's result). */
     fun openChatFromNotification(context: Context, id: String) {
         if (conversations.none { it.id == id }) reloadConversations(context)
         if (conversations.any { it.id == id }) selectConversation(context, id)
+        // If its task is still running, show where it is right away.
+        AppEvents.taskProgress.value?.takeIf { it.chatId == id }?.let { progress ->
+            _uiState.update { it.copy(streamingReply = progress.text, liveActivity = progress.steps) }
+        }
     }
 
     /** Speaker button on a reply: reads it aloud, or stops if it is already being read. */

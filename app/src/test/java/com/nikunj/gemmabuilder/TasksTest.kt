@@ -45,6 +45,17 @@ class TasksTest {
             TaskCommand.Assistant("Give me the latest tech news", at(20, 7), false),
             taskCommandFrom("tomorrow at 7am give me the latest tech news", now)
         )
+        // Typos and the time at the end, as typed on a phone.
+        assertEquals(
+            TaskCommand.Assistant("Summarise tech news", at(20, 8), true),
+            taskCommandFrom("summarise tech news eveyday at 8am", now)
+        )
+        assertEquals(
+            TaskCommand.Assistant("Summarize the latest tech news", at(19, 18), false),
+            taskCommandFrom("summarize the latest tech news at 6pm", now)
+        )
+        assertEquals(TaskCommand.Reminder("drink water", at(20, 9), true), taskCommandFrom("remind me everday at 9am to drink water", now))
+        assertNull(taskCommandFrom("Summarize what we discussed about every developer", now))
         assertNull(taskCommandFrom("At 10am I had a meeting about prices", now).takeIf { it !is TaskCommand.Assistant })
         assertNull(taskCommandFrom("What happened in 1969?", now))
     }

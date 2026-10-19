@@ -49,12 +49,18 @@ object AppEvents {
     val openChat = MutableStateFlow<String?>(null)
     /** A notification asked to show the Tasks screen. */
     val openTasks = MutableStateFlow(false)
+    /** The scheduled task running now, so its chat can show it live. */
+    val taskProgress = MutableStateFlow<TaskProgress?>(null)
 }
+
+/** What a running scheduled task has done so far: its steps and the answer written so far. */
+data class TaskProgress(val chatId: String, val steps: List<ActivityStep>, val text: String, val status: String)
 
 const val EXTRA_OPEN_CHAT = "com.nikunj.ondevicestudio.OPEN_CHAT"
 const val EXTRA_OPEN_TASKS = "com.nikunj.ondevicestudio.OPEN_TASKS"
 const val EXTRA_RUN_TASK = "com.nikunj.ondevicestudio.RUN_TASK"
 private const val EXTRA_TASK_ID = "taskId"
+private const val EXTRA_CHAT_ID = "chatId"
 private const val ACTION_TASK_ALARM = "com.nikunj.ondevicestudio.TASK_ALARM"
 private const val ACTION_DISMISS = "com.nikunj.ondevicestudio.DISMISS"
 
@@ -97,9 +103,33 @@ object TaskAlarms {
         }
     }
 
-    /** Runs an assistant task right away (the "Run now" button). */
-    fun runNow(context: Context, id: String) {
-        ContextCompat.startForegroundService(context, Intent(context, TaskRunnerService::class.java).putExtra(EXTRA_TASK_ID, id))
+    /**
+     * Runs an assistant task right away. Its chat is created first (with the request in it) and its id
+     * returned, so the caller can open it and watch the answer come in.
+     */
+    fun runNow(context: Context, id: String): String? {
+        val task = TaskRepository.get(context, id) ?: return null
+        val chatId = startTaskChat(context, task)
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, TaskRunnerService::class.java).putExtra(EXTRA_TASK_ID, id).putExtra(EXTRA_CHAT_ID, chatId)
+        )
+        return chatId
+    }
+
+    /** Saves a new chat holding the task's request; the runner adds the answer to it. */
+    fun startTaskChat(context: Context, task: ScheduledTask): String {
+        val now = System.currentTimeMillis()
+        val chat = ChatConversation(
+            id = UUID.randomUUID().toString(),
+            title = "⏰ ${task.text.take(50)}",
+            updatedAt = now,
+            messages = listOf(ChatMessage("user", task.text, timestamp = now)),
+            kind = CHAT_KIND_ASSISTANT
+        )
+        saveConversationFile(context, chat)
+        AppEvents.chatAdded.tryEmit(chat.id)
+        return chat.id
     }
 }
 
@@ -320,6 +350,7 @@ class TaskRunnerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val id = intent?.getStringExtra(EXTRA_TASK_ID)
         val task = id?.let { TaskRepository.get(this, it) }
+        val chatId = intent?.getStringExtra(EXTRA_CHAT_ID)
         val notification = TaskNotifications.running(this, task, "Starting…")
         startForeground(TaskNotifications.RUNNING_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         if (task == null) {
@@ -328,20 +359,27 @@ class TaskRunnerService : Service() {
         }
         pending++
         scope.launch {
-            queue.withLock { runCatching { run(task) } }
+            queue.withLock { runCatching { run(task, chatId ?: TaskAlarms.startTaskChat(applicationContext, task)) } }
+            AppEvents.taskProgress.value = null
             // Stop (and drop the "running" notification) once nothing else is queued.
             if (--pending == 0) finish()
         }
         return START_NOT_STICKY
     }
 
-    private fun progress(task: ScheduledTask, step: String) {
+    private var liveChatId = ""
+    private val liveSteps = mutableListOf<ActivityStep>()
+
+    private fun progress(task: ScheduledTask, step: String, text: String = "") {
+        AppEvents.taskProgress.value = TaskProgress(liveChatId, liveSteps.toList(), text, step)
         runCatching {
             getSystemService(NotificationManager::class.java).notify(TaskNotifications.RUNNING_ID, TaskNotifications.running(this, task, step))
         }
     }
 
-    private suspend fun run(task: ScheduledTask) {
+    private suspend fun run(task: ScheduledTask, chatId: String) {
+        liveChatId = chatId
+        liveSteps.clear()
         // Let a reply that's being written in the app finish first.
         repeat(600) { if (!EngineHolder.foregroundBusy) return@repeat; delay(1_000) }
         EngineHolder.backgroundRunning = true
@@ -350,7 +388,7 @@ class TaskRunnerService : Service() {
             progress(task, "Getting the model ready…")
             val engine = EngineHolder.loaded ?: withContext(Dispatchers.IO) { loadModelForTask(applicationContext) }
                 ?.also { ownEngine = it }
-            val steps = mutableListOf<ActivityStep>()
+            val steps = liveSteps
             val pages = mutableListOf<PageText>()
             var unread = emptyList<SearchResult>()
             var searchBlocked = false
@@ -399,9 +437,15 @@ class TaskRunnerService : Service() {
                 val prompt = if (needsWeb(task.text)) webResearchPrompt(task.text, pages, unread, 12_000) else task.text
                 val memory = if (savedMemoryEnabled(applicationContext)) memoryPromptSection(loadMemories(applicationContext)) else ""
                 val output = StringBuilder()
+                var lastUpdate = 0L
                 runCatching {
                     engine.generate("task:${task.id}", prompt, ASSISTANT_SYSTEM_PROMPT + memory).collect { chunk ->
                         output.append(chunk)
+                        val nowMs = System.currentTimeMillis()
+                        if (nowMs - lastUpdate > 150) {
+                            lastUpdate = nowMs
+                            AppEvents.taskProgress.value = TaskProgress(liveChatId, liveSteps.toList(), splitThinking(output.toString()).answer, "Writing the summary…")
+                        }
                         degenerateRepetitionStart(output)?.let { start -> output.setLength(start); throw StopGeneration("loop") }
                     }
                 }
@@ -414,17 +458,16 @@ class TaskRunnerService : Service() {
                 }.joinToString("\n")
             }
             val now = System.currentTimeMillis()
-            val chat = ChatConversation(
-                id = UUID.randomUUID().toString(),
+            val started = withContext(Dispatchers.IO) { loadConversations(applicationContext).firstOrNull { it.id == chatId } }
+            val chat = (started ?: ChatConversation(
+                id = chatId,
                 title = "⏰ ${task.text.take(50)}",
                 updatedAt = now,
-                messages = listOf(
-                    ChatMessage("user", task.text, timestamp = now - 1),
-                    ChatMessage("assistant", reply, timestamp = now, activity = steps)
-                ),
+                messages = listOf(ChatMessage("user", task.text, timestamp = now - 1)),
                 kind = CHAT_KIND_ASSISTANT
-            )
+            )).let { it.copy(updatedAt = now, messages = it.messages + ChatMessage("assistant", reply, timestamp = now, activity = steps.toList())) }
             withContext(Dispatchers.IO) { saveConversationFile(applicationContext, chat) }
+            AppEvents.taskProgress.value = null
             AppEvents.chatAdded.tryEmit(chat.id)
             TaskNotifications.result(applicationContext, task, chat.id, speakableText(reply))
             val latest = TaskRepository.get(applicationContext, task.id) ?: task

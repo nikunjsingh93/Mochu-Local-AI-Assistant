@@ -185,7 +185,8 @@ fun hostOf(url: String): String =
 
 private val searchPrefixes = listOf(
     "search the web for", "search online for", "search for", "search", "look up", "lookup",
-    "google", "find online", "browse for", "can you", "could you", "please"
+    "google", "find online", "browse for", "can you", "could you", "please",
+    "give me", "tell me", "send me", "show me", "get me", "summarize", "summarise", "check"
 )
 
 /** Turns "search for best buy laptop prices please" into a search query. */
