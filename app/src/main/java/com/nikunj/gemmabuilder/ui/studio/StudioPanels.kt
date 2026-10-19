@@ -115,6 +115,15 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -352,7 +361,7 @@ fun WorkPanel(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = modifier
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -363,47 +372,34 @@ fun WorkPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
-                        .clickable { onRefresh() },
-                    contentAlignment = Alignment.Center
-                ) { Text("↻", fontWeight = FontWeight.Bold) }
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
-                        .clickable { onToggleFullscreen() },
-                    contentAlignment = Alignment.Center
-                ) { Text("⛶", fontWeight = FontWeight.Bold) }
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
-                        .clickable { onToggleWorkPanelCollapsed() },
-                    contentAlignment = Alignment.Center
-                ) { Text(if (isLandscape) (if (state.workPanelCollapsed) "◀" else "▶") else (if (state.workPanelCollapsed) "▴" else "▾"), fontWeight = FontWeight.Bold) }
-                Box(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("Preview", "Code", "Files").forEachIndexed { index, title ->
-                            val selected = state.tab == index
-                            val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                            Text(
-                                text = title,
-                                modifier = Modifier
-                                    .background(bg, MaterialTheme.shapes.small)
-                                    .clickable { onTab(index) }
-                                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                maxLines = 1
-                            )
-                        }
+                val tabs = listOf("Preview", "Code", "Files")
+                SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+                    tabs.forEachIndexed { index, title ->
+                        SegmentedButton(
+                            selected = state.tab == index && !state.workPanelCollapsed,
+                            onClick = { onTab(index) },
+                            shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
+                            icon = {},
+                            label = { Text(title, maxLines = 1) }
+                        )
                     }
+                }
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Reload preview")
+                }
+                IconButton(onClick = onToggleFullscreen) {
+                    Icon(Icons.Rounded.Fullscreen, contentDescription = "Full screen preview")
+                }
+                IconButton(onClick = onToggleWorkPanelCollapsed) {
+                    Icon(
+                        when {
+                            isLandscape && state.workPanelCollapsed -> Icons.Rounded.ChevronLeft
+                            isLandscape -> Icons.Rounded.ChevronRight
+                            state.workPanelCollapsed -> Icons.Rounded.ExpandLess
+                            else -> Icons.Rounded.ExpandMore
+                        },
+                        contentDescription = if (state.workPanelCollapsed) "Show panel" else "Hide panel"
+                    )
                 }
             }
 

@@ -101,7 +101,7 @@ fun AssistantChatScreen(
                 .imePadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            ContextMeter(state, Modifier.padding(horizontal = 8.dp))
+            if (state.messages.isNotEmpty()) ContextMeter(state, Modifier.padding(horizontal = 8.dp))
             Composer(
                 text = state.prompt,
                 enabled = !state.isBusy,
@@ -265,11 +265,11 @@ private fun MessageList(state: BuilderUiState) {
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         items(state.messages, key = { "${it.timestamp}-${it.role}" }) { message ->
-            if (message.role == "user") UserMessage(message, state.chatFontScale) else AssistantMessage(message, state.chatFontScale)
+            if (message.role == "user") UserMessage(message, state.chatFontScale / 1.2f) else AssistantMessage(message, state.chatFontScale / 1.2f)
         }
         state.streamingReply?.let { partial ->
             item(key = "streaming") {
-                if (partial.isBlank()) ThinkingDots() else RichMarkdown(partial, state.chatFontScale * 0.9f)
+                if (partial.isBlank()) ThinkingDots() else RichMarkdown(partial, state.chatFontScale / 1.2f)
             }
         }
     }
@@ -285,7 +285,7 @@ private fun UserMessage(message: ChatMessage, fontScale: Float) {
         ) {
             Text(
                 message.text,
-                style = MaterialTheme.typography.bodyLarge.let { it.copy(fontSize = it.fontSize * fontScale * 0.9f) },
+                style = MaterialTheme.typography.bodyLarge.let { it.copy(fontSize = it.fontSize * fontScale) },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
             )
         }
@@ -296,7 +296,7 @@ private fun UserMessage(message: ChatMessage, fontScale: Float) {
 private fun AssistantMessage(message: ChatMessage, fontScale: Float) {
     val clipboard = LocalClipboardManager.current
     Column {
-        RichMarkdown(message.text, fontScale * 0.9f)
+        RichMarkdown(message.text, fontScale)
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = { clipboard.setText(AnnotatedString(message.text)) },

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.MoreVert
@@ -101,9 +102,9 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(onClick = {
+                IconButton(onClick = {
                     if (settingsSubPage != "root") settingsSubPage = "root" else onDismiss()
-                }) { Text("Back") }
+                }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
                 Spacer(Modifier.width(12.dp))
                 Text(
                     text = when (settingsSubPage) {
@@ -111,7 +112,7 @@ fun SettingsScreen(
                         "licenses" -> "Third-Party Licenses"
                         else -> "Settings"
                     },
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
             }
