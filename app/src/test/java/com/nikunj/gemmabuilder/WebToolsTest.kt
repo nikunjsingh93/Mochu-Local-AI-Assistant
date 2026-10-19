@@ -31,6 +31,17 @@ class WebToolsTest {
     }
 
     @Test
+    fun parsesLiteResultsAndSpotsBotChecks() {
+        val lite = """
+            <table><tr><td><a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.theverge.com%2Ftech" class='result-link'>The Verge Tech</a></td></tr>
+            <tr><td class='result-snippet'>Latest tech news.</td></tr></table>
+        """.trimIndent()
+        assertEquals(listOf(SearchResult("The Verge Tech", "https://www.theverge.com/tech", "Latest tech news.")), parseDuckDuckGoLiteResults(lite))
+        assertTrue(isDuckDuckGoBotCheck("<p>Unfortunately, bots use DuckDuckGo too.</p>"))
+        assertFalse(isDuckDuckGoBotCheck(lite))
+    }
+
+    @Test
     fun unwrapsRedirectLinks() {
         assertEquals("https://a.com/x?y=1", unwrapDuckDuckGoUrl("//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.com%2Fx%3Fy%3D1&amp;rut=abc"))
         assertEquals(null, unwrapDuckDuckGoUrl("javascript:alert(1)"))

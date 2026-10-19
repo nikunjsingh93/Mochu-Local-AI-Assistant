@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChatBubble
@@ -111,6 +112,25 @@ fun OnDeviceApp(
     // Browser and Models are standalone tabs; otherwise the tab follows the active chat's space.
     var pinnedTab by rememberSaveable { mutableStateOf<AppTab?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var tasksOpen by rememberSaveable { mutableStateOf(false) }
+    // Notification taps: a scheduled task's result chat, or the Tasks screen.
+    val openChat by AppEvents.openChat.collectAsState()
+    LaunchedEffect(openChat) {
+        openChat?.let { id ->
+            tasksOpen = false
+            settingsOpen = false
+            pinnedTab = null
+            vm.openChatFromNotification(app, id)
+            AppEvents.openChat.value = null
+        }
+    }
+    val openTasks by AppEvents.openTasks.collectAsState()
+    LaunchedEffect(openTasks) {
+        if (openTasks) {
+            tasksOpen = true
+            AppEvents.openTasks.value = false
+        }
+    }
     val tab = pinnedTab ?: if (state.activeKind == CHAT_KIND_STUDIO) AppTab.Studio else AppTab.Chat
     LaunchedEffect(state.browserUrl) { if (state.browserUrl != null) pinnedTab = AppTab.Browser }
     val browser = rememberSaveable(saver = BrowserSession.Saver) { BrowserSession() }
@@ -123,6 +143,10 @@ fun OnDeviceApp(
         pinnedTab = AppTab.Models
     }
 
+    // Back on a main screen sends the app to the background instead of closing it, so a model
+    // that is loading or loaded (and a reply being written) isn't thrown away. Registered first, so
+    // every other back handler below takes precedence.
+    BackHandler { (context as? android.app.Activity)?.moveTaskToBack(true) }
     BackHandler(enabled = state.previewFullscreen) { vm.togglePreviewFullscreen() }
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
     BackHandler(enabled = pinnedTab != null && !settingsOpen && tab != AppTab.Browser) { pinnedTab = null }
@@ -153,6 +177,10 @@ fun OnDeviceApp(
                 onDelete = { id -> vm.deleteConversation(app, id) },
                 onOpenSettings = {
                     settingsOpen = true
+                    scope.launch { drawerState.close() }
+                },
+                onOpenTasks = {
+                    tasksOpen = true
                     scope.launch { drawerState.close() }
                 }
             )
@@ -193,6 +221,7 @@ fun OnDeviceApp(
                         onOpenDrawer = openDrawer,
                         onNewChat = { vm.newConversation(app, CHAT_KIND_ASSISTANT) },
                         onOpenModels = openModels,
+                        onOpenTasks = { tasksOpen = true },
                         onDownloadModel = { id ->
                             vm.downloadModel(app, id)
                             openModels()
@@ -209,6 +238,9 @@ fun OnDeviceApp(
                             photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
                         onRemovePhoto = vm::removeChatImage,
+                        onVoiceSend = { vm.sendVoice(app, it) },
+                        onToggleSpeak = { vm.toggleSpeak(app, it) },
+                        onStopSpeaking = vm::stopSpeaking,
                         onOpenLink = { url -> vm.openInBrowserTab(url) },
                         onStop = vm::stopGeneration
                     )
@@ -260,6 +292,16 @@ fun OnDeviceApp(
         }
     }
 
+    if (tasksOpen) {
+        TasksScreen(
+            onOpenChat = { id ->
+                tasksOpen = false
+                pinnedTab = null
+                vm.openChatFromNotification(app, id)
+            },
+            onDismiss = { tasksOpen = false }
+        )
+    }
     if (settingsOpen) {
         SettingsScreen(
             chatFontScale = state.chatFontScale,
@@ -273,6 +315,7 @@ fun OnDeviceApp(
             thinkingEnabled = state.thinkingEnabled,
             memories = state.memories,
             memoryEnabled = state.memoryEnabled,
+            speakVoiceReplies = state.speakVoiceReplies,
             onChatFontScale = { vm.setChatFontScale(app, it) },
             onCodeFontScale = { vm.setCodeFontScale(app, it) },
             onContextTokensChange = { vm.setContextTokens(app, it) },
@@ -282,6 +325,7 @@ fun OnDeviceApp(
             onSpeculativeDecodingChange = { vm.setSpeculativeDecodingEnabled(app, it) },
             onThinkingChange = { vm.setThinkingEnabled(app, it) },
             onMemoryEnabledChange = { vm.setMemoryEnabled(app, it) },
+            onSpeakVoiceRepliesChange = { vm.setSpeakVoiceReplies(app, it) },
             onAddMemory = { vm.addMemory(app, it) },
             onDeleteMemory = { vm.deleteMemory(app, it) },
             onDismiss = { settingsOpen = false }
@@ -322,7 +366,8 @@ private fun HistoryDrawer(
     onNew: (String) -> Unit,
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenTasks: () -> Unit
 ) {
     val studio = kind == CHAT_KIND_STUDIO
     var pendingDelete by remember { mutableStateOf<ConversationInfo?>(null) }
@@ -375,6 +420,13 @@ private fun HistoryDrawer(
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            NavigationDrawerItem(
+                label = { Text("Tasks, timers & reminders") },
+                icon = { Icon(Icons.Outlined.Schedule, contentDescription = null) },
+                selected = false,
+                onClick = onOpenTasks,
+                modifier = Modifier.padding(top = 8.dp)
+            )
             NavigationDrawerItem(
                 label = { Text("Settings") },
                 icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },

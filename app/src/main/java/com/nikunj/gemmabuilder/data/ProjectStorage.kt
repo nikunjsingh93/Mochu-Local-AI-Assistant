@@ -251,3 +251,11 @@ fun savedMemoryEnabled(context: Context): Boolean =
 fun saveMemoryEnabled(context: Context, enabled: Boolean) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("memoryEnabled", enabled).apply()
 }
+
+/** Read Chat replies aloud after a message spoken with the mic; on by default. */
+fun savedSpeakVoiceReplies(context: Context): Boolean =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("speakVoiceReplies", true)
+
+fun saveSpeakVoiceReplies(context: Context, enabled: Boolean) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("speakVoiceReplies", enabled).apply()
+}

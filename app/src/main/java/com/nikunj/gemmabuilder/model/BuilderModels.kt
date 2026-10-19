@@ -142,6 +142,10 @@ data class BuilderUiState(
     /** Facts the user asked Chat to remember, added to its system prompt when [memoryEnabled]. */
     val memories: List<String> = emptyList(),
     val memoryEnabled: Boolean = true,
+    /** Reads a reply aloud automatically when the message was spoken with the mic. */
+    val speakVoiceReplies: Boolean = true,
+    /** Timestamp of the reply being read aloud, or null. */
+    val speakingMessageId: Long? = null,
     /** Lets models that support it reason before answering in Chat. */
     val thinkingEnabled: Boolean = true,
     /** Steps of the web research running right now, shown live above the streaming reply. */

@@ -33,6 +33,20 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.foundation.Image
@@ -106,12 +120,16 @@ fun AssistantChatScreen(
     onOpenDrawer: () -> Unit,
     onNewChat: () -> Unit,
     onOpenModels: () -> Unit,
+    onOpenTasks: () -> Unit,
     onDownloadModel: (String) -> Unit,
     onPromptChange: (String) -> Unit,
     onSend: () -> Unit,
     onBuildInStudio: (String) -> Unit,
     onToggleWeb: (Boolean) -> Unit,
     onAttachPhoto: () -> Unit,
+    onVoiceSend: (String) -> Unit,
+    onToggleSpeak: (ChatMessage) -> Unit,
+    onStopSpeaking: () -> Unit,
     onRemovePhoto: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onStop: () -> Unit
@@ -122,6 +140,38 @@ fun AssistantChatScreen(
             override fun openUri(uri: String) = onOpenLink(uri)
         }
     }
+    val context = LocalContext.current
+    val voice = remember { VoiceInput(context) }
+    var listening by remember { mutableStateOf(false) }
+    var micLevel by remember { mutableFloatStateOf(0f) }
+    DisposableEffect(Unit) { onDispose { voice.stop() } }
+    fun startListening() {
+        onStopSpeaking()
+        listening = true
+        voice.start(
+            onLevel = { micLevel = it },
+            onPartial = onPromptChange,
+            onFinal = { text ->
+                listening = false
+                if (text.isNotBlank()) onVoiceSend(text)
+            },
+            onError = { message ->
+                listening = false
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startListening() else Toast.makeText(context, "Allow the microphone to talk to the assistant.", Toast.LENGTH_SHORT).show()
+    }
+    val onMic: () -> Unit = {
+        when {
+            listening -> voice.finish()
+            !voice.available -> Toast.makeText(context, "This phone has no speech recognizer.", Toast.LENGTH_SHORT).show()
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED -> startListening()
+            else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
     CompositionLocalProvider(LocalUriHandler provides inAppLinks) {
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -130,6 +180,9 @@ fun AssistantChatScreen(
             },
             title = { ModelChip(state, onOpenModels) },
             actions = {
+                IconButton(onClick = onOpenTasks) {
+                    Icon(Icons.Rounded.Schedule, contentDescription = "Tasks, timers and reminders")
+                }
                 IconButton(onClick = onNewChat, enabled = !state.isBusy) {
                     Icon(Icons.Rounded.EditNote, contentDescription = "New chat")
                 }
@@ -141,7 +194,7 @@ fun AssistantChatScreen(
             if (state.messages.isEmpty() && state.streamingReply == null) {
                 WelcomeState(state, onOpenModels, onDownloadModel, onPromptChange, onSend, onBuildInStudio)
             } else {
-                MessageList(state)
+                MessageList(state, onToggleSpeak)
             }
         }
 
@@ -151,7 +204,7 @@ fun AssistantChatScreen(
                 .imePadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            if (state.messages.isNotEmpty()) ContextMeter(state, Modifier.padding(horizontal = 8.dp))
+            // Photo previews sit above the context meter, which stays right on top of the message box.
             if (state.chatImages.isNotEmpty()) {
                 Row(
                     Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -177,12 +230,14 @@ fun AssistantChatScreen(
                     }
                 }
             }
+            if (state.messages.isNotEmpty()) ContextMeter(state, Modifier.padding(horizontal = 8.dp))
             Composer(
                 text = state.prompt,
                 enabled = !state.isBusy,
                 canSend = (state.prompt.isNotBlank() || state.chatImages.isNotEmpty()) && !state.isBusy && state.modelReady,
                 placeholder = when {
                     !state.modelReady -> "Download a model to start"
+                    listening -> "Listening…"
                     state.chatImages.isNotEmpty() -> "Ask about the photo"
                     state.webSearchEnabled -> "Search the web"
                     else -> "Message"
@@ -191,6 +246,9 @@ fun AssistantChatScreen(
                 onSend = onSend,
                 busy = state.isBusy,
                 onStop = onStop,
+                onMic = if (state.modelReady) onMic else null,
+                listening = listening,
+                micLevel = micLevel,
                 leading = {
                     Row {
                         IconButton(onClick = { onToggleWeb(!state.webSearchEnabled) }, enabled = !state.isBusy) {
@@ -359,7 +417,7 @@ private fun WelcomeState(
 }
 
 @Composable
-private fun MessageList(state: BuilderUiState) {
+private fun MessageList(state: BuilderUiState, onToggleSpeak: (ChatMessage) -> Unit) {
     val listState = rememberLazyListState()
     val itemCount = state.messages.size + if (state.streamingReply != null) 1 else 0
     // Follow new text only while the user is at the bottom; scrolling up pauses it until they return.
@@ -388,7 +446,11 @@ private fun MessageList(state: BuilderUiState) {
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         items(state.messages, key = { "${it.timestamp}-${it.role}" }) { message ->
-            if (message.role == "user") UserMessage(message, state.chatFontScale / 1.2f) else AssistantMessage(message, state.chatFontScale / 1.2f)
+            if (message.role == "user") {
+                UserMessage(message, state.chatFontScale / 1.2f)
+            } else {
+                AssistantMessage(message, state.chatFontScale / 1.2f, speaking = state.speakingMessageId == message.timestamp, onToggleSpeak = { onToggleSpeak(message) })
+            }
         }
         state.streamingReply?.let { partial ->
             item(key = "streaming") {
@@ -472,7 +534,7 @@ private fun PhotoThumbnail(path: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AssistantMessage(message: ChatMessage, fontScale: Float) {
+private fun AssistantMessage(message: ChatMessage, fontScale: Float, speaking: Boolean, onToggleSpeak: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     Column {
         if (message.activity.isNotEmpty()) {
@@ -494,6 +556,14 @@ private fun AssistantMessage(message: ChatMessage, fontScale: Float) {
                     contentDescription = "Copy reply",
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onToggleSpeak, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    if (speaking) Icons.Rounded.StopCircle else Icons.AutoMirrored.Rounded.VolumeUp,
+                    contentDescription = if (speaking) "Stop reading" else "Read aloud",
+                    modifier = Modifier.size(18.dp),
+                    tint = if (speaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text(
@@ -627,7 +697,11 @@ fun Composer(
     leading: (@Composable () -> Unit)? = null,
     // While busy, the send button becomes a Stop button when [onStop] is given.
     busy: Boolean = false,
-    onStop: (() -> Unit)? = null
+    onStop: (() -> Unit)? = null,
+    // With nothing to send, the send button becomes a mic (like ChatGPT); [listening] shows it live.
+    onMic: (() -> Unit)? = null,
+    listening: Boolean = false,
+    micLevel: Float = 0f
 ) {
     Surface(
         shape = RoundedCornerShape(28.dp),
@@ -657,9 +731,16 @@ fun Composer(
                 modifier = Modifier.weight(1f)
             )
             val showStop = busy && onStop != null
+            val showMic = !showStop && onMic != null && (listening || (!canSend && text.isBlank() && enabled))
             FilledIconButton(
-                onClick = { if (showStop) onStop?.invoke() else onSend() },
-                enabled = canSend || showStop,
+                onClick = {
+                    when {
+                        showStop -> onStop?.invoke()
+                        showMic -> onMic?.invoke()
+                        else -> onSend()
+                    }
+                },
+                enabled = canSend || showStop || showMic,
                 shape = CircleShape,
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -668,9 +749,20 @@ fun Composer(
                 modifier = Modifier
                     .padding(bottom = 4.dp)
                     .size(44.dp)
+                    // The button swells with your voice while listening.
+                    .graphicsLayer {
+                        val scale = if (listening) 1f + micLevel * 0.18f else 1f
+                        scaleX = scale
+                        scaleY = scale
+                    }
             ) {
                 if (showStop) {
                     Icon(Icons.Rounded.Stop, contentDescription = "Stop")
+                } else if (showMic) {
+                    Icon(
+                        if (listening) Icons.Rounded.GraphicEq else Icons.Rounded.Mic,
+                        contentDescription = if (listening) "Stop listening" else "Talk"
+                    )
                 } else {
                     Icon(Icons.Rounded.ArrowUpward, contentDescription = "Send")
                 }

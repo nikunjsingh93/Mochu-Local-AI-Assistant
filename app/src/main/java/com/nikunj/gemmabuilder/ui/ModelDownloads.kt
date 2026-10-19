@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +54,7 @@ fun ModelDownloadsScreen(
     onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val recommendedId = remember(context) { recommendedModel(context).id }
     val ramGb = remember(context) { deviceRamGb(context) }
     var pendingDelete by remember { mutableStateOf<CatalogModel?>(null) }
     var pendingDownload by remember { mutableStateOf<String?>(null) }
@@ -128,6 +130,7 @@ fun ModelDownloadsScreen(
                     models = MODEL_CATALOG.filter { !it.isGguf },
                     state = state,
                     ramGb = ramGb,
+                    recommended = recommendedId,
                     onDownload = startDownload,
                     onCancel = onCancel,
                     onUse = onUse,
@@ -138,6 +141,7 @@ fun ModelDownloadsScreen(
                     models = MODEL_CATALOG.filter { it.isGguf },
                     state = state,
                     ramGb = ramGb,
+                    recommended = recommendedId,
                     onDownload = startDownload,
                     onCancel = onCancel,
                     onUse = onUse,
@@ -168,6 +172,7 @@ private fun ModelSection(
     models: List<CatalogModel>,
     state: BuilderUiState,
     ramGb: Double,
+    recommended: String,
     onDownload: (String) -> Unit,
     onCancel: (String) -> Unit,
     onUse: (String) -> Unit,
@@ -180,6 +185,7 @@ private fun ModelSection(
             model = model,
             download = state.modelDownloads[model.id] ?: ModelDownloadState(),
             isActive = isActive,
+            recommended = model.id == recommended,
             usage = if (isActive) state else null,
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
@@ -196,6 +202,7 @@ private fun ModelCard(
     model: CatalogModel,
     download: ModelDownloadState,
     isActive: Boolean,
+    recommended: Boolean,
     usage: BuilderUiState?,
     lowRam: Boolean,
     onDownload: () -> Unit,
@@ -209,6 +216,16 @@ private fun ModelCard(
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (recommended) {
+                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Text(
+                        "Recommended for this phone",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                    )
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(model.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Text(

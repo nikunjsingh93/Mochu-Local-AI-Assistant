@@ -183,7 +183,27 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Draw behind the status and navigation bars; screens pad themselves with window insets.
         enableEdgeToEdge()
+        handleTaskIntent(intent)
         setContent { OnDeviceRoot() }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleTaskIntent(intent)
+    }
+
+    /** Notifications from timers, reminders and scheduled tasks open a chat or the Tasks screen. */
+    private fun handleTaskIntent(intent: Intent?) {
+        intent ?: return
+        intent.getStringExtra(EXTRA_OPEN_CHAT)?.let { AppEvents.openChat.value = it }
+        if (intent.getBooleanExtra(EXTRA_OPEN_TASKS, false)) AppEvents.openTasks.value = true
+        intent.getStringExtra(EXTRA_RUN_TASK)?.let { id ->
+            TaskAlarms.runNow(applicationContext, id)
+            AppEvents.openTasks.value = true
+        }
+        intent.removeExtra(EXTRA_OPEN_CHAT)
+        intent.removeExtra(EXTRA_OPEN_TASKS)
+        intent.removeExtra(EXTRA_RUN_TASK)
     }
 }
 

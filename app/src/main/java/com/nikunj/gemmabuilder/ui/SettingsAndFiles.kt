@@ -70,6 +70,7 @@ fun SettingsScreen(
     thinkingEnabled: Boolean,
     memories: List<String>,
     memoryEnabled: Boolean,
+    speakVoiceReplies: Boolean,
     onChatFontScale: (Float) -> Unit,
     onCodeFontScale: (Float) -> Unit,
     onContextTokensChange: (Int) -> Unit,
@@ -79,6 +80,7 @@ fun SettingsScreen(
     onSpeculativeDecodingChange: (Boolean) -> Unit,
     onThinkingChange: (Boolean) -> Unit,
     onMemoryEnabledChange: (Boolean) -> Unit,
+    onSpeakVoiceRepliesChange: (Boolean) -> Unit,
     onAddMemory: (String) -> Unit,
     onDeleteMemory: (String) -> Unit,
     onDismiss: () -> Unit
@@ -304,6 +306,21 @@ fun SettingsScreen(
                             )
                         }
                         Switch(checked = thinkingEnabled, onCheckedChange = onThinkingChange)
+                    }
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Read replies aloud after voice input")
+                            Text(
+                                "When you talk with the mic, the answer is spoken back. The speaker button on any reply works either way.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = speakVoiceReplies, onCheckedChange = onSpeakVoiceRepliesChange)
                     }
                     HorizontalDivider()
                     Row(

@@ -140,10 +140,17 @@ val MODEL_CATALOG = listOf(
     )
 )
 
-/** The model to suggest first: E4B on 12 GB phones, which have the memory for it, otherwise E2B. */
+/**
+ * The model to suggest for this phone: E4B on 12 GB+ phones, E2B on 6–8 GB phones, and the small
+ * Qwen3 0.6B below that. Phones report less than they are sold with (12 GB shows as ~10.9, 6 GB as ~5.5).
+ */
 fun recommendedModel(context: Context): CatalogModel {
-    // Phones sold as 12 GB report about 10.9 GB in total.
-    val id = if (deviceRamGb(context) >= 10.5) "gemma-4-e4b-litert" else "gemma-4-e2b-litert"
+    val ram = deviceRamGb(context)
+    val id = when {
+        ram >= 10.5 -> "gemma-4-e4b-litert"
+        ram >= 5.0 -> "gemma-4-e2b-litert"
+        else -> "qwen3-0.6b-litert"
+    }
     return MODEL_CATALOG.first { it.id == id }
 }
 
