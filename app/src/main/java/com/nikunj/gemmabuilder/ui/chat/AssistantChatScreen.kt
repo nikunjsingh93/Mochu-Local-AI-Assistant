@@ -323,7 +323,14 @@ private fun MessageList(state: BuilderUiState) {
         }
     }
     LaunchedEffect(itemCount) { followBottom = true }
-    LaunchedEffect(itemCount, state.streamingReply?.length, state.liveActivity.size) {
+    // Anything that grows the reply being written: its text, reasoning, web steps, or the loading row.
+    LaunchedEffect(
+        itemCount,
+        state.streamingReply?.length,
+        state.streamingThinking?.length,
+        state.liveActivity.size,
+        state.modelLoading
+    ) {
         if (itemCount > 0 && followBottom) listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE / 2)
     }
     LazyColumn(

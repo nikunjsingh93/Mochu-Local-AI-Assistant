@@ -277,18 +277,10 @@ private fun ModelUsage(state: BuilderUiState) {
         Text("Loads when you send a message.", style = MaterialTheme.typography.labelSmall, color = muted)
         return
     }
-    val used = (state.contextUsedTokens ?: 0).coerceIn(0, window)
+    // Context use belongs to a chat, so it's shown in Chat rather than here.
     Text(
-        "Context: ${formatTokens(used)} used · ${formatTokens(window - used)} left of ${formatTokens(window)} tokens",
+        state.lastTokensPerSecond?.let { "Loaded · last reply ${String.format(Locale.US, "%.1f", it)} tokens/s" } ?: "Loaded.",
         style = MaterialTheme.typography.labelSmall,
         color = muted
     )
-    LinearProgressIndicator(progress = { used.toFloat() / window }, modifier = Modifier.fillMaxWidth())
-    state.lastTokensPerSecond?.let { speed ->
-        Text(
-            "Last reply: ${String.format(Locale.US, "%.1f", speed)} tokens/s",
-            style = MaterialTheme.typography.labelSmall,
-            color = muted
-        )
-    }
 }

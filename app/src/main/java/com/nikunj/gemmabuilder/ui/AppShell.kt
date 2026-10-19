@@ -65,12 +65,12 @@ import kotlinx.coroutines.launch
 
 private enum class AppTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     Chat("Chat", Icons.Outlined.ChatBubbleOutline, Icons.Rounded.ChatBubble),
-    Studio("Studio", Icons.Outlined.Widgets, Icons.Rounded.Widgets),
     Browser("Browser", Icons.Outlined.Language, Icons.Rounded.Language),
+    Studio("Studio", Icons.Outlined.Widgets, Icons.Rounded.Widgets),
     Models("Models", Icons.Outlined.Memory, Icons.Rounded.Memory)
 }
 
-/** Top-level layout: Chat / Studio / Models tabs, a history drawer, and full-screen overlays. */
+/** Top-level layout: Chat / Browser / Studio / Models tabs, a history drawer, and full-screen overlays. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OnDeviceApp(
