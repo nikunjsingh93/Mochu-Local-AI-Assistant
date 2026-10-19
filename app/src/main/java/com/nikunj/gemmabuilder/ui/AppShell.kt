@@ -46,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -108,6 +109,8 @@ fun OnDeviceApp(
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val tab = pinnedTab ?: if (state.activeKind == CHAT_KIND_STUDIO) AppTab.Studio else AppTab.Chat
     LaunchedEffect(state.browserUrl) { if (state.browserUrl != null) pinnedTab = AppTab.Browser }
+    val browser = rememberSaveable(saver = BrowserSession.Saver) { BrowserSession() }
+    DisposableEffect(Unit) { onDispose { browser.destroy() } }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val openDrawer: () -> Unit = { scope.launch { drawerState.open() } }
@@ -127,6 +130,8 @@ fun OnDeviceApp(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // Opens only from the menu button; a swipe can still close it.
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             HistoryDrawer(
                 state = state,
@@ -161,6 +166,7 @@ fun OnDeviceApp(
                             NavigationBarItem(
                                 selected = tab == item,
                                 onClick = {
+                                    if (item != AppTab.Browser) browser.releaseFocus()
                                     when (item) {
                                         AppTab.Models -> openModels()
                                         AppTab.Browser -> pinnedTab = AppTab.Browser
@@ -183,6 +189,10 @@ fun OnDeviceApp(
                         onOpenDrawer = openDrawer,
                         onNewChat = { vm.newConversation(app, CHAT_KIND_ASSISTANT) },
                         onOpenModels = openModels,
+                        onDownloadModel = { id ->
+                            vm.downloadModel(app, id)
+                            openModels()
+                        },
                         onPromptChange = vm::setPrompt,
                         onSend = { vm.generate(app) },
                         onBuildInStudio = { prompt ->
@@ -195,6 +205,7 @@ fun OnDeviceApp(
                         onStop = vm::stopGeneration
                     )
                     AppTab.Browser -> BrowserScreen(
+                        session = browser,
                         requestedUrl = state.browserUrl,
                         onRequestedUrlOpened = vm::consumeBrowserUrl,
                         canAsk = state.modelReady && !state.isBusy,
@@ -251,6 +262,7 @@ fun OnDeviceApp(
             dynamicColor = dynamicColor,
             backendPreference = state.backendPreference,
             speculativeDecodingEnabled = state.speculativeDecodingEnabled,
+            thinkingEnabled = state.thinkingEnabled,
             onChatFontScale = { vm.setChatFontScale(app, it) },
             onCodeFontScale = { vm.setCodeFontScale(app, it) },
             onContextTokensChange = { vm.setContextTokens(app, it) },
@@ -258,6 +270,7 @@ fun OnDeviceApp(
             onDynamicColorChange = onDynamicColorChange,
             onBackendPreferenceChange = { vm.setBackendPreference(app, it) },
             onSpeculativeDecodingChange = { vm.setSpeculativeDecodingEnabled(app, it) },
+            onThinkingChange = { vm.setThinkingEnabled(app, it) },
             onDismiss = { settingsOpen = false }
         )
     }

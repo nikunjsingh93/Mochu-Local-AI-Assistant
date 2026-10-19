@@ -40,7 +40,10 @@ data class ChatMessage(
     val attachments: List<String> = emptyList(),
     val statsInline: String? = null,
     /** What the assistant did to produce this reply (searches, pages read), shown as an activity log. */
-    val activity: List<ActivityStep> = emptyList()
+    val activity: List<ActivityStep> = emptyList(),
+    /** The model's reasoning before it answered, shown collapsed above the reply. */
+    val thinking: String = "",
+    val thinkingSeconds: Int = 0
 )
 
 /** One entry in a reply's activity log. [kind] is one of the ACTIVITY_* constants. */
@@ -128,6 +131,14 @@ data class BuilderUiState(
     val activeKind: String = CHAT_KIND_ASSISTANT,
     /** Assistant reply text streamed so far, or null when no assistant reply is being generated. */
     val streamingReply: String? = null,
+    /** Reasoning streamed so far for the reply being generated, or null when the model isn't thinking. */
+    val streamingThinking: String? = null,
+    /** How long the model thought, once it has finished thinking and started answering. */
+    val streamingThinkingSeconds: Int = 0,
+    /** True while a model is being loaded into memory. */
+    val modelLoading: Boolean = false,
+    /** Lets models that support it reason before answering in Chat. */
+    val thinkingEnabled: Boolean = true,
     /** Steps of the web research running right now, shown live above the streaming reply. */
     val liveActivity: List<ActivityStep> = emptyList(),
     /** Chat composer's "search the web" toggle. */
@@ -156,8 +167,9 @@ interface BuilderEngine {
     /**
      * Streams a reply to [message], continuing the open session for [sessionKey] if there is one.
      * A session is tied to its [systemPrompt]: Studio projects and assistant chats use different ones.
+     * With [thinking], models that can reason first stream it wrapped in <think>...</think>.
      */
-    fun generate(sessionKey: String, message: String, systemPrompt: String = BUILD_SYSTEM_PROMPT): Flow<String>
+    fun generate(sessionKey: String, message: String, systemPrompt: String = BUILD_SYSTEM_PROMPT, thinking: Boolean = false): Flow<String>
     /** Tokens left in the open session for [sessionKey], or null when no reusable session is open. */
     fun remainingTokens(sessionKey: String): Int? = null
     /** Drops the open session so the next [generate] starts a fresh conversation. */

@@ -2,6 +2,7 @@ package com.nikunj.gemmabuilder
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -19,7 +21,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -39,6 +45,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 // Markdown for assistant replies: headings, lists, quotes, rules, code blocks, and inline styles.
 
@@ -49,7 +56,68 @@ private sealed class MdBlock {
     data class Quote(val text: String) : MdBlock()
     data class Code(val language: String, val code: String) : MdBlock()
     data class Table(val rows: List<List<String>>) : MdBlock()
+    /** Text under a label like "Option 1:" (a drafted note, message, caption...), shown as a copyable card. */
+    data class Note(val label: MdBlock, val body: List<MdBlock>) : MdBlock()
     data object Rule : MdBlock()
+}
+
+/** Labels that introduce something the user will want to copy: "Option 2", "**Draft 1:**", "Version A". */
+private val noteLabelRegex = Regex("""(?i)^(option|draft|version|variation|alternative|choice|template|example|message|note|email|caption|reply)\b.{0,40}$""")
+
+private fun labelText(block: MdBlock): String? = when (block) {
+    is MdBlock.Heading -> block.text
+    // A short paragraph that is all bold, e.g. "**Option 1: Formal**" or "**Option 1:** (formal)".
+    is MdBlock.Paragraph -> block.text.takeIf { it.startsWith("**") && it.length <= 60 }
+    else -> null
+}?.replace("*", "")?.trim()?.trimEnd(':')?.trim()
+
+private fun isNoteLabel(block: MdBlock): Boolean = labelText(block)?.let { noteLabelRegex.matches(it) } == true
+
+/** Groups the paragraphs, list items and quotes after each note label into one [MdBlock.Note]. */
+private fun groupNotes(blocks: List<MdBlock>): List<MdBlock> {
+    val out = mutableListOf<MdBlock>()
+    var i = 0
+    while (i < blocks.size) {
+        val block = blocks[i]
+        if (isNoteLabel(block)) {
+            var j = i + 1
+            // Stop at the next label, or at a bold lead-in like "**Tips:**" that starts another part.
+            while (j < blocks.size && labelText(blocks[j]) == null &&
+                (blocks[j] is MdBlock.Paragraph || blocks[j] is MdBlock.ListItem || blocks[j] is MdBlock.Quote)
+            ) j++
+            if (j > i + 1) {
+                out += MdBlock.Note(block, blocks.subList(i + 1, j).toList())
+                i = j
+                continue
+            }
+        }
+        out += block
+        i++
+    }
+    return out
+}
+
+/** Text for the clipboard: Markdown markers removed, link text kept. */
+private fun plainText(markdown: String): String = markdown
+    .replace(Regex("""\[([^\]]+)]\((https?://[^)]+)\)"""), "$1")
+    .replace("**", "")
+    .replace(Regex("""(?<![\w*])[*_](\S(?:.*?\S)?)[*_](?![\w*])"""), "$1")
+    .replace("`", "")
+
+private fun blockPlainText(block: MdBlock): String = when (block) {
+    is MdBlock.Paragraph -> plainText(block.text)
+    is MdBlock.Quote -> plainText(block.text)
+    is MdBlock.ListItem -> "  ".repeat(block.indent) + (if (block.marker == "•") "-" else block.marker) + " " + plainText(block.text)
+    is MdBlock.Heading -> plainText(block.text)
+    is MdBlock.Code -> block.code
+    else -> ""
+}
+
+private fun notePlainText(blocks: List<MdBlock>): String = buildString {
+    blocks.forEachIndexed { index, block ->
+        if (index > 0) append(if (block is MdBlock.ListItem && blocks[index - 1] is MdBlock.ListItem) "\n" else "\n\n")
+        append(blockPlainText(block))
+    }
 }
 
 private val headingRegex = Regex("""^(#{1,4})\s+(.*)$""")
@@ -108,7 +176,22 @@ private fun parseBlocks(text: String): List<MdBlock> {
                 val m = orderedRegex.find(line)!!
                 blocks += MdBlock.ListItem("${m.groupValues[2]}.", m.groupValues[3], m.groupValues[1].length / 2)
             }
-            trimmed.startsWith(">") -> { flush(); blocks += MdBlock.Quote(trimmed.removePrefix(">").trim()) }
+            // Consecutive "> " lines form one quote, keeping paragraph breaks.
+            trimmed.startsWith(">") -> {
+                flush()
+                val quote = StringBuilder()
+                while (i < lines.size && lines[i].trim().startsWith(">")) {
+                    val content = lines[i].trim().removePrefix(">").trim()
+                    when {
+                        content.isEmpty() -> if (quote.isNotEmpty() && !quote.endsWith("\n\n")) quote.append("\n\n")
+                        quote.isEmpty() || quote.endsWith("\n\n") -> quote.append(content)
+                        else -> quote.append(' ').append(content)
+                    }
+                    i++
+                }
+                i--
+                if (quote.isNotBlank()) blocks += MdBlock.Quote(quote.toString().trim())
+            }
             else -> {
                 if (paragraph.isNotEmpty()) paragraph.append(' ')
                 paragraph.append(trimmed)
@@ -117,7 +200,7 @@ private fun parseBlocks(text: String): List<MdBlock> {
         i++
     }
     flush()
-    return blocks
+    return groupNotes(blocks)
 }
 
 /** Inline **bold**, *italic*, `code`, and [links](https://…). */
@@ -173,7 +256,21 @@ fun RichMarkdown(text: String, fontScale: Float, modifier: Modifier = Modifier, 
     val linkColor = MaterialTheme.colorScheme.primary
     SelectionContainer(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            blocks.forEach { block ->
+            blocks.forEach { block -> MarkdownBlock(block, body, fontScale, color, codeBackground, linkColor) }
+        }
+    }
+}
+
+@Composable
+private fun MarkdownBlock(
+    block: MdBlock,
+    body: TextStyle,
+    fontScale: Float,
+    color: Color,
+    codeBackground: Color,
+    linkColor: Color,
+    inCard: Boolean = false
+) {
                 when (block) {
                     is MdBlock.Heading -> Text(
                         inlineMarkdown(block.text, codeBackground, linkColor),
@@ -189,7 +286,15 @@ fun RichMarkdown(text: String, fontScale: Float, modifier: Modifier = Modifier, 
                         Text(block.marker, style = body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(24.dp))
                         Text(inlineMarkdown(block.text, codeBackground, linkColor), style = body, color = color)
                     }
-                    is MdBlock.Quote -> {
+                    // Inside a note card a quote is just the note's text.
+                    is MdBlock.Quote -> if (inCard) {
+                        Text(inlineMarkdown(block.text, codeBackground, linkColor), style = body, color = color)
+                    } else if (block.text.length >= 80 || block.text.contains("\n")) {
+                        // A longer quote is usually drafted text (a note, message, caption): make it copyable.
+                        CopyCard(block.text) {
+                            Text(inlineMarkdown(block.text, codeBackground, linkColor), style = body, color = color)
+                        }
+                    } else {
                         val bar = MaterialTheme.colorScheme.outline
                         Text(
                             inlineMarkdown(block.text, codeBackground, linkColor),
@@ -200,18 +305,58 @@ fun RichMarkdown(text: String, fontScale: Float, modifier: Modifier = Modifier, 
                                 .padding(start = 14.dp)
                         )
                     }
+                    is MdBlock.Note -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MarkdownBlock(block.label, body, fontScale, color, codeBackground, linkColor)
+                        CopyCard(notePlainText(block.body)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                block.body.forEach { MarkdownBlock(it, body, fontScale, color, codeBackground, linkColor, inCard = true) }
+                            }
+                        }
+                    }
                     is MdBlock.Code -> CodeBlock(block.language, block.code, body)
                     is MdBlock.Table -> MarkdownTable(block.rows, body, codeBackground, linkColor)
                     MdBlock.Rule -> HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
-            }
+}
+
+/** A card with a copy button in its top-right corner; [copyText] may contain Markdown. */
+@Composable
+private fun CopyCard(copyText: String, content: @Composable () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Box {
+            Box(Modifier.padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 48.dp)) { content() }
+            CopyButton(plainText(copyText), contentDescription = "Copy", modifier = Modifier.align(Alignment.TopEnd))
         }
+    }
+}
+
+/** Copy icon that briefly turns into a check mark after copying. */
+@Composable
+private fun CopyButton(text: String, contentDescription: String, modifier: Modifier = Modifier) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_500)
+            copied = false
+        }
+    }
+    IconButton(onClick = { clipboard.setText(AnnotatedString(text)); copied = true }, modifier = modifier) {
+        Icon(
+            if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+            contentDescription = if (copied) "Copied" else contentDescription,
+            tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
 @Composable
 private fun CodeBlock(language: String, code: String, body: TextStyle) {
-    val clipboard = LocalClipboardManager.current
     Surface(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -230,9 +375,7 @@ private fun CodeBlock(language: String, code: String, body: TextStyle) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy code", modifier = Modifier.size(18.dp))
-                }
+                CopyButton(code, contentDescription = "Copy code")
             }
             Text(
                 code,

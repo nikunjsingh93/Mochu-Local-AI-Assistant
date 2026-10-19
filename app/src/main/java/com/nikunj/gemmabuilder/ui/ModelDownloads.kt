@@ -181,7 +181,8 @@ private fun ModelSection(
             download = state.modelDownloads[model.id] ?: ModelDownloadState(),
             isActive = isActive,
             usage = if (isActive) state else null,
-            lowRam = ramGb + 0.5 < model.minRamGb,
+            // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
+            lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
             onCancel = { onCancel(model.id) },
             onUse = { onUse(model.id) },

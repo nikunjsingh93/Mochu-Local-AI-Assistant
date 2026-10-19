@@ -39,7 +39,7 @@ val MODEL_CATALOG = listOf(
         sizeBytes = 2_588_147_712,
         sha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
         minRamGb = 6,
-        summary = "Recommended. Fast on GPU with a good balance of quality and speed."
+        summary = "Recommended for most phones. Fast on the GPU and light on memory."
     ),
     CatalogModel(
         id = "gemma-4-e4b-litert",
@@ -50,8 +50,9 @@ val MODEL_CATALOG = listOf(
         fileName = "gemma-4-E4B-it.litertlm",
         sizeBytes = 3_659_530_240,
         sha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
-        minRamGb = 8,
-        summary = "Noticeably better code than E2B; slower and needs more memory."
+        // Runs at full precision on the GPU (exact numbers) and peaks around 6.5 GB.
+        minRamGb = 12,
+        summary = "Recommended for phones with 12 GB of RAM. Clearly smarter than E2B."
     ),
     CatalogModel(
         id = "qwen3-0.6b-litert",
@@ -100,8 +101,51 @@ val MODEL_CATALOG = listOf(
         sha256 = "8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52",
         minRamGb = 6,
         summary = "Gemma 4 through llama.cpp, for phones where the LiteRT build won't load."
+    ),
+    CatalogModel(
+        id = "qwen3.5-4b-gguf",
+        name = "Qwen3.5 4B",
+        engine = "GGUF",
+        repo = "unsloth/Qwen3.5-4B-GGUF",
+        revision = "e87f176479d0855a907a41277aca2f8ee7a09523",
+        fileName = "Qwen3.5-4B-Q4_0.gguf",
+        sizeBytes = 2_583_221_408,
+        sha256 = "298fcb5fe7a77ccc79745ae24751560c5ac56874caff4bb39b1f2055bd72b8bb",
+        minRamGb = 8,
+        summary = "Newer Qwen with thinking. Strong at reasoning and code; runs on the CPU."
+    ),
+    CatalogModel(
+        id = "bonsai-8b-gguf",
+        name = "Bonsai 8B (1-bit)",
+        engine = "GGUF",
+        repo = "prism-ml/Bonsai-8B-gguf",
+        revision = "48516770dd04643643e9f9019a2a349cf26c5dbd",
+        fileName = "Bonsai-8B-Q1_0.gguf",
+        sizeBytes = 1_158_654_496,
+        sha256 = "284a335aa3fb2ced3b1b01fcb40b08aa783e3b70832767f0dd2e3fdfa134bd54",
+        minRamGb = 6,
+        summary = "An 8B model squeezed to 1 bit per weight: 8B-class answers in a 1.2 GB download."
+    ),
+    CatalogModel(
+        id = "bonsai-27b-gguf",
+        name = "Bonsai 27B (1-bit)",
+        engine = "GGUF",
+        repo = "prism-ml/Bonsai-27B-gguf",
+        revision = "f10afb355f104535e3e3e98cf7ab7795c72bd292",
+        fileName = "Bonsai-27B-Q1_0.gguf",
+        sizeBytes = 3_803_452_480,
+        sha256 = "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
+        minRamGb = 12,
+        summary = "Experimental. Qwen3.6 27B at 1 bit per weight, the largest model that fits a phone. Slow on the CPU; needs a 12 GB flagship."
     )
 )
+
+/** The model to suggest first: E4B on 12 GB phones, which have the memory for it, otherwise E2B. */
+fun recommendedModel(context: Context): CatalogModel {
+    // Phones sold as 12 GB report about 10.9 GB in total.
+    val id = if (deviceRamGb(context) >= 10.5) "gemma-4-e4b-litert" else "gemma-4-e2b-litert"
+    return MODEL_CATALOG.first { it.id == id }
+}
 
 /** Downloaded models live in app-specific external storage: private to the app, no permission needed. */
 fun downloadedModelsDir(context: Context): File =

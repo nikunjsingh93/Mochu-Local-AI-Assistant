@@ -235,3 +235,11 @@ fun applyEditActions(root: File, edits: List<EditFileAction>, writes: List<Write
     }
     return EditOutcome(current.map { (path, text) -> WriteFileAction(path, text) }, count)
 }
+
+/** Chat's "think before answering" setting; on by default. */
+fun savedThinkingEnabled(context: Context): Boolean =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("thinkingEnabled", true)
+
+fun saveThinkingEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("thinkingEnabled", enabled).apply()
+}

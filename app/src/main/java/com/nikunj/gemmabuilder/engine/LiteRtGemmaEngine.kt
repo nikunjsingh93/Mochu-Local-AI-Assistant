@@ -137,6 +137,7 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ActivationDataType
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.ExperimentalApi
@@ -192,6 +193,7 @@ class LiteRtGemmaEngine(
     private var conversation: Conversation? = null
     private var conversationKey: String? = null
     private var conversationPrompt: String? = null
+    private var conversationThinking = false
     private var tokenLimit: Int? = null
     @Volatile private var lastStats: GenerationStats? = null
 
@@ -228,7 +230,10 @@ class LiteRtGemmaEngine(
                     else -> Backend.CPU()
                 },
                 maxNumTokens = attempt.maxNumTokens,
-                cacheDir = context.cacheDir.absolutePath
+                cacheDir = context.cacheDir.absolutePath,
+                // Half-precision GPU activations garble digits in long prompts (a web page summary
+                // turned "June 16, 2026" into "June6, 2, 026"); full precision keeps them exact.
+                activationDataType = if (attempt.backend == "gpu") ActivationDataType.FLOAT32 else null
             )
             val candidate = Engine(config)
             val result = runCatching {
@@ -255,7 +260,7 @@ class LiteRtGemmaEngine(
         throw firstError ?: IllegalStateException("Model load failed.")
     }
 
-    private fun newConversationConfig(systemPrompt: String) = ConversationConfig(
+    private fun newConversationConfig(systemPrompt: String, thinking: Boolean) = ConversationConfig(
         systemInstruction = Contents.of(systemPrompt),
         samplerConfig = SamplerConfig(
             topK = 20,
@@ -264,22 +269,25 @@ class LiteRtGemmaEngine(
         ),
         // Leave the other half of the window for the prompt and earlier turns.
         maxOutputToken = tokenLimit?.let { it / 2 },
-        // Thinking models (e.g. Qwen3) otherwise spend the output budget in a hidden reasoning
-        // channel the app never shows, which looks like a stuck "0 chars" generation.
-        thinkingConfig = ThinkingConfig(enableThinking = false)
+        // Reasoning streams on its own channel, which generate() passes on as <think>...</think>.
+        // Studio turns it off: its file-writing replies are long enough already.
+        thinkingConfig = ThinkingConfig(enableThinking = thinking)
     )
 
-    override fun generate(sessionKey: String, message: String, systemPrompt: String): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean): Flow<String> = flow {
         val loadedEngine = engine ?: run {
             emit("Model is not loaded.")
             return@flow
         }
-        val active = conversation?.takeIf { conversationKey == sessionKey && conversationPrompt == systemPrompt && it.isAlive } ?: run {
+        val active = conversation?.takeIf {
+            conversationKey == sessionKey && conversationPrompt == systemPrompt && conversationThinking == thinking && it.isAlive
+        } ?: run {
             resetSession()
-            loadedEngine.createConversation(newConversationConfig(systemPrompt)).also {
+            loadedEngine.createConversation(newConversationConfig(systemPrompt, thinking)).also {
                 conversation = it
                 conversationKey = sessionKey
                 conversationPrompt = systemPrompt
+                conversationThinking = thinking
             }
         }
         var finished = false
@@ -287,10 +295,23 @@ class LiteRtGemmaEngine(
         var firstChunkAt = 0L
         lastStats = null
         try {
+            var inThought = false
             active.sendMessageAsync(message).collect { token ->
                 if (chunks++ == 0) firstChunkAt = System.nanoTime()
-                emit(token.toString())
+                val thought = token.channels.values.joinToString("")
+                if (thought.isNotEmpty()) {
+                    if (!inThought) emit("<think>")
+                    inThought = true
+                    emit(thought)
+                }
+                val text = token.toString()
+                if (text.isNotEmpty()) {
+                    if (inThought) emit("</think>")
+                    inThought = false
+                    emit(text)
+                }
             }
+            if (inThought) emit("</think>")
             finished = true
             @OptIn(ExperimentalApi::class)
             val benchmark = runCatching { active.getBenchmarkInfo() }.getOrNull()
@@ -343,7 +364,7 @@ class MediaPipeMultimodalEngine(
 }
 
 class DemoBuilderEngine : BuilderEngine {
-    override fun generate(sessionKey: String, message: String, systemPrompt: String): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean): Flow<String> = flow {
         val lower = message.lowercase(Locale.US)
         val html = when {
             "calculator" in lower -> calculatorHtml()

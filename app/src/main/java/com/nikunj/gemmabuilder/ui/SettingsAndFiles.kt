@@ -62,6 +62,7 @@ fun SettingsScreen(
     dynamicColor: Boolean,
     backendPreference: String,
     speculativeDecodingEnabled: Boolean,
+    thinkingEnabled: Boolean,
     onChatFontScale: (Float) -> Unit,
     onCodeFontScale: (Float) -> Unit,
     onContextTokensChange: (Int) -> Unit,
@@ -69,6 +70,7 @@ fun SettingsScreen(
     onDynamicColorChange: (Boolean) -> Unit,
     onBackendPreferenceChange: (String) -> Unit,
     onSpeculativeDecodingChange: (Boolean) -> Unit,
+    onThinkingChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var settingsSubPage by rememberSaveable { mutableStateOf("root") }
@@ -274,6 +276,21 @@ fun SettingsScreen(
                             checked = speculativeDecodingEnabled,
                             onCheckedChange = onSpeculativeDecodingChange
                         )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Think before answering")
+                            Text(
+                                "Models that support it reason first in Chat. Better answers, slower replies.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = thinkingEnabled, onCheckedChange = onThinkingChange)
                     }
                     HorizontalDivider()
                     OutlinedButton(onClick = { settingsSubPage = "privacy" }) {

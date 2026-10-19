@@ -73,7 +73,8 @@ class LlamaCppEngine(
         description = "${LlamaCppNative.nativeDescribe(loaded)} · $cpuLabel"
     }
 
-    override fun generate(sessionKey: String, message: String, systemPrompt: String): Flow<String> = flow {
+    // Reasoning models here (Qwen3, Bonsai) write <think>...</think> into the text themselves.
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean): Flow<String> = flow {
         val h = handle
         if (h == 0L) {
             emit("Model is not loaded.")

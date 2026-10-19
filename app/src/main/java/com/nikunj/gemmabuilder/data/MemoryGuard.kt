@@ -45,7 +45,11 @@ fun learnFromLowMemoryKill(context: Context): String? {
     val last = runCatching { manager.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull() }
         .getOrNull() ?: return null
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    if (last.reason != ApplicationExitInfo.REASON_LOW_MEMORY) return null
+    // Some phones (Samsung) report a low-memory kill of the app on screen as a plain SIGKILL.
+    val totalKb = deviceRamGb(context) * 1_048_576
+    val killedOnScreenForMemory = last.reason == ApplicationExitInfo.REASON_SIGNALED && last.status == 9 &&
+        last.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE && last.rss > totalKb * 0.4
+    if (last.reason != ApplicationExitInfo.REASON_LOW_MEMORY && !killedOnScreenForMemory) return null
     if (last.timestamp <= prefs.getLong("lastHandledExitTimestamp", 0L)) return null
     prefs.edit().putLong("lastHandledExitTimestamp", last.timestamp).apply()
 
@@ -61,6 +65,16 @@ fun learnFromLowMemoryKill(context: Context): String? {
     }
     return "The phone ran out of memory running $modelName even at ${formatTokens(window)} tokens. " +
         "Try closing other apps or a smaller model."
+}
+
+/**
+ * True when opening a full web page in a WebView (often several hundred MB for big shops) could push
+ * the phone into killing the app, which already holds the model.
+ */
+fun tooLowOnMemoryForWebView(context: Context): Boolean {
+    val info = ActivityManager.MemoryInfo()
+    context.getSystemService(ActivityManager::class.java).getMemoryInfo(info)
+    return info.lowMemory || info.availMem < 1_500_000_000L
 }
 
 private fun savedLearnedTokenCap(context: Context, modelName: String): Int? =

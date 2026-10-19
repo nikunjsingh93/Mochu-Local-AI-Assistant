@@ -75,6 +75,7 @@ class BuilderViewModel : ViewModel() {
                 contextTokens = savedContextTokens(context),
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
+                thinkingEnabled = savedThinkingEnabled(context),
                 allowMobileDataDownloads = savedAllowMobileDataDownloads(context),
                 status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Download a model from the Models tab."
             )
@@ -145,7 +146,7 @@ class BuilderViewModel : ViewModel() {
         }
         engine.close()
         engine = DemoBuilderEngine()
-        _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
+        refreshContextUsage()
         sessionFingerprint = null
         saveModelName(appContext, model.fileName)
         saveActiveModelPath(appContext, file.absolutePath)
@@ -176,7 +177,7 @@ class BuilderViewModel : ViewModel() {
             }
             engine.close()
             engine = DemoBuilderEngine()
-            _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
+            refreshContextUsage()
             sessionFingerprint = null
             saveActiveModelPath(appContext, null)
             saveModelName(appContext, "")
@@ -269,6 +270,11 @@ class BuilderViewModel : ViewModel() {
         }
     }
 
+    fun setThinkingEnabled(context: Context, enabled: Boolean) {
+        saveThinkingEnabled(context, enabled)
+        _uiState.update { it.copy(thinkingEnabled = enabled) }
+    }
+
     fun setSpeculativeDecodingEnabled(context: Context, enabled: Boolean) {
         saveSpeculativeDecodingEnabled(context, enabled)
         _uiState.update {
@@ -332,6 +338,7 @@ class BuilderViewModel : ViewModel() {
                 status = "Opened ${conv.title}."
             )
         }
+        refreshContextUsage()
     }
 
     fun deleteConversation(context: Context, id: String) {
@@ -372,6 +379,7 @@ class BuilderViewModel : ViewModel() {
                 status = "Deleted ${deleted.title}."
             )
         }
+        refreshContextUsage()
     }
 
     fun setPrompt(prompt: String) {
@@ -454,7 +462,7 @@ class BuilderViewModel : ViewModel() {
             // The loaded engine may be memory-mapping the file we are about to overwrite or delete.
             engine.close()
             engine = DemoBuilderEngine()
-            _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
+            refreshContextUsage()
             sessionFingerprint = null
             val result = runCatching {
                 withContext(Dispatchers.IO) {
@@ -563,11 +571,11 @@ class BuilderViewModel : ViewModel() {
             _uiState.update { it.copy(isBusy = false, status = "Import a .litertlm or .gguf model from the ⋮ menu first.") }
             return false
         }
-        _uiState.update { it.copy(isBusy = true, status = "Loading model. First load can take several seconds...") }
+        _uiState.update { it.copy(isBusy = true, modelLoading = true, status = "Loading model. First load can take several seconds...") }
         // Free the previous model before loading the next so two copies never sit in RAM/GPU memory.
         engine.close()
         engine = DemoBuilderEngine()
-        _uiState.update { it.copy(contextUsedTokens = it.contextWindowTokens?.let { 0 }) }
+        refreshContextUsage()
         sessionFingerprint = null
         val requestedTokens = uiState.value.contextTokens
         val maxNumTokens = safeTokenWindow(context, file, requestedTokens)
@@ -595,6 +603,7 @@ class BuilderViewModel : ViewModel() {
             }
         }
         if (result.isSuccess) recordLoadedModel(context, file, maxNumTokens)
+        _uiState.update { it.copy(modelLoading = false) }
         _uiState.update {
             val loaded = result.getOrNull()
             if (loaded != null) {
@@ -609,7 +618,7 @@ class BuilderViewModel : ViewModel() {
                     activeRoutingMode = "text",
                     status = "${savedModelName(context)} loaded on $backendLabel$note$windowNote. Sending message...",
                     contextWindowTokens = maxNumTokens,
-                    contextUsedTokens = 0
+                    contextUsedTokens = estimatedHistoryTokens().coerceAtMost(maxNumTokens)
                 )
             } else {
                 it.copy(
@@ -983,8 +992,6 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
                     return@launch
                 }
-                if (!uiState.value.gemmaLoaded && !loadGemmaInternal(context.applicationContext)) return@launch
-
                 val pendingMessages = uiState.value.messages + ChatMessage("user", prompt)
                 _uiState.update {
                     it.copy(
@@ -993,10 +1000,21 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         status = "Thinking...",
                         messages = pendingMessages,
                         streamingReply = "",
+                        streamingThinking = null,
                         generationMetrics = null
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
+                // Load after the message is on screen, so the chat can show "Loading model" under it.
+                if (!uiState.value.gemmaLoaded) {
+                    if (!loadGemmaInternal(context.applicationContext)) {
+                        val failed = pendingMessages + ChatMessage("assistant", "_${uiState.value.status}_")
+                        persistActiveConversation(context, failed)
+                        _uiState.update { it.copy(messages = failed) }
+                        return@launch
+                    }
+                    _uiState.update { it.copy(isBusy = true, status = "Thinking...") }
+                }
                 turnOutputTokens = 0
                 turnDecodeSeconds = 0.0
                 val startedAtMs = System.currentTimeMillis()
@@ -1005,6 +1023,9 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 val sessionKey = uiState.value.activeConversationId.orEmpty()
                 val useWeb = presetResearch == null && webConsentGiven(context) &&
                     (uiState.value.webSearchEnabled || looksLikeSearchRequest(prompt))
+                // A web turn starts a fresh session anyway; closing the old one first frees its memory
+                // while pages load in the background reader.
+                if (useWeb) engine.resetSession()
                 val research = presetResearch ?: if (useWeb) runWebResearch(context, prompt) else null
                 val message = when {
                     // Web sources are large, so a web turn always starts a fresh session with short history.
@@ -1021,33 +1042,59 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         buildAssistantSnapshot(pendingMessages)
                     }
                 }
-                _uiState.update { it.copy(status = "Writing...") }
+                // The meter rises as the turn runs: the session's earlier tokens (if it continues),
+                // this turn's prompt (web sources included), then the reply (~4 chars a token).
+                val sessionContinues = engine.remainingTokens(sessionKey) != null
+                val turnBaseTokens = (if (sessionContinues) uiState.value.contextUsedTokens ?: 0 else 0) + message.length / 4
+                val window = uiState.value.contextWindowTokens
+                _uiState.update { it.copy(status = "Writing...", contextUsedTokens = window?.let { w -> turnBaseTokens.coerceAtMost(w) }) }
 
                 val output = StringBuilder()
                 var lastUiUpdate = 0L
+                // When reasoning started and ended, for the "Thought for 12s" label.
+                var thinkingStartedAtMs = 0L
+                var thinkingEndedAtMs = 0L
                 val result = runCatching {
-                    engine.generate(sessionKey, message, ASSISTANT_SYSTEM_PROMPT)
+                    engine.generate(sessionKey, message, ASSISTANT_SYSTEM_PROMPT, thinking = uiState.value.thinkingEnabled)
                         .onCompletion { absorbGenerationStats() }
                         .collect { chunk ->
-                            if (firstTokenAtMs == null && chunk.isNotBlank()) firstTokenAtMs = System.currentTimeMillis()
+                            val now = System.currentTimeMillis()
+                            if (firstTokenAtMs == null && chunk.isNotBlank()) firstTokenAtMs = now
+                            if (thinkingStartedAtMs == 0L && "<think>" in chunk) thinkingStartedAtMs = now
+                            if (thinkingEndedAtMs == 0L && "</think>" in chunk) {
+                                thinkingEndedAtMs = now
+                                if (thinkingStartedAtMs == 0L) thinkingStartedAtMs = startedAtMs
+                            }
                             output.append(chunk)
                             if (stopRequested) throw StopGeneration("Stopped.")
                             degenerateRepetitionStart(output)?.let { start ->
                                 output.setLength(start)
                                 throw StopGeneration("Stopped because the model started repeating itself.")
                             }
-                            val now = System.currentTimeMillis()
                             if (now - lastUiUpdate > 80L) {
                                 lastUiUpdate = now
-                                val text = output.toString()
-                                _uiState.update { it.copy(streamingReply = text, status = "Writing...") }
+                                val split = splitThinking(output.toString())
+                                _uiState.update {
+                                    it.copy(
+                                        streamingReply = split.answer,
+                                        streamingThinking = split.thinking.takeIf { text -> split.stillThinking || text.isNotEmpty() },
+                                        streamingThinkingSeconds = if (thinkingEndedAtMs > 0) ((thinkingEndedAtMs - thinkingStartedAtMs) / 1000).toInt() else 0,
+                                        contextUsedTokens = window?.let { w -> (turnBaseTokens + output.length / 4).coerceAtMost(w) },
+                                        status = if (split.stillThinking) "Thinking..." else "Writing..."
+                                    )
+                                }
                             }
                         }
                 }
 
                 // Stopping early still keeps what was written; the session is reset by the engine.
                 val stopNote = (result.exceptionOrNull() as? StopGeneration)?.reason
-                val reply = output.toString().trim().let { if (stopNote != null && it.isNotBlank()) "$it\n\n_${stopNote}_" else it }
+                val split = splitThinking(output.toString())
+                val thinkingSeconds = when {
+                    split.thinking.isEmpty() || thinkingStartedAtMs == 0L -> 0
+                    else -> (((if (thinkingEndedAtMs > 0) thinkingEndedAtMs else System.currentTimeMillis()) - thinkingStartedAtMs) / 1000).toInt()
+                }
+                val reply = split.answer.trim().let { if (stopNote != null && it.isNotBlank()) "$it\n\n_${stopNote}_" else it }
                 val text = when {
                     reply.isNotBlank() -> reply
                     stopNote != null -> "_${stopNote}_"
@@ -1077,7 +1124,14 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 }
                 val metrics = buildGenerationMetrics(startedAtMs, firstTokenAtMs)
                 val finalMessages = uiState.value.messages +
-                    ChatMessage("assistant", withSources, statsInline = metrics, activity = research?.steps.orEmpty())
+                    ChatMessage(
+                        "assistant",
+                        withSources,
+                        statsInline = metrics,
+                        activity = research?.steps.orEmpty(),
+                        thinking = split.thinking,
+                        thinkingSeconds = thinkingSeconds
+                    )
                 persistActiveConversation(context, finalMessages)
                 _uiState.update {
                     it.copy(
@@ -1085,6 +1139,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         status = "Answered.",
                         messages = finalMessages,
                         streamingReply = null,
+                        streamingThinking = null,
                         liveActivity = emptyList(),
                         generationMetrics = metrics
                     )
@@ -1092,7 +1147,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             } finally {
                 generationInProgress = false
                 generationJob = null
-                _uiState.update { it.copy(isBusy = false, streamingReply = null, liveActivity = emptyList()) }
+                _uiState.update { it.copy(isBusy = false, streamingReply = null, streamingThinking = null, liveActivity = emptyList()) }
                 refreshContextUsage()
             }
         }
@@ -1164,15 +1219,21 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         )
 
         val pages = mutableListOf<PageText>()
+        val skippedHosts = mutableSetOf<String>()
         for (result in results) {
             if (pages.size >= MAX_WEB_PAGES || stopRequested) break
             val host = hostOf(result.url)
-            if (pages.any { hostOf(it.url) == host }) continue
+            if (pages.any { hostOf(it.url) == host } || host in skippedHosts) continue
             show(ActivityStep(ACTIVITY_READ, "Reading $host", result.url))
             // Direct fetch first (fast); fall back to a real browser engine for JS-heavy or picky sites.
             val direct = withContext(Dispatchers.IO) { fetchPageText(result.url) }
-            val page = direct?.takeIf { it.text.length >= 600 && !looksBlocked(it) }
-                ?: readWithWebView(context, result.url)
+            val usable = direct?.takeIf { it.text.length >= 600 && !looksBlocked(it) }
+            if (usable == null && tooLowOnMemoryForWebView(context)) {
+                show(ActivityStep(ACTIVITY_SKIP, "Skipped $host to save memory", result.url), replaceLast = true)
+                skippedHosts += host
+                continue
+            }
+            val page = usable ?: readWithWebView(context, result.url)
             if (page == null || page.text.length < 200 || looksBlocked(page)) {
                 show(ActivityStep(ACTIVITY_SKIP, "Couldn't read $host", result.url), replaceLast = true)
                 continue
@@ -1206,10 +1267,15 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             if (pages.isEmpty() && unread.isEmpty()) append("No web sources could be loaded.\n\n")
             append("User's request: $request\n\n")
             append("Reply in Markdown: one or two sentences answering directly, then details. ")
-            // Small models garble long tables (wrong digits, endless "|" rows), so ask for a short list.
-            append("When listing products or prices, use a bulleted list of at most 6 items in the form ")
-            append("\"**Name**: price — one key detail [n]\", copying names and prices exactly as written in the sources. ")
-            append("Never invent or round numbers. Cite sources like [1]. ")
+            // Shopping rules only for shopping questions; otherwise the model talks about "no prices found".
+            if (Regex("""(?i)\b(price|prices|deal|deals|cost|buy|cheap|sale|\$)""").containsMatchIn(request)) {
+                // Small models garble long tables (wrong digits, endless "|" rows), so ask for a short list.
+                append("When listing products or prices, use a bulleted list of at most 6 items in the form ")
+                append("\"**Name**: price — one key detail [n]\", copying names and prices exactly as written in the sources. ")
+            } else {
+                append("Use a short bulleted list for the key points. ")
+            }
+            append("Copy names, dates and numbers exactly as written in the sources; never invent or round them. Cite sources like [1]. ")
             append("If the sources don't contain the answer, say what's missing instead of guessing.")
         }
     }
@@ -1749,15 +1815,30 @@ Write at most 120 words: what the user is building, requirements and preferences
         if (uiState.value.gemmaLoaded) return
         val file = modelFile(context)
         val window = if (file.exists()) safeTokenWindow(context, file, uiState.value.contextTokens) else null
-        _uiState.update { it.copy(contextWindowTokens = window, contextUsedTokens = window?.let { 0 }) }
+        _uiState.update { it.copy(contextWindowTokens = window) }
+        refreshContextUsage()
     }
 
-    /** How much of the loaded model's window the active chat's session currently holds. */
+    /**
+     * How much of the window the active chat uses: what its open session holds, or, with no session
+     * (app restarted, model reloaded, another chat in use), an estimate of the history it will resend.
+     */
     private fun refreshContextUsage() {
         val window = uiState.value.contextWindowTokens ?: return
         val sessionKey = uiState.value.activeConversationId.orEmpty()
-        val used = engine.remainingTokens(sessionKey)?.let { (window - it).coerceIn(0, window) } ?: 0
-        _uiState.update { it.copy(contextUsedTokens = used) }
+        val used = engine.remainingTokens(sessionKey)?.let { window - it } ?: estimatedHistoryTokens()
+        _uiState.update { it.copy(contextUsedTokens = used.coerceIn(0, window)) }
+    }
+
+    /** Rough tokens the active chat's history takes when it's sent to a fresh session (~4 chars a token). */
+    private fun estimatedHistoryTokens(): Int {
+        val messages = uiState.value.messages
+        if (messages.isEmpty()) return 0
+        val conversation = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
+        val summarized = conversation?.summarizedCount?.coerceAtMost(messages.size) ?: 0
+        val summaryChars = if (summarized > 0) conversation?.summary.orEmpty().length else 0
+        val historyChars = messages.drop(summarized).takeLast(RECENT_MESSAGES_KEPT).sumOf { it.text.take(2000).length }
+        return (summaryChars + historyChars) / 4
     }
 
     private fun conversationInfos(): List<ConversationInfo> = conversations

@@ -45,7 +45,7 @@ fun readConversationFile(file: File): ChatConversation {
             line.startsWith("kind\t") -> kind = line.substringAfter("kind\t").ifBlank { CHAT_KIND_STUDIO }
             line.startsWith("summarized\t") -> summarizedCount = line.substringAfter("summarized\t").toIntOrNull() ?: 0
             line.startsWith("msg	") -> {
-                val parts = line.split("	", limit = 7)
+                val parts = line.split("	", limit = 8)
                 when {
                     parts.size >= 5 -> {
                         val attachments = decodeText(parts[4])
@@ -53,6 +53,7 @@ fun readConversationFile(file: File): ChatConversation {
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
                         val statsInline = parts.getOrNull(5)?.let(::decodeText)?.takeIf { it.isNotBlank() }
+                        val thinking = parts.getOrNull(7)?.let(::decodeText).orEmpty()
                         messages.add(
                             ChatMessage(
                                 role = parts[1],
@@ -60,7 +61,10 @@ fun readConversationFile(file: File): ChatConversation {
                                 timestamp = parts[2].toLongOrNull() ?: updatedAt,
                                 attachments = attachments,
                                 statsInline = statsInline,
-                                activity = parts.getOrNull(6)?.let { decodeActivity(decodeText(it)) }.orEmpty()
+                                activity = parts.getOrNull(6)?.let { decodeActivity(decodeText(it)) }.orEmpty(),
+                                // Stored as "<seconds><unit separator><text>".
+                                thinking = thinking.substringAfter(FIELD_SEP, ""),
+                                thinkingSeconds = thinking.substringBefore(FIELD_SEP, "").toIntOrNull() ?: 0
                             )
                         )
                     }
@@ -97,7 +101,8 @@ fun saveConversationFile(context: Context, conversation: ChatConversation) {
             val attachmentsEncoded = encodeText(msg.attachments.joinToString("|"))
             val statsEncoded = encodeText(msg.statsInline.orEmpty())
             val activityEncoded = encodeText(encodeActivity(msg.activity))
-            appendLine("msg\t${msg.role}\t${msg.timestamp}\t${encodeText(msg.text)}\t$attachmentsEncoded\t$statsEncoded\t$activityEncoded")
+            val thinkingEncoded = if (msg.thinking.isBlank()) "" else encodeText("${msg.thinkingSeconds}$FIELD_SEP${msg.thinking}")
+            appendLine("msg\t${msg.role}\t${msg.timestamp}\t${encodeText(msg.text)}\t$attachmentsEncoded\t$statsEncoded\t$activityEncoded\t$thinkingEncoded")
         }
     }
     file.writeText(text)

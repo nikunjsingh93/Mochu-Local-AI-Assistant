@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.ArrowUpward
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -60,6 +63,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
@@ -67,8 +71,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -88,6 +95,7 @@ fun AssistantChatScreen(
     onOpenDrawer: () -> Unit,
     onNewChat: () -> Unit,
     onOpenModels: () -> Unit,
+    onDownloadModel: (String) -> Unit,
     onPromptChange: (String) -> Unit,
     onSend: () -> Unit,
     onBuildInStudio: (String) -> Unit,
@@ -118,7 +126,7 @@ fun AssistantChatScreen(
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (state.messages.isEmpty() && state.streamingReply == null) {
-                WelcomeState(state, onOpenModels, onPromptChange, onSend, onBuildInStudio)
+                WelcomeState(state, onOpenModels, onDownloadModel, onPromptChange, onSend, onBuildInStudio)
             } else {
                 MessageList(state)
             }
@@ -209,10 +217,13 @@ private val SUGGESTIONS = listOf(
 private fun WelcomeState(
     state: BuilderUiState,
     onOpenModels: () -> Unit,
+    onDownloadModel: (String) -> Unit,
     onPromptChange: (String) -> Unit,
     onSend: () -> Unit,
     onBuildInStudio: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val recommended = remember { recommendedModel(context) }
     Column(
         Modifier
             .fillMaxSize()
@@ -248,16 +259,19 @@ private fun WelcomeState(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Recommended: Gemma 4 E2B", style = MaterialTheme.typography.titleMedium)
+                    Text("Recommended for your phone: ${recommended.name}", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "2.6 GB · fast on most phones · runs on the GPU",
+                        "${formatBytes(recommended.sizeBytes)} · ${recommended.summary}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                     )
-                    Button(onClick = onOpenModels) {
-                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(8.dp))
-                        Text("Get a model")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { onDownloadModel(recommended.id) }) {
+                            Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text("Download")
+                        }
+                        TextButton(onClick = onOpenModels) { Text("Other models") }
                     }
                 }
             }
@@ -325,7 +339,14 @@ private fun MessageList(state: BuilderUiState) {
             item(key = "streaming") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (state.liveActivity.isNotEmpty()) ActivityLog(state.liveActivity, live = partial.isBlank())
-                    if (partial.isBlank()) ThinkingDots() else RichMarkdown(partial, state.chatFontScale / 1.2f)
+                    state.streamingThinking?.let { thinking ->
+                        ThinkingSection(thinking, state.streamingThinkingSeconds, live = partial.isBlank(), fontScale = state.chatFontScale / 1.2f)
+                    }
+                    when {
+                        state.modelLoading -> LoadingModelRow(modelDisplayName(state.modelName))
+                        partial.isNotBlank() -> RichMarkdown(partial, state.chatFontScale / 1.2f)
+                        state.streamingThinking == null -> ThinkingDots()
+                    }
                 }
             }
         }
@@ -334,11 +355,25 @@ private fun MessageList(state: BuilderUiState) {
 
 @Composable
 private fun UserMessage(message: ChatMessage, fontScale: Float) {
+    val clipboard = LocalClipboardManager.current
+    val haptics = LocalHapticFeedback.current
+    val shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp)
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         Surface(
-            shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp),
+            shape = shape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.widthIn(max = 320.dp)
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .clip(shape)
+                // Press and hold to copy the message.
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        clipboard.setText(AnnotatedString(message.text))
+                    },
+                    onLongClickLabel = "Copy message"
+                )
         ) {
             Text(
                 message.text,
@@ -355,6 +390,10 @@ private fun AssistantMessage(message: ChatMessage, fontScale: Float) {
     Column {
         if (message.activity.isNotEmpty()) {
             ActivityLog(message.activity, live = false)
+            Spacer(Modifier.height(10.dp))
+        }
+        if (message.thinking.isNotBlank()) {
+            ThinkingSection(message.thinking, message.thinkingSeconds, live = false, fontScale = fontScale)
             Spacer(Modifier.height(10.dp))
         }
         RichMarkdown(message.text, fontScale)
@@ -379,6 +418,92 @@ private fun AssistantMessage(message: ChatMessage, fontScale: Float) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+/** Shown under the user's message while the model loads into memory. */
+@Composable
+private fun LoadingModelRow(modelName: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.size(10.dp))
+            Text("Loading $modelName…", style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(
+            "The first message after opening the app takes a few seconds while the model loads.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * The model's reasoning. While it thinks, the latest lines stream in; afterwards it collapses to
+ * "Thought for 12s" and opens on tap.
+ */
+@Composable
+private fun ThinkingSection(thinking: String, seconds: Int, live: Boolean, fontScale: Float) {
+    // null follows the default: open while thinking, closed once the answer starts.
+    var expandedChoice by remember { mutableStateOf<Boolean?>(null) }
+    val expanded = expandedChoice ?: live
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expandedChoice = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (live) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                } else {
+                    Icon(Icons.Rounded.Lightbulb, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.size(10.dp))
+                Text(
+                    when {
+                        live -> "Thinking…"
+                        seconds < 2 -> "Thought for a moment"
+                        seconds < 60 -> "Thought for ${seconds}s"
+                        else -> "Thought for ${seconds / 60}m ${seconds % 60}s"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = if (expanded) "Hide thinking" else "Show thinking",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            if (expanded && thinking.isNotBlank()) {
+                val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                if (live) {
+                    // Only the latest lines while it streams, so the card doesn't keep growing.
+                    Text(
+                        thinking.lines().filter { it.isNotBlank() }.takeLast(6).joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = muted,
+                        modifier = Modifier.padding(start = 28.dp, top = 4.dp, bottom = 4.dp)
+                    )
+                } else {
+                    RichMarkdown(
+                        thinking,
+                        fontScale * 0.85f,
+                        color = muted,
+                        modifier = Modifier.padding(start = 28.dp, top = 4.dp, bottom = 4.dp)
+                    )
+                }
+            }
         }
     }
 }
