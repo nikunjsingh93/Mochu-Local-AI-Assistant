@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Widgets
@@ -63,6 +65,7 @@ import kotlinx.coroutines.launch
 private enum class AppTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     Chat("Chat", Icons.Outlined.ChatBubbleOutline, Icons.Rounded.ChatBubble),
     Studio("Studio", Icons.Outlined.Widgets, Icons.Rounded.Widgets),
+    Browser("Browser", Icons.Outlined.Language, Icons.Rounded.Language),
     Models("Models", Icons.Outlined.Memory, Icons.Rounded.Memory)
 }
 
@@ -100,24 +103,22 @@ fun OnDeviceApp(
         if (uri != null) vm.exportPwaReadyProjectZip(app, uri)
     }
 
-    var showModels by rememberSaveable { mutableStateOf(false) }
+    // Browser and Models are standalone tabs; otherwise the tab follows the active chat's space.
+    var pinnedTab by rememberSaveable { mutableStateOf<AppTab?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    val tab = when {
-        showModels -> AppTab.Models
-        state.activeKind == CHAT_KIND_STUDIO -> AppTab.Studio
-        else -> AppTab.Chat
-    }
+    val tab = pinnedTab ?: if (state.activeKind == CHAT_KIND_STUDIO) AppTab.Studio else AppTab.Chat
+    LaunchedEffect(state.browserUrl) { if (state.browserUrl != null) pinnedTab = AppTab.Browser }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val openDrawer: () -> Unit = { scope.launch { drawerState.open() } }
     val openModels: () -> Unit = {
         vm.refreshModelDownloads(app)
-        showModels = true
+        pinnedTab = AppTab.Models
     }
 
     BackHandler(enabled = state.previewFullscreen) { vm.togglePreviewFullscreen() }
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
-    BackHandler(enabled = showModels && !settingsOpen) { showModels = false }
+    BackHandler(enabled = pinnedTab != null && !settingsOpen && tab != AppTab.Browser) { pinnedTab = null }
 
     if (state.previewFullscreen) {
         FullscreenPreview(state = state)
@@ -131,12 +132,12 @@ fun OnDeviceApp(
                 state = state,
                 kind = if (tab == AppTab.Studio) CHAT_KIND_STUDIO else CHAT_KIND_ASSISTANT,
                 onNew = { kind ->
-                    showModels = false
+                    pinnedTab = null
                     vm.newConversation(app, kind)
                     scope.launch { drawerState.close() }
                 },
                 onSelect = { id ->
-                    showModels = false
+                    pinnedTab = null
                     vm.selectConversation(app, id)
                     scope.launch { drawerState.close() }
                 },
@@ -162,8 +163,9 @@ fun OnDeviceApp(
                                 onClick = {
                                     when (item) {
                                         AppTab.Models -> openModels()
-                                        AppTab.Chat -> { showModels = false; vm.openSpace(app, CHAT_KIND_ASSISTANT) }
-                                        AppTab.Studio -> { showModels = false; vm.openSpace(app, CHAT_KIND_STUDIO) }
+                                        AppTab.Browser -> pinnedTab = AppTab.Browser
+                                        AppTab.Chat -> { pinnedTab = null; vm.openSpace(app, CHAT_KIND_ASSISTANT) }
+                                        AppTab.Studio -> { pinnedTab = null; vm.openSpace(app, CHAT_KIND_STUDIO) }
                                     }
                                 },
                                 icon = { Icon(if (tab == item) item.selectedIcon else item.icon, contentDescription = null) },
@@ -187,6 +189,17 @@ fun OnDeviceApp(
                             vm.newConversation(app, CHAT_KIND_STUDIO)
                             vm.setPrompt(prompt)
                             vm.generate(app)
+                        },
+                        onToggleWeb = { vm.setWebSearchEnabled(app, it) },
+                        onOpenLink = { url -> vm.openInBrowserTab(url) }
+                    )
+                    AppTab.Browser -> BrowserScreen(
+                        requestedUrl = state.browserUrl,
+                        onRequestedUrlOpened = vm::consumeBrowserUrl,
+                        canAsk = state.modelReady && !state.isBusy,
+                        onAskAboutPage = { page ->
+                            pinnedTab = null
+                            vm.askAboutPage(app, page)
                         }
                     )
                     AppTab.Studio -> StudioScreen(
@@ -252,6 +265,22 @@ fun OnDeviceApp(
             title = { Text("Ran out of memory") },
             text = { Text(notice) },
             confirmButton = { Button(onClick = { vm.dismissMemoryNotice() }) { Text("OK") } }
+        )
+    }
+    if (state.webConsentPending) {
+        AlertDialog(
+            onDismissRequest = { vm.answerWebConsent(app, false) },
+            icon = { Icon(Icons.Rounded.Language, contentDescription = null) },
+            title = { Text("Allow web search?") },
+            text = {
+                Text(
+                    "When you search, your search words go to DuckDuckGo and the app loads the top pages from the internet. " +
+                        "Your chats and the model stay on this phone, and web pages can only be read, never submitted to. " +
+                        "Web search only runs when you turn it on or ask to search."
+                )
+            },
+            confirmButton = { Button(onClick = { vm.answerWebConsent(app, true) }) { Text("Allow") } },
+            dismissButton = { TextButton(onClick = { vm.answerWebConsent(app, false) }) { Text("Not now") } }
         )
     }
     state.previewImagePath?.let { path -> ImagePreviewOverlay(imagePath = path, onClose = vm::closeImagePreview) }

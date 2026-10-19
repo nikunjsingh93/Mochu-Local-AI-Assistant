@@ -1,0 +1,146 @@
+package com.nikunj.gemmabuilder
+
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import java.net.InetAddress
+import java.net.URI
+import java.net.URLDecoder
+import java.net.URLEncoder
+
+// Read-only web tools for the assistant: keyless DuckDuckGo search, readable page text, and the
+// policy that decides which URLs the app may load on the user's behalf.
+
+data class SearchResult(val title: String, val url: String, val snippet: String)
+
+data class PageText(val title: String, val url: String, val text: String)
+
+/** A mobile Chrome user agent, so sites serve the same pages a phone browser would get. */
+const val WEB_USER_AGENT =
+    "Mozilla/5.0 (Linux; Android 16; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+
+object WebPolicy {
+    /**
+     * Only public http(s) pages. Blocks local files, app content, and anything on the device or the
+     * local network, so a malicious page or prompt can't point the agent at private services.
+     */
+    fun isAllowed(url: String): Boolean {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        if (uri.scheme?.lowercase() !in setOf("http", "https")) return false
+        val host = uri.host?.lowercase()?.trimEnd('.') ?: return false
+        if (host == "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) return false
+        if (isPrivateIpLiteral(host)) return false
+        return true
+    }
+
+    private fun isPrivateIpLiteral(host: String): Boolean {
+        val looksLikeIp = host.all { it.isDigit() || it == '.' } || host.contains(':')
+        if (!looksLikeIp) return false
+        val address = runCatching { InetAddress.getByName(host.trim('[', ']')) }.getOrNull() ?: return true
+        return address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+            address.isSiteLocalAddress || address.isMulticastAddress ||
+            // IPv6 unique local addresses (fc00::/7)
+            (address.address.size == 16 && (address.address[0].toInt() and 0xFE) == 0xFC)
+    }
+}
+
+/** Keyless search through DuckDuckGo's HTML endpoint. Ads are dropped; links are unwrapped. */
+fun searchDuckDuckGo(query: String, limit: Int = 6): List<SearchResult> {
+    val url = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
+    val html = Jsoup.connect(url)
+        .userAgent(WEB_USER_AGENT)
+        .timeout(12_000)
+        .execute()
+        .body()
+    return parseDuckDuckGoResults(html).take(limit)
+}
+
+fun parseDuckDuckGoResults(html: String): List<SearchResult> {
+    val doc = Jsoup.parse(html)
+    return doc.select("div.result").mapNotNull { result ->
+        if (result.hasClass("result--ad")) return@mapNotNull null
+        val link = result.selectFirst("a.result__a") ?: return@mapNotNull null
+        val url = unwrapDuckDuckGoUrl(link.attr("href")) ?: return@mapNotNull null
+        // Sponsored results route through DuckDuckGo's ad redirector.
+        if (url.contains("duckduckgo.com/y.js")) return@mapNotNull null
+        SearchResult(
+            title = link.text().trim(),
+            url = url,
+            snippet = result.selectFirst(".result__snippet")?.text()?.trim().orEmpty()
+        )
+    }.distinctBy { it.url }
+}
+
+/** DuckDuckGo wraps result links as //duckduckgo.com/l/?uddg=<encoded url>; returns the real URL. */
+fun unwrapDuckDuckGoUrl(href: String): String? {
+    val raw = href.replace("&amp;", "&").let { if (it.startsWith("//")) "https:$it" else it }
+    val wrapped = Regex("""[?&]uddg=([^&]+)""").find(raw)?.groupValues?.get(1)
+    val url = wrapped?.let { URLDecoder.decode(it, "UTF-8") } ?: raw
+    return url.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+}
+
+/** Fetches a page directly (no JavaScript). Fast, but some sites block it or render client-side. */
+fun fetchPageText(url: String, timeoutMs: Int = 8_000): PageText? = runCatching {
+    val doc = Jsoup.connect(url)
+        .userAgent(WEB_USER_AGENT)
+        .timeout(timeoutMs)
+        .followRedirects(true)
+        .get()
+    PageText(doc.title().trim(), url, readableText(doc))
+}.getOrNull()
+
+/** Main-content text of a page: drops scripts, navigation, and boilerplate, keeps line structure. */
+fun readableText(doc: Document): String {
+    doc.select("script, style, noscript, svg, nav, footer, header, aside, form, iframe, [aria-hidden=true]").remove()
+    val root = doc.selectFirst("main, article, [role=main]") ?: doc.body() ?: return ""
+    root.select("br").append("\\n")
+    root.select("p, li, h1, h2, h3, h4, tr, div").prepend("\\n")
+    return root.text()
+        .replace("\\n", "\n")
+        .lines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n")
+}
+
+/** True when a page is a bot check or error page rather than real content. */
+fun looksBlocked(page: PageText): Boolean {
+    val title = page.title.lowercase()
+    val start = page.text.take(400).lowercase()
+    val markers = listOf("access denied", "just a moment", "attention required", "are you a robot", "captcha", "verify you are human")
+    return markers.any { it in title || it in start }
+}
+
+/** Pages the research recipe reads per question; more rarely helps a small model and costs time. */
+const val MAX_WEB_PAGES = 3
+
+fun hostOf(url: String): String =
+    runCatching { URI(url).host?.removePrefix("www.") }.getOrNull() ?: url
+
+private val searchPrefixes = listOf(
+    "search the web for", "search online for", "search for", "search", "look up", "lookup",
+    "google", "find online", "browse for", "can you", "could you", "please"
+)
+
+/** Turns "search for best buy laptop prices please" into a search query. */
+fun searchQueryFrom(request: String): String {
+    var query = request.trim()
+    var changed = true
+    while (changed) {
+        changed = false
+        for (prefix in searchPrefixes) {
+            if (query.lowercase().startsWith("$prefix ") || query.lowercase().startsWith("$prefix:")) {
+                query = query.drop(prefix.length + 1).trim()
+                changed = true
+            }
+        }
+    }
+    return query.trimEnd('?', '.', '!').removeSuffix(" please").take(150).ifBlank { request.take(150) }
+}
+
+/** True for messages that clearly ask for a web search, so it works without the toggle. */
+fun looksLikeSearchRequest(message: String): Boolean {
+    val lower = message.trim().lowercase()
+    val starts = listOf("search ", "search:", "look up ", "lookup ", "google ", "find online", "browse ")
+    val contains = listOf("search the web", "search online", "on the web", "online prices", "latest news")
+    return starts.any { lower.startsWith(it) } || contains.any { it in lower }
+}

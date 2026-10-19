@@ -38,8 +38,18 @@ data class ChatMessage(
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
     val attachments: List<String> = emptyList(),
-    val statsInline: String? = null
+    val statsInline: String? = null,
+    /** What the assistant did to produce this reply (searches, pages read), shown as an activity log. */
+    val activity: List<ActivityStep> = emptyList()
 )
+
+/** One entry in a reply's activity log. [kind] is one of the ACTIVITY_* constants. */
+data class ActivityStep(val kind: String, val text: String, val url: String? = null)
+
+const val ACTIVITY_SEARCH = "search"
+const val ACTIVITY_READ = "read"
+const val ACTIVITY_SKIP = "skip"
+const val ACTIVITY_NOTE = "note"
 
 data class ChatConversation(
     val id: String,
@@ -117,7 +127,15 @@ data class BuilderUiState(
     /** Which space the active chat belongs to: [CHAT_KIND_ASSISTANT] or [CHAT_KIND_STUDIO]. */
     val activeKind: String = CHAT_KIND_ASSISTANT,
     /** Assistant reply text streamed so far, or null when no assistant reply is being generated. */
-    val streamingReply: String? = null
+    val streamingReply: String? = null,
+    /** Steps of the web research running right now, shown live above the streaming reply. */
+    val liveActivity: List<ActivityStep> = emptyList(),
+    /** Chat composer's "search the web" toggle. */
+    val webSearchEnabled: Boolean = false,
+    /** Shows the one-time web access consent dialog. */
+    val webConsentPending: Boolean = false,
+    /** URL the Browser tab should open next (set by tapping a source link). */
+    val browserUrl: String? = null
 )
 
 enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }

@@ -1,10 +1,12 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -32,6 +41,7 @@ import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -45,6 +55,11 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -52,6 +67,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,8 +88,17 @@ fun AssistantChatScreen(
     onOpenModels: () -> Unit,
     onPromptChange: (String) -> Unit,
     onSend: () -> Unit,
-    onBuildInStudio: (String) -> Unit
+    onBuildInStudio: (String) -> Unit,
+    onToggleWeb: (Boolean) -> Unit,
+    onOpenLink: (String) -> Unit
 ) {
+    // Links in replies (e.g. sources) open in the in-app Browser instead of leaving the app.
+    val inAppLinks = remember(onOpenLink) {
+        object : UriHandler {
+            override fun openUri(uri: String) = onOpenLink(uri)
+        }
+    }
+    CompositionLocalProvider(LocalUriHandler provides inAppLinks) {
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             navigationIcon = {
@@ -106,11 +132,25 @@ fun AssistantChatScreen(
                 text = state.prompt,
                 enabled = !state.isBusy,
                 canSend = state.prompt.isNotBlank() && !state.isBusy && state.modelReady,
-                placeholder = if (state.modelReady) "Message" else "Download a model to start",
+                placeholder = when {
+                    !state.modelReady -> "Download a model to start"
+                    state.webSearchEnabled -> "Search the web"
+                    else -> "Message"
+                },
                 onTextChange = onPromptChange,
-                onSend = onSend
+                onSend = onSend,
+                leading = {
+                    IconButton(onClick = { onToggleWeb(!state.webSearchEnabled) }, enabled = !state.isBusy) {
+                        Icon(
+                            Icons.Rounded.Language,
+                            contentDescription = if (state.webSearchEnabled) "Turn off web search" else "Search the web",
+                            tint = if (state.webSearchEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             )
         }
+    }
     }
 }
 
@@ -269,7 +309,10 @@ private fun MessageList(state: BuilderUiState) {
         }
         state.streamingReply?.let { partial ->
             item(key = "streaming") {
-                if (partial.isBlank()) ThinkingDots() else RichMarkdown(partial, state.chatFontScale / 1.2f)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (state.liveActivity.isNotEmpty()) ActivityLog(state.liveActivity, live = partial.isBlank())
+                    if (partial.isBlank()) ThinkingDots() else RichMarkdown(partial, state.chatFontScale / 1.2f)
+                }
             }
         }
     }
@@ -296,6 +339,10 @@ private fun UserMessage(message: ChatMessage, fontScale: Float) {
 private fun AssistantMessage(message: ChatMessage, fontScale: Float) {
     val clipboard = LocalClipboardManager.current
     Column {
+        if (message.activity.isNotEmpty()) {
+            ActivityLog(message.activity, live = false)
+            Spacer(Modifier.height(10.dp))
+        }
         RichMarkdown(message.text, fontScale)
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
@@ -393,6 +440,89 @@ fun Composer(
                     .size(44.dp)
             ) {
                 Icon(Icons.Rounded.ArrowUpward, contentDescription = "Send")
+            }
+        }
+    }
+}
+
+/**
+ * What the assistant did for a reply: searches, pages read, pages skipped. Collapsed to one line
+ * once the reply is done; shown in full (with a spinner on the current step) while it runs.
+ */
+@Composable
+fun ActivityLog(steps: List<ActivityStep>, live: Boolean) {
+    var expanded by rememberSaveable(steps.size) { mutableStateOf(live) }
+    val uriHandler = LocalUriHandler.current
+    val reads = steps.count { it.kind == ACTIVITY_READ }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !live) { expanded = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.Language, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(10.dp))
+                Text(
+                    when {
+                        live -> "Researching on the web…"
+                        reads == 0 -> "Searched the web"
+                        else -> "Searched the web · $reads page${if (reads == 1) "" else "s"} read"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!live) {
+                    Icon(
+                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (expanded) "Hide steps" else "Show steps",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            if (expanded || live) {
+                steps.forEachIndexed { index, step ->
+                    val running = live && index == steps.lastIndex
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = step.url != null) { step.url?.let(uriHandler::openUri) }
+                            .padding(vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (running) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                        } else {
+                            Icon(
+                                when (step.kind) {
+                                    ACTIVITY_SEARCH -> Icons.Rounded.Search
+                                    ACTIVITY_READ -> Icons.AutoMirrored.Rounded.Article
+                                    ACTIVITY_SKIP -> Icons.Rounded.Block
+                                    else -> Icons.Rounded.Info
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(Modifier.size(10.dp))
+                        Text(
+                            step.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (step.url != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }

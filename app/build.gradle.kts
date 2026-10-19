@@ -114,6 +114,8 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:image-labeling:17.0.9")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // HTML parsing for DuckDuckGo results and readable page text.
+    implementation("org.jsoup:jsoup:1.23.2")
 
     // LiteRT-LM Android runtime for .litertlm Gemma models.
     // If Android Studio warns about this version, change it to latest.release.

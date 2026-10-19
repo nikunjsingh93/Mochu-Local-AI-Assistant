@@ -45,7 +45,7 @@ fun readConversationFile(file: File): ChatConversation {
             line.startsWith("kind\t") -> kind = line.substringAfter("kind\t").ifBlank { CHAT_KIND_STUDIO }
             line.startsWith("summarized\t") -> summarizedCount = line.substringAfter("summarized\t").toIntOrNull() ?: 0
             line.startsWith("msg	") -> {
-                val parts = line.split("	", limit = 6)
+                val parts = line.split("	", limit = 7)
                 when {
                     parts.size >= 5 -> {
                         val attachments = decodeText(parts[4])
@@ -59,7 +59,8 @@ fun readConversationFile(file: File): ChatConversation {
                                 text = decodeText(parts[3]),
                                 timestamp = parts[2].toLongOrNull() ?: updatedAt,
                                 attachments = attachments,
-                                statsInline = statsInline
+                                statsInline = statsInline,
+                                activity = parts.getOrNull(6)?.let { decodeActivity(decodeText(it)) }.orEmpty()
                             )
                         )
                     }
@@ -95,7 +96,8 @@ fun saveConversationFile(context: Context, conversation: ChatConversation) {
         conversation.messages.forEach { msg ->
             val attachmentsEncoded = encodeText(msg.attachments.joinToString("|"))
             val statsEncoded = encodeText(msg.statsInline.orEmpty())
-            appendLine("msg\t${msg.role}\t${msg.timestamp}\t${encodeText(msg.text)}\t$attachmentsEncoded\t$statsEncoded")
+            val activityEncoded = encodeText(encodeActivity(msg.activity))
+            appendLine("msg\t${msg.role}\t${msg.timestamp}\t${encodeText(msg.text)}\t$attachmentsEncoded\t$statsEncoded\t$activityEncoded")
         }
     }
     file.writeText(text)
@@ -112,3 +114,17 @@ fun formatChatTimestamp(timestamp: Long): String {
     return SimpleDateFormat(pattern, Locale.US).format(Date(timestamp))
 }
 
+
+// Activity steps are stored as kind / text / url fields joined by unit separators, one step per
+// record separator. These characters never appear in step text.
+private const val FIELD_SEP = '\u001F'
+private const val STEP_SEP = '\u001E'
+
+fun encodeActivity(steps: List<ActivityStep>): String =
+    steps.joinToString(STEP_SEP.toString()) { listOf(it.kind, it.text, it.url.orEmpty()).joinToString(FIELD_SEP.toString()) }
+
+fun decodeActivity(raw: String): List<ActivityStep> =
+    raw.split(STEP_SEP).filter { it.isNotBlank() }.mapNotNull { record ->
+        val fields = record.split(FIELD_SEP)
+        if (fields.size < 2) null else ActivityStep(fields[0], fields[1], fields.getOrNull(2)?.ifBlank { null })
+    }
