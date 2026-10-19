@@ -137,6 +137,11 @@ data class BuilderUiState(
     val streamingThinkingSeconds: Int = 0,
     /** True while a model is being loaded into memory. */
     val modelLoading: Boolean = false,
+    /** Photos attached to the Chat message being written (absolute paths in app storage). */
+    val chatImages: List<String> = emptyList(),
+    /** Facts the user asked Chat to remember, added to its system prompt when [memoryEnabled]. */
+    val memories: List<String> = emptyList(),
+    val memoryEnabled: Boolean = true,
     /** Lets models that support it reason before answering in Chat. */
     val thinkingEnabled: Boolean = true,
     /** Steps of the web research running right now, shown live above the streaming reply. */
@@ -169,7 +174,15 @@ interface BuilderEngine {
      * A session is tied to its [systemPrompt]: Studio projects and assistant chats use different ones.
      * With [thinking], models that can reason first stream it wrapped in <think>...</think>.
      */
-    fun generate(sessionKey: String, message: String, systemPrompt: String = BUILD_SYSTEM_PROMPT, thinking: Boolean = false): Flow<String>
+    fun generate(
+        sessionKey: String,
+        message: String,
+        systemPrompt: String = BUILD_SYSTEM_PROMPT,
+        thinking: Boolean = false,
+        images: List<String> = emptyList()
+    ): Flow<String>
+    /** Whether [generate] can take [images] (absolute paths of photos to send with the message). */
+    val supportsImages: Boolean get() = false
     /** Tokens left in the open session for [sessionKey], or null when no reusable session is open. */
     fun remainingTokens(sessionKey: String): Int? = null
     /** Drops the open session so the next [generate] starts a fresh conversation. */

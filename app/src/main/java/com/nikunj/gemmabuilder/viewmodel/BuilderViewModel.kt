@@ -2,6 +2,8 @@ package com.nikunj.gemmabuilder
 
 import android.content.Intent
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +24,8 @@ import java.util.zip.ZipOutputStream
 
 // Messages a fresh model session always sees verbatim; older ones are folded into the chat summary.
 private const val RECENT_MESSAGES_KEPT = 6
+private const val MAX_CHAT_IMAGES = 3
+private const val CHAT_IMAGE_MAX_SIDE = 1024
 
 class BuilderViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(BuilderUiState())
@@ -76,6 +80,8 @@ class BuilderViewModel : ViewModel() {
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
                 thinkingEnabled = savedThinkingEnabled(context),
+                memories = loadMemories(context),
+                memoryEnabled = savedMemoryEnabled(context),
                 allowMobileDataDownloads = savedAllowMobileDataDownloads(context),
                 status = if (hasModel) "${savedModelName(context)} found. Type a message and tap Send to auto-load." else "Download a model from the Models tab."
             )
@@ -641,7 +647,10 @@ class BuilderViewModel : ViewModel() {
     }
 
     fun generate(context: Context) {
-        val prompt = uiState.value.prompt.trim()
+        val typed = uiState.value.prompt.trim()
+        // In Chat a photo alone is enough to send.
+        val chatWithPhoto = uiState.value.activeKind == CHAT_KIND_ASSISTANT && uiState.value.chatImages.isNotEmpty()
+        val prompt = typed.ifBlank { if (chatWithPhoto) "What's in this photo?" else "" }
         if (prompt.isBlank() || uiState.value.isBusy || generationInProgress) return
         generationInProgress = true
         if (uiState.value.activeKind == CHAT_KIND_ASSISTANT) {
@@ -992,11 +1001,13 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
                     return@launch
                 }
-                val pendingMessages = uiState.value.messages + ChatMessage("user", prompt)
+                val images = if (presetResearch == null) uiState.value.chatImages else emptyList()
+                val pendingMessages = uiState.value.messages + ChatMessage("user", prompt, attachments = images)
                 _uiState.update {
                     it.copy(
                         isBusy = true,
                         prompt = "",
+                        chatImages = if (presetResearch == null) emptyList() else it.chatImages,
                         status = "Thinking...",
                         messages = pendingMessages,
                         streamingReply = "",
@@ -1005,6 +1016,22 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
+                // GGUF models here have no image encoder: say so before spending time loading one.
+                if (images.isNotEmpty() && isGgufModel(savedModelName(context))) {
+                    val reply = "_${modelDisplayName(uiState.value.modelName)} can't see photos. Gemma 4 E2B and E4B can: switch in the Models tab._"
+                    val done = pendingMessages + ChatMessage("assistant", reply)
+                    persistActiveConversation(context, done)
+                    _uiState.update { it.copy(messages = done) }
+                    return@launch
+                }
+                // "Remember that...", "forget...", "what do you remember about me?" are handled by the app.
+                val memoryCommand = if (presetResearch == null && images.isEmpty()) memoryCommandFrom(prompt) else null
+                if (memoryCommand != null) {
+                    val done = pendingMessages + ChatMessage("assistant", applyMemoryCommand(context, memoryCommand))
+                    persistActiveConversation(context, done)
+                    _uiState.update { it.copy(messages = done) }
+                    return@launch
+                }
                 // Load after the message is on screen, so the chat can show "Loading model" under it.
                 if (!uiState.value.gemmaLoaded) {
                     if (!loadGemmaInternal(context.applicationContext)) {
@@ -1014,6 +1041,13 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         return@launch
                     }
                     _uiState.update { it.copy(isBusy = true, status = "Thinking...") }
+                }
+                if (images.isNotEmpty() && !engine.supportsImages) {
+                    val reply = "_${modelDisplayName(uiState.value.modelName)} can't see photos. Gemma 4 E2B and E4B can: switch in the Models tab._"
+                    val done = pendingMessages + ChatMessage("assistant", reply)
+                    persistActiveConversation(context, done)
+                    _uiState.update { it.copy(messages = done) }
+                    return@launch
                 }
                 turnOutputTokens = 0
                 turnDecodeSeconds = 0.0
@@ -1035,7 +1069,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         buildAssistantSnapshot(pendingMessages, finalUserText = research.prompt)
                     }
                     // Continue the open session when it still has room; otherwise rebuild from history.
-                    hasRoomForTurn(sessionKey, prompt) -> prompt
+                    // Each photo takes a few hundred tokens of the window.
+                    hasRoomForTurn(sessionKey, prompt + " ".repeat(images.size * 3000)) -> prompt
                     else -> {
                         engine.resetSession()
                         compactHistoryIfNeeded(context, pendingMessages)
@@ -1055,7 +1090,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 var thinkingStartedAtMs = 0L
                 var thinkingEndedAtMs = 0L
                 val result = runCatching {
-                    engine.generate(sessionKey, message, ASSISTANT_SYSTEM_PROMPT, thinking = uiState.value.thinkingEnabled)
+                    engine.generate(sessionKey, message, assistantSystemPrompt(), thinking = uiState.value.thinkingEnabled, images = images)
                         .onCompletion { absorbGenerationStats() }
                         .collect { chunk ->
                             val now = System.currentTimeMillis()
@@ -1287,7 +1322,11 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         val summarized = conversation?.summarizedCount?.coerceAtMost(earlier.size) ?: 0
         val summary = conversation?.summary.orEmpty().takeIf { summarized > 0 }.orEmpty()
         val history = earlier.drop(summarized).takeLast(RECENT_MESSAGES_KEPT)
-            .joinToString("\n\n") { "${if (it.role == "user") "User" else "Assistant"}: ${it.text.take(2000)}" }
+            .joinToString("\n\n") { message ->
+                // Photos aren't resent to a fresh session; the history just notes them.
+                val photos = if (message.attachments.isNotEmpty()) " [sent ${message.attachments.size} photo(s)]" else ""
+                "${if (message.role == "user") "User" else "Assistant"}: ${message.text.take(2000)}$photos"
+            }
             // Web turns carry large sources, so they keep a smaller share of history.
             .takeLast(snapshotCharBudget(activeTokenWindow) / (if (finalUserText == messages.last().text) 1 else 4) * 2 / 3)
         if (summary.isBlank() && history.isBlank()) return finalUserText
@@ -1297,6 +1336,84 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             if (finalUserText == messages.last().text) append("Reply to the user's new message:\n")
             append(finalUserText)
         }
+    }
+
+    // ---- Photos and memory (Chat space) ----
+
+    /** Copies a picked photo into app storage, downscaled so the model encodes it quickly. */
+    fun attachChatImage(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val path = withContext(Dispatchers.IO) { runCatching { saveChatImage(context, uri) }.getOrNull() }
+            _uiState.update {
+                if (path == null) it.copy(status = "Couldn't open that image.")
+                else it.copy(chatImages = (it.chatImages + path).takeLast(MAX_CHAT_IMAGES))
+            }
+        }
+    }
+
+    fun removeChatImage(path: String) {
+        _uiState.update { it.copy(chatImages = it.chatImages - path) }
+    }
+
+    private fun saveChatImage(context: Context, uri: Uri): String {
+        val dir = File(context.filesDir, "chat_images").apply { mkdirs() }
+        val source = ImageDecoder.createSource(context.contentResolver, uri)
+        // ImageDecoder also applies the photo's EXIF rotation.
+        val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            val longest = maxOf(info.size.width, info.size.height)
+            if (longest > CHAT_IMAGE_MAX_SIDE) {
+                val scale = CHAT_IMAGE_MAX_SIDE.toFloat() / longest
+                decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
+            }
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+        val file = File(dir, "${java.util.UUID.randomUUID()}.jpg")
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        bitmap.recycle()
+        return file.absolutePath
+    }
+
+    private fun assistantSystemPrompt(): String =
+        ASSISTANT_SYSTEM_PROMPT + if (uiState.value.memoryEnabled) memoryPromptSection(uiState.value.memories) else ""
+
+    private fun applyMemoryCommand(context: Context, command: MemoryCommand): String {
+        val memories = uiState.value.memories
+        if (!uiState.value.memoryEnabled) return "Memory is turned off. Turn it on in Settings → Memory."
+        return when (command) {
+            is MemoryCommand.Remember -> {
+                val updated = withMemory(memories, command.fact)
+                setMemories(context, updated)
+                if (updated == memories) "I already remember that."
+                else "Got it, I'll remember: **${updated.last()}**\n\nYou can see and edit what I remember in Settings → Memory."
+            }
+            is MemoryCommand.Forget -> {
+                val matches = matchingMemories(memories, command.query)
+                if (matches.isEmpty()) {
+                    "I don't have anything saved about \"${command.query}\". Settings → Memory shows everything I remember."
+                } else {
+                    setMemories(context, memories - matches.toSet())
+                    "Forgotten:\n" + matches.joinToString("\n") { "- $it" }
+                }
+            }
+            MemoryCommand.ShowAll ->
+                if (memories.isEmpty()) "I don't remember anything about you yet. Say \"remember that...\" to save something."
+                else "Here's what I remember about you:\n" + memories.joinToString("\n") { "- $it" }
+        }
+    }
+
+    private fun setMemories(context: Context, memories: List<String>) {
+        saveMemories(context, memories)
+        // Memories are part of the system prompt, so the open session is rebuilt on the next turn.
+        _uiState.update { it.copy(memories = memories) }
+    }
+
+    fun addMemory(context: Context, fact: String) = setMemories(context, withMemory(uiState.value.memories, fact))
+
+    fun deleteMemory(context: Context, fact: String) = setMemories(context, uiState.value.memories - fact)
+
+    fun setMemoryEnabled(context: Context, enabled: Boolean) {
+        saveMemoryEnabled(context, enabled)
+        _uiState.update { it.copy(memoryEnabled = enabled) }
     }
 
     fun openInBrowser(context: Context) {

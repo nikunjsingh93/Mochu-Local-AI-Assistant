@@ -2,6 +2,7 @@ package com.nikunj.gemmabuilder
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -87,6 +88,9 @@ fun OnDeviceApp(
 
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importModel(app, uri)
+    }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) vm.attachChatImage(app, uri)
     }
     val fileImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) vm.importFiles(app, uris)
@@ -201,6 +205,10 @@ fun OnDeviceApp(
                             vm.generate(app)
                         },
                         onToggleWeb = { vm.setWebSearchEnabled(app, it) },
+                        onAttachPhoto = {
+                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onRemovePhoto = vm::removeChatImage,
                         onOpenLink = { url -> vm.openInBrowserTab(url) },
                         onStop = vm::stopGeneration
                     )
@@ -263,6 +271,8 @@ fun OnDeviceApp(
             backendPreference = state.backendPreference,
             speculativeDecodingEnabled = state.speculativeDecodingEnabled,
             thinkingEnabled = state.thinkingEnabled,
+            memories = state.memories,
+            memoryEnabled = state.memoryEnabled,
             onChatFontScale = { vm.setChatFontScale(app, it) },
             onCodeFontScale = { vm.setCodeFontScale(app, it) },
             onContextTokensChange = { vm.setContextTokens(app, it) },
@@ -271,6 +281,9 @@ fun OnDeviceApp(
             onBackendPreferenceChange = { vm.setBackendPreference(app, it) },
             onSpeculativeDecodingChange = { vm.setSpeculativeDecodingEnabled(app, it) },
             onThinkingChange = { vm.setThinkingEnabled(app, it) },
+            onMemoryEnabledChange = { vm.setMemoryEnabled(app, it) },
+            onAddMemory = { vm.addMemory(app, it) },
+            onDeleteMemory = { vm.deleteMemory(app, it) },
             onDismiss = { settingsOpen = false }
         )
     }

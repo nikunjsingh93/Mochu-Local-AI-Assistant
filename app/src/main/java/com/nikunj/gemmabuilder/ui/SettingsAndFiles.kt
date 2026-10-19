@@ -19,7 +19,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.OpenInNew
@@ -63,6 +68,8 @@ fun SettingsScreen(
     backendPreference: String,
     speculativeDecodingEnabled: Boolean,
     thinkingEnabled: Boolean,
+    memories: List<String>,
+    memoryEnabled: Boolean,
     onChatFontScale: (Float) -> Unit,
     onCodeFontScale: (Float) -> Unit,
     onContextTokensChange: (Int) -> Unit,
@@ -71,6 +78,9 @@ fun SettingsScreen(
     onBackendPreferenceChange: (String) -> Unit,
     onSpeculativeDecodingChange: (Boolean) -> Unit,
     onThinkingChange: (Boolean) -> Unit,
+    onMemoryEnabledChange: (Boolean) -> Unit,
+    onAddMemory: (String) -> Unit,
+    onDeleteMemory: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var settingsSubPage by rememberSaveable { mutableStateOf("root") }
@@ -112,6 +122,7 @@ fun SettingsScreen(
                     text = when (settingsSubPage) {
                         "privacy" -> "Privacy Policy"
                         "licenses" -> "Third-Party Licenses"
+                        "memory" -> "Memory"
                         else -> "Settings"
                     },
                     style = MaterialTheme.typography.headlineSmall,
@@ -119,7 +130,9 @@ fun SettingsScreen(
                 )
             }
 
-            if (settingsSubPage == "privacy") {
+            if (settingsSubPage == "memory") {
+                MemoryPage(memories, memoryEnabled, onMemoryEnabledChange, onAddMemory, onDeleteMemory, Modifier.weight(1f))
+            } else if (settingsSubPage == "privacy") {
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -293,6 +306,21 @@ fun SettingsScreen(
                         Switch(checked = thinkingEnabled, onCheckedChange = onThinkingChange)
                     }
                     HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Memory")
+                            Text(
+                                if (!memoryEnabled) "Off" else if (memories.isEmpty()) "Nothing saved yet" else "${memories.size} saved",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        OutlinedButton(onClick = { settingsSubPage = "memory" }) { Text("Manage") }
+                    }
+                    HorizontalDivider()
                     OutlinedButton(onClick = { settingsSubPage = "privacy" }) {
                         Text("Open Privacy Policy")
                     }
@@ -427,5 +455,70 @@ fun RawPane(state: BuilderUiState) {
             text = state.lastRawResponse.ifBlank { "No model response yet." },
             modifier = Modifier.fillMaxSize()
         )
+    }
+}
+
+/** What Chat remembers about the user: on/off, the saved facts, and a way to add or delete them. */
+@Composable
+private fun MemoryPage(
+    memories: List<String>,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onAdd: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var draft by rememberSaveable { mutableStateOf("") }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Use memory in Chat")
+                Text(
+                    "Chat uses these facts in every conversation. Say \"remember that…\" or \"forget…\" in a chat to change them. They stay on this phone.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            placeholder = { Text("Add something to remember") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = {
+                if (draft.isNotBlank()) onAdd(draft)
+                draft = ""
+            }),
+            trailingIcon = {
+                IconButton(onClick = { if (draft.isNotBlank()) onAdd(draft); draft = "" }, enabled = draft.isNotBlank()) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Add memory")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (memories.isEmpty()) {
+            Text("Nothing saved yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        memories.asReversed().forEach { memory ->
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(memory, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
+                    IconButton(onClick = { onDelete(memory) }) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete memory", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
     }
 }

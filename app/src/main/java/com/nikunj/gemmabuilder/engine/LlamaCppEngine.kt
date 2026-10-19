@@ -74,7 +74,7 @@ class LlamaCppEngine(
     }
 
     // Reasoning models here (Qwen3, Bonsai) write <think>...</think> into the text themselves.
-    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean, images: List<String>): Flow<String> = flow {
         val h = handle
         if (h == 0L) {
             emit("Model is not loaded.")

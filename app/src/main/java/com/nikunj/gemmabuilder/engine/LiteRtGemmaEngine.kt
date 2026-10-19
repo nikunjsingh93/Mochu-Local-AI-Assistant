@@ -132,7 +132,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.tasks.Tasks
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.ModelInfo
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
@@ -187,7 +189,7 @@ class LiteRtGemmaEngine(
     private val speculativeDecodingEnabled: Boolean,
     private val maxNumTokens: Int
 ) : BuilderEngine {
-    private data class LoadAttempt(val backend: String, val speculativeDecoding: Boolean, val maxNumTokens: Int?)
+    private data class LoadAttempt(val backend: String, val speculativeDecoding: Boolean, val maxNumTokens: Int?, val vision: Boolean = false)
 
     private var engine: Engine? = null
     private var conversation: Conversation? = null
@@ -201,6 +203,10 @@ class LiteRtGemmaEngine(
     var activeBackend: String = backendPreference.uppercase(Locale.US)
         private set
 
+    /** True when the model loaded with its image encoder, so messages can include photos. */
+    override var supportsImages: Boolean = false
+        private set
+
     /** Why the preferred setup was not used, or null when it loaded as configured. */
     var fallbackReason: String? = null
         private set
@@ -210,7 +216,13 @@ class LiteRtGemmaEngine(
         val preferred = backendPreference.lowercase(Locale.US)
         // Try the requested setup first, then progressively safer ones: without speculative decoding,
         // with the model's default context window, and finally on CPU.
+        // Models with an image encoder (Gemma 4 E2B/E4B) load it too; if that fails, text-only still works.
+        val hasVision = runCatching { ModelInfo.from(modelPath).use { it.inputModalities().vision } }.getOrDefault(false)
         val attempts = buildList {
+            if (hasVision) {
+                add(LoadAttempt(preferred, speculativeDecodingEnabled, maxNumTokens, vision = true))
+                add(LoadAttempt(preferred, false, maxNumTokens, vision = true))
+            }
             add(LoadAttempt(preferred, speculativeDecodingEnabled, maxNumTokens))
             add(LoadAttempt(preferred, false, maxNumTokens))
             add(LoadAttempt(preferred, false, null))
@@ -229,6 +241,9 @@ class LiteRtGemmaEngine(
                     "npu" -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
                     else -> Backend.CPU()
                 },
+                // The image encoder runs on the CPU: on the GPU at full precision it needs over a GB more,
+                // enough to get E4B killed on a 12 GB phone. Encoding one photo still takes about a second.
+                visionBackend = if (attempt.vision) Backend.CPU() else null,
                 maxNumTokens = attempt.maxNumTokens,
                 cacheDir = context.cacheDir.absolutePath,
                 // Half-precision GPU activations garble digits in long prompts (a web page summary
@@ -251,6 +266,7 @@ class LiteRtGemmaEngine(
                 engine = candidate
                 tokenLimit = attempt.maxNumTokens
                 activeBackend = attempt.backend.uppercase(Locale.US)
+                supportsImages = attempt.vision
                 fallbackReason = if (attempt == attempts.first()) null else firstError?.message ?: "unknown error"
                 return@withContext
             }
@@ -274,7 +290,13 @@ class LiteRtGemmaEngine(
         thinkingConfig = ThinkingConfig(enableThinking = thinking)
     )
 
-    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean): Flow<String> = flow {
+    override fun generate(
+        sessionKey: String,
+        message: String,
+        systemPrompt: String,
+        thinking: Boolean,
+        images: List<String>
+    ): Flow<String> = flow {
         val loadedEngine = engine ?: run {
             emit("Model is not loaded.")
             return@flow
@@ -296,7 +318,10 @@ class LiteRtGemmaEngine(
         lastStats = null
         try {
             var inThought = false
-            active.sendMessageAsync(message).collect { token ->
+            // Photos go first, then the text that asks about them.
+            val request = if (images.isEmpty() || !supportsImages) Contents.of(message)
+            else Contents.of(images.map { Content.ImageFile(it) } + Content.Text(message))
+            active.sendMessageAsync(request).collect { token ->
                 if (chunks++ == 0) firstChunkAt = System.nanoTime()
                 val thought = token.channels.values.joinToString("")
                 if (thought.isNotEmpty()) {
@@ -364,7 +389,7 @@ class MediaPipeMultimodalEngine(
 }
 
 class DemoBuilderEngine : BuilderEngine {
-    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean, images: List<String>): Flow<String> = flow {
         val lower = message.lowercase(Locale.US)
         val html = when {
             "calculator" in lower -> calculatorHtml()

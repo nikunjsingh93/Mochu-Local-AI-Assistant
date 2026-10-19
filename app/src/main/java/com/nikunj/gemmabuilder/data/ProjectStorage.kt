@@ -243,3 +243,11 @@ fun savedThinkingEnabled(context: Context): Boolean =
 fun saveThinkingEnabled(context: Context, enabled: Boolean) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("thinkingEnabled", enabled).apply()
 }
+
+/** Chat's long-term memory switch; on by default. */
+fun savedMemoryEnabled(context: Context): Boolean =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("memoryEnabled", true)
+
+fun saveMemoryEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("memoryEnabled", enabled).apply()
+}

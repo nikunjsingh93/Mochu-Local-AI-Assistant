@@ -33,6 +33,17 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
@@ -100,6 +111,8 @@ fun AssistantChatScreen(
     onSend: () -> Unit,
     onBuildInStudio: (String) -> Unit,
     onToggleWeb: (Boolean) -> Unit,
+    onAttachPhoto: () -> Unit,
+    onRemovePhoto: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onStop: () -> Unit
 ) {
@@ -139,12 +152,38 @@ fun AssistantChatScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             if (state.messages.isNotEmpty()) ContextMeter(state, Modifier.padding(horizontal = 8.dp))
+            if (state.chatImages.isNotEmpty()) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    state.chatImages.forEach { path ->
+                        Box {
+                            PhotoThumbnail(path, Modifier.size(64.dp))
+                            Surface(
+                                onClick = { onRemovePhoto(path) },
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.inverseSurface,
+                                modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(22.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = "Remove photo",
+                                    tint = MaterialTheme.colorScheme.inverseOnSurface,
+                                    modifier = Modifier.padding(3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             Composer(
                 text = state.prompt,
                 enabled = !state.isBusy,
-                canSend = state.prompt.isNotBlank() && !state.isBusy && state.modelReady,
+                canSend = (state.prompt.isNotBlank() || state.chatImages.isNotEmpty()) && !state.isBusy && state.modelReady,
                 placeholder = when {
                     !state.modelReady -> "Download a model to start"
+                    state.chatImages.isNotEmpty() -> "Ask about the photo"
                     state.webSearchEnabled -> "Search the web"
                     else -> "Message"
                 },
@@ -153,12 +192,21 @@ fun AssistantChatScreen(
                 busy = state.isBusy,
                 onStop = onStop,
                 leading = {
-                    IconButton(onClick = { onToggleWeb(!state.webSearchEnabled) }, enabled = !state.isBusy) {
-                        Icon(
-                            Icons.Rounded.Language,
-                            contentDescription = if (state.webSearchEnabled) "Turn off web search" else "Search the web",
-                            tint = if (state.webSearchEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row {
+                        IconButton(onClick = { onToggleWeb(!state.webSearchEnabled) }, enabled = !state.isBusy) {
+                            Icon(
+                                Icons.Rounded.Language,
+                                contentDescription = if (state.webSearchEnabled) "Turn off web search" else "Search the web",
+                                tint = if (state.webSearchEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = onAttachPhoto, enabled = !state.isBusy && state.chatImages.size < 3) {
+                            Icon(
+                                Icons.Rounded.AddPhotoAlternate,
+                                contentDescription = "Add a photo",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             )
@@ -382,11 +430,43 @@ private fun UserMessage(message: ChatMessage, fontScale: Float) {
                     onLongClickLabel = "Copy message"
                 )
         ) {
-            Text(
-                message.text,
-                style = MaterialTheme.typography.bodyLarge.let { it.copy(fontSize = it.fontSize * fontScale) },
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
-            )
+            Column {
+                val photos = message.attachments.filter { File(it).isFile }
+                if (photos.isNotEmpty()) {
+                    Row(
+                        Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        photos.forEach { PhotoThumbnail(it, Modifier.size(if (photos.size == 1) 200.dp else 96.dp)) }
+                    }
+                }
+                Text(
+                    message.text,
+                    style = MaterialTheme.typography.bodyLarge.let { it.copy(fontSize = it.fontSize * fontScale) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
+                )
+            }
+        }
+    }
+}
+
+/** A photo from app storage, decoded off the main thread at about the size it's shown. */
+@Composable
+private fun PhotoThumbnail(path: String, modifier: Modifier = Modifier) {
+    val bitmap by produceState<ImageBitmap?>(null, path) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(path, bounds)
+                val longest = maxOf(bounds.outWidth, bounds.outHeight)
+                val options = BitmapFactory.Options().apply { inSampleSize = (longest / 512).coerceAtLeast(1) }
+                BitmapFactory.decodeFile(path, options)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = modifier) {
+        bitmap?.let {
+            Image(it, contentDescription = "Photo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
     }
 }

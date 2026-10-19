@@ -28,11 +28,17 @@ fun safeTokenWindow(context: Context, modelFile: File, requested: Int): Int {
     return minOf(requested, ramCap, learnedCap)
 }
 
+/**
+ * Version of how models use memory (precision, where the image encoder runs). Bumped when that changes,
+ * so a kill under the old setup doesn't shrink the context window under the new one.
+ */
+private const val MEMORY_PROFILE = "2"
+
 /** Records what is loaded so a low-memory kill can be traced back to it on the next launch. */
 fun recordLoadedModel(context: Context, modelFile: File, tokenWindow: Int) {
     runCatching {
         context.getSystemService(ActivityManager::class.java)
-            .setProcessStateSummary("${modelFile.name}|$tokenWindow".toByteArray(Charsets.UTF_8).take(128).toByteArray())
+            .setProcessStateSummary("${modelFile.name}|$tokenWindow|$MEMORY_PROFILE".toByteArray(Charsets.UTF_8).take(128).toByteArray())
     }
 }
 
@@ -54,8 +60,11 @@ fun learnFromLowMemoryKill(context: Context): String? {
     prefs.edit().putLong("lastHandledExitTimestamp", last.timestamp).apply()
 
     val summary = last.processStateSummary?.toString(Charsets.UTF_8) ?: return null
-    val modelName = summary.substringBefore('|')
-    val window = summary.substringAfter('|').toIntOrNull() ?: return null
+    val parts = summary.split('|')
+    // A kill under an older memory setup says nothing about the current one.
+    if (parts.getOrNull(2) != MEMORY_PROFILE) return null
+    val modelName = parts[0]
+    val window = parts.getOrNull(1)?.toIntOrNull() ?: return null
     if (modelName.isBlank()) return null
     val newCap = maxOf(4096, window / 2)
     if (newCap < window) {
