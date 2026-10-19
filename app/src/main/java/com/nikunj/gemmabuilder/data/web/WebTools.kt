@@ -249,14 +249,18 @@ fun webResearchPrompt(request: String, pages: List<PageText>, unread: List<Searc
 }
 
 /**
- * With web search on, Chat searches only when the question needs current information: a website,
- * news, prices, weather, scores, or words like "latest" and "today". Other messages answer offline.
+ * With web search on, Chat searches only for clear signs that the answer lives online: a website,
+ * news, weather, prices, scores, stocks, "latest", or an explicit "search". Writing tasks ("write a
+ * thank-you note to a coworker who helped me this week") never search unless the user says "search".
  */
 fun chatNeedsWeb(message: String): Boolean {
+    if (looksLikeSearchRequest(message)) return true
     val lower = message.lowercase()
     val site = Regex("""(?:https?://|www\.|\b[\w-]+\.(?:com|org|net|io|ca|co|uk|dev|ai)\b)""").containsMatchIn(lower)
-    val fresh = Regex(
-        """\b(news|headlines?|weather|forecast|prices?|deals?|sales?|latest|newest|today'?s?|tonight|tomorrow'?s|current(?:ly)?|right now|this (?:week|month|year)|scores?|stocks?|who won|release date|open now|near me|reviews?|20\d\d)\b"""
-    ).containsMatchIn(lower)
-    return site || fresh || looksLikeSearchRequest(message)
+    if (site) return true
+    // Writing and explaining come from the model itself, whatever words like "this week" they contain.
+    val writing = Regex("""^\s*(?:please\s+|can you\s+|could you\s+)?(?:write|draft|compose|rewrite|reword|edit|proofread|translate|make|create|generate|brainstorm|plan|explain|help me write)\b""")
+    val writingThing = Regex("""\b(note|email|letter|poem|story|essay|message|caption|speech|toast|joke)\b""")
+    if (writing.containsMatchIn(lower) || writingThing.containsMatchIn(lower)) return false
+    return Regex("""\b(news|headlines?|weather|forecast|prices?|deals?|on sale|latest|newest|scores?|stocks?|who won|release date|open now|near me)\b""").containsMatchIn(lower)
 }

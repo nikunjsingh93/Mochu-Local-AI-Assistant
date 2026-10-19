@@ -90,6 +90,10 @@ class WebToolsTest {
         assertTrue(chatNeedsWeb("weather in Boston tomorrow"))
         assertFalse(chatNeedsWeb("Write a short poem about the sea"))
         assertFalse(chatNeedsWeb("Explain how a for loop works"))
+        assertFalse(chatNeedsWeb("write a friendly thank you note to cowarker helping me this week"))
+        assertFalse(chatNeedsWeb("Plan a relaxed weekend in Tokyo today"))
+        assertTrue(chatNeedsWeb("what's the weather today"))
+        assertTrue(chatNeedsWeb("search for a good thank you note template"))
     }
 
     @Test
