@@ -1,22 +1,24 @@
 <p align="center">
-  <img src="docs/assets/icon_no_bg.png" alt="OnDevice Studio logo" width="72" />
+  <img src="docs/assets/mochu.svg" alt="Mochu AI logo" width="96" />
 </p>
 
-<h1 align="center">OnDevice Studio</h1>
+<h1 align="center">Mochu AI</h1>
 
 <p align="center">
-  OnDevice Studio is an Android app that helps you build and preview web apps (HTML/CSS/JS) directly on your device using local AI workflows.
-  Import a compatible .litertlm model, generate with prompts, iterate fast in live preview, and export your project when ready.
+  A cute, private AI assistant that runs entirely on your Android phone. Chat, search the web, ask about photos,
+  set timers and scheduled tasks, talk with your voice, and build small web apps, all with on-device models.
 </p>
 
 ## App Features
 
-- Build simple web apps from prompts directly on Android
-- Live preview your generated app instantly
-- Edit and iterate with chat-style prompts
-- Import model files and run generation on-device
-- Import project files and export your work as ZIP
-- Keep your generated files inside app-local storage by default
+- **Chat** with on-device models (Gemma 4 E2B/E4B on the GPU, GGUF models like Qwen and Bonsai on the CPU), with visible thinking
+- **Web search and an in-app Browser**: Mochu searches DuckDuckGo when a question needs current info and cites its sources
+- **Photos**: ask about pictures and screenshots (Gemma 4 E2B/E4B)
+- **Memory**: "remember that…" facts used in every chat, managed in Settings
+- **Tasks**: timers, a stopwatch, reminders, and scheduled assistant tasks ("every day at 8am summarize tech news") with notifications
+- **Voice**: talk with the mic; replies can be read aloud
+- **Studio**: build and preview small web apps (HTML/CSS/JS) from prompts and export them as ZIP
+- Everything runs on the phone; chats, files and models stay on the device
 
 ## Screenshots
 
@@ -53,25 +55,18 @@ Notes:
 
 ## Installing
 
-1. Go to the GitHub **Releases** page: [OnDevice Studio v1.0.8](https://github.com/nikunjsingh93/ondevice-studio/releases/tag/v1.0.8)
+1. Go to the GitHub **Releases** page: [latest release](https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/latest)
 2. Download the latest APK from the most recent release.
 3. Open the APK on your Android device and install it.
-4. Launch **OnDevice Studio**.
+4. Launch **Mochu AI**.
 
 Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so they install as a separate app next to the old one. Export any projects you want to keep from the old app (Files → Save ZIP), then uninstall it.
 
 ## Using the App
 
-1. Open OnDevice Studio on your device.
-2. Import a compatible `.litertlm` or `.gguf` model from the menu.
-Model setup: This repository does **not** include model files, so download one first and then import it in-app.
-Recommended model family: `litert-community/gemma-4-E2B-it.litertlm`
-Model source: [Hugging Face - litert-community/gemma-4-E2B-it-litert-lm](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/tree/main)
-GGUF models (the format used by apps like PocketPal) run on the CPU through llama.cpp. A 4-bit quant (`Q4_K_M` or `Q4_0`) of a 1–4B instruct model is a good fit for phones.
-3. Enter a prompt (example: `Build a calculator app with a clean UI`).
-4. Generate and review the live preview.
-5. Refine with follow-up prompts.
-6. Export files when you are ready.
+1. Open Mochu AI and download a model from the **Models** tab (the app recommends one for your phone), or import a `.litertlm` / `.gguf` file.
+2. Chat with Mochu, or switch to **Studio** to build a web app from a prompt.
+3. Use the globe for web search, the photo button for pictures, the mic to talk, and the clock for tasks and reminders.
 
 ## Security and Privacy Notes
 
@@ -109,8 +104,8 @@ GGUF models (the format used by apps like PocketPal) run on the CPU through llam
 
 Current app version:
 
-- `versionName`: `1.0.8`
-- `applicationId`: `com.nikunj.ondevicestudio`
+- `versionName`: `1.2.0`
+- `applicationId`: `com.nikunj.ondevicestudio` (kept from the app's original name so updates install over earlier versions)
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.
 

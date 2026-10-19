@@ -301,7 +301,7 @@ fun SettingsScreen(
                     OutlinedButton(onClick = { settingsSubPage = "licenses" }) {
                         Text("Open Third-Party Licenses")
                     }
-                    OutlinedButton(onClick = { uriHandler.openUri("https://github.com/nikunjsingh93/ondevice-studio") }) {
+                    OutlinedButton(onClick = { uriHandler.openUri("https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/latest") }) {
                         Text("Check for updates on GitHub")
                     }
                 }
