@@ -271,52 +271,28 @@ fun ChatPanel(
             }
             ContextMeter(state)
             var addMenuOpen by remember { mutableStateOf(false) }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box {
-                    IconButton(
-                        onClick = { addMenuOpen = true },
-                        enabled = !state.isBusy
-                    ) {
-                        Icon(Icons.Outlined.Add, contentDescription = "Add attachments")
-                    }
-                    DropdownMenu(expanded = addMenuOpen, onDismissRequest = { addMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Add files") },
-                            leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
-                            onClick = { addMenuOpen = false; onAddFiles() }
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = state.prompt,
-                    onValueChange = onPromptChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { if (state.messages.isEmpty()) Text(SAMPLE_PLACEHOLDER) },
-                    minLines = 1,
-                    maxLines = 4,
-                    enabled = !state.isBusy,
-                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (!state.isBusy && state.prompt.isNotBlank() && state.modelReady) onGenerate() })
-                )
-                Button(
-                    onClick = onGenerate,
-                    modifier = Modifier.size(54.dp),
-                    enabled = state.prompt.isNotBlank() && !state.isBusy && state.modelReady
-                ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "➤",
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.offset(x = (-2).dp)
-                        )
+            Composer(
+                text = state.prompt,
+                enabled = !state.isBusy,
+                canSend = state.prompt.isNotBlank() && !state.isBusy && state.modelReady,
+                placeholder = if (state.messages.isEmpty()) SAMPLE_PLACEHOLDER else "Ask for a change",
+                onTextChange = onPromptChange,
+                onSend = onGenerate,
+                leading = {
+                    Box {
+                        IconButton(onClick = { addMenuOpen = true }, enabled = !state.isBusy) {
+                            Icon(Icons.Outlined.Add, contentDescription = "Add attachments")
+                        }
+                        DropdownMenu(expanded = addMenuOpen, onDismissRequest = { addMenuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Add files") },
+                                leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
+                                onClick = { addMenuOpen = false; onAddFiles() }
+                            )
+                        }
                     }
                 }
-            }
+            )
         }
     }
 }

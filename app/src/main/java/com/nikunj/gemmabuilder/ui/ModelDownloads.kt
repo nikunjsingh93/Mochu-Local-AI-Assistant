@@ -49,7 +49,8 @@ fun ModelDownloadsScreen(
     onDelete: (String) -> Unit,
     onAllowMobileDataChange: (Boolean) -> Unit,
     onImportFile: () -> Unit,
-    onDismiss: () -> Unit
+    // Null when shown as a tab, so there is no Back button or bottom inset of its own.
+    onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val ramGb = remember(context) { deviceRamGb(context) }
@@ -71,21 +72,23 @@ fun ModelDownloadsScreen(
         }
     }
 
-    BackHandler(onBack = onDismiss)
+    if (onDismiss != null) BackHandler(onBack = onDismiss)
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding()
+                .then(if (onDismiss != null) Modifier.navigationBarsPadding() else Modifier)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onDismiss) { Text("Back") }
-                Spacer(Modifier.width(12.dp))
-                Text("Models", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (onDismiss != null) {
+                    OutlinedButton(onClick = onDismiss) { Text("Back") }
+                    Spacer(Modifier.width(12.dp))
+                }
+                Text("Models", style = MaterialTheme.typography.headlineSmall)
             }
             Column(
                 modifier = Modifier

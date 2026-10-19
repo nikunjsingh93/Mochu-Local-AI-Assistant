@@ -58,12 +58,14 @@ fun SettingsScreen(
     contextTokens: Int,
     activeContextTokens: Int?,
     themeMode: String,
+    dynamicColor: Boolean,
     backendPreference: String,
     speculativeDecodingEnabled: Boolean,
     onChatFontScale: (Float) -> Unit,
     onCodeFontScale: (Float) -> Unit,
     onContextTokensChange: (Int) -> Unit,
     onThemeModeChange: (String) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
     onBackendPreferenceChange: (String) -> Unit,
     onSpeculativeDecodingChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
@@ -179,6 +181,21 @@ fun SettingsScreen(
                                 Text(if (themeMode == mode) "✓ $label" else label)
                             }
                         }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Wallpaper colors")
+                            Text(
+                                "Match the app's accent to your wallpaper (Material You).",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = dynamicColor, onCheckedChange = onDynamicColorChange)
                     }
                     HorizontalDivider()
                     val contextOptions = CONTEXT_TOKEN_OPTIONS
