@@ -191,7 +191,8 @@ fun ChatPanel(
     onAddFiles: () -> Unit,
     onOpenImagePreview: (String) -> Unit,
     chatFontScale: Float,
-    liftInputForKeyboard: Boolean
+    liftInputForKeyboard: Boolean,
+    onStop: () -> Unit = {}
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -278,6 +279,8 @@ fun ChatPanel(
                 placeholder = if (state.messages.isEmpty()) SAMPLE_PLACEHOLDER else "Ask for a change",
                 onTextChange = onPromptChange,
                 onSend = onGenerate,
+                busy = state.isBusy,
+                onStop = onStop,
                 leading = {
                     Box {
                         IconButton(onClick = { addMenuOpen = true }, enabled = !state.isBusy) {

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -57,6 +58,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -90,7 +92,8 @@ fun AssistantChatScreen(
     onSend: () -> Unit,
     onBuildInStudio: (String) -> Unit,
     onToggleWeb: (Boolean) -> Unit,
-    onOpenLink: (String) -> Unit
+    onOpenLink: (String) -> Unit,
+    onStop: () -> Unit
 ) {
     // Links in replies (e.g. sources) open in the in-app Browser instead of leaving the app.
     val inAppLinks = remember(onOpenLink) {
@@ -139,6 +142,8 @@ fun AssistantChatScreen(
                 },
                 onTextChange = onPromptChange,
                 onSend = onSend,
+                busy = state.isBusy,
+                onStop = onStop,
                 leading = {
                     IconButton(onClick = { onToggleWeb(!state.webSearchEnabled) }, enabled = !state.isBusy) {
                         Icon(
@@ -295,8 +300,17 @@ private fun WelcomeState(
 private fun MessageList(state: BuilderUiState) {
     val listState = rememberLazyListState()
     val itemCount = state.messages.size + if (state.streamingReply != null) 1 else 0
-    LaunchedEffect(itemCount, state.streamingReply?.length) {
-        if (itemCount > 0) listState.animateScrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE / 2)
+    // Follow new text only while the user is at the bottom; scrolling up pauses it until they return.
+    var followBottom by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }.collect { (scrolling, canGoDown) ->
+            if (scrolling && listState.lastScrolledBackward) followBottom = false
+            if (!canGoDown) followBottom = true
+        }
+    }
+    LaunchedEffect(itemCount) { followBottom = true }
+    LaunchedEffect(itemCount, state.streamingReply?.length, state.liveActivity.size) {
+        if (itemCount > 0 && followBottom) listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE / 2)
     }
     LazyColumn(
         state = listState,
@@ -398,7 +412,10 @@ fun Composer(
     placeholder: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
-    leading: (@Composable () -> Unit)? = null
+    leading: (@Composable () -> Unit)? = null,
+    // While busy, the send button becomes a Stop button when [onStop] is given.
+    busy: Boolean = false,
+    onStop: (() -> Unit)? = null
 ) {
     Surface(
         shape = RoundedCornerShape(28.dp),
@@ -427,9 +444,10 @@ fun Composer(
                 ),
                 modifier = Modifier.weight(1f)
             )
+            val showStop = busy && onStop != null
             FilledIconButton(
-                onClick = onSend,
-                enabled = canSend,
+                onClick = { if (showStop) onStop?.invoke() else onSend() },
+                enabled = canSend || showStop,
                 shape = CircleShape,
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -439,7 +457,11 @@ fun Composer(
                     .padding(bottom = 4.dp)
                     .size(44.dp)
             ) {
-                Icon(Icons.Rounded.ArrowUpward, contentDescription = "Send")
+                if (showStop) {
+                    Icon(Icons.Rounded.Stop, contentDescription = "Stop")
+                } else {
+                    Icon(Icons.Rounded.ArrowUpward, contentDescription = "Send")
+                }
             }
         }
     }
@@ -474,6 +496,7 @@ fun ActivityLog(steps: List<ActivityStep>, live: Boolean) {
                 Text(
                     when {
                         live -> "Researching on the web…"
+                        steps.none { it.kind == ACTIVITY_SEARCH } -> "Read ${if (reads == 1) "a page" else "$reads pages"} from the Browser"
                         reads == 0 -> "Searched the web"
                         else -> "Searched the web · $reads page${if (reads == 1) "" else "s"} read"
                     },

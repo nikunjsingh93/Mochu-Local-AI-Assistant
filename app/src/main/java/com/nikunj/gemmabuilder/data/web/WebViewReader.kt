@@ -30,7 +30,7 @@ const val PAGE_EXTRACT_SCRIPT = """
  * bot checks work) and returns its readable text, or null on timeout or error.
  */
 @SuppressLint("SetJavaScriptEnabled")
-suspend fun readWithWebView(context: Context, url: String, timeoutMs: Long = 20_000): PageText? =
+suspend fun readWithWebView(context: Context, url: String, timeoutMs: Long = 25_000): PageText? =
     withContext(Dispatchers.Main) {
         val webView = WebView(context.applicationContext).apply {
             settings.javaScriptEnabled = true
@@ -55,8 +55,21 @@ suspend fun readWithWebView(context: Context, url: String, timeoutMs: Long = 20_
                     webView.loadUrl(url)
                 }
                 if (!loaded) return@withTimeoutOrNull null
-                // Give client-side rendering a moment after the load event.
-                delay(2_500)
+                // Many shops render listings well after the load event and only as you scroll. Scroll a
+                // step at a time and stop once the page text has stopped growing (or after ~12 s).
+                var lastLength = -1
+                var stablePolls = 0
+                for (step in 1..12) {
+                    delay(1_000)
+                    val length = suspendCancellableCoroutine { cont ->
+                        webView.evaluateJavascript(
+                            "window.scrollTo(0, document.body.scrollHeight * $step / 12); (document.body.innerText || '').length"
+                        ) { result -> if (cont.isActive) cont.resume(result?.toIntOrNull() ?: 0) }
+                    }
+                    stablePolls = if (length == lastLength) stablePolls + 1 else 0
+                    lastLength = length
+                    if (stablePolls >= 2 && length >= 1_500) break
+                }
                 val json = suspendCancellableCoroutine { cont ->
                     webView.evaluateJavascript(PAGE_EXTRACT_SCRIPT) { result -> if (cont.isActive) cont.resume(result) }
                 }

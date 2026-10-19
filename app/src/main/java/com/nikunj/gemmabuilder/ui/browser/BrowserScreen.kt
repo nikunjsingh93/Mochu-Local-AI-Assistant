@@ -49,7 +49,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -77,6 +80,8 @@ fun BrowserScreen(
     onAskAboutPage: (PageText) -> Unit
 ) {
     val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val pageBackground = MaterialTheme.colorScheme.background.toArgb()
     var address by rememberSaveable { mutableStateOf("") }
     var currentUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var progress by remember { mutableFloatStateOf(1f) }
@@ -133,6 +138,7 @@ fun BrowserScreen(
                     keyboardActions = KeyboardActions(onGo = {
                         if (address.isNotBlank()) open(browserTarget(address))
                         focus.clearFocus()
+                        keyboard?.hide()
                     }),
                     textStyle = MaterialTheme.typography.bodyMedium,
                     colors = TextFieldDefaults.colors(
@@ -160,10 +166,12 @@ fun BrowserScreen(
             )
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            AndroidView(
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+            // Created only once there's a page: an empty WebView paints white over the address bar.
+            if (currentUrl != null) AndroidView(
                 factory = { context ->
                     WebView(context).apply {
+                        setBackgroundColor(pageBackground)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.userAgentString = WEB_USER_AGENT

@@ -33,6 +33,8 @@ class BuilderViewModel : ViewModel() {
     private var conversations: MutableList<ChatConversation> = mutableListOf()
     private var generationInProgress = false
     private var generationJob: Job? = null
+    // Set by the Stop button; the streaming loop checks it between tokens.
+    @Volatile private var stopRequested = false
     // "<chat id>|<workspace fingerprint>" the open model session was last in sync with.
     private var sessionFingerprint: String? = null
     // Context window the loaded model actually got (may be below the setting to fit in memory).
@@ -965,7 +967,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         generationInProgress = true
         val title = page.title.ifBlank { hostOf(page.url) }
         val research = WebResearch(
-            prompt = researchPrompt(question, listOf(page), emptyList()),
+            // Small models read "this page" as missing unless told which source it is.
+            prompt = researchPrompt("$question (\"This page\" is source [1], \"$title\", which the user has open in the browser.)", listOf(page), emptyList()),
             pages = listOf(page),
             steps = listOf(ActivityStep(ACTIVITY_READ, "Read ${hostOf(page.url)} from the Browser", page.url))
         )
@@ -973,6 +976,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
     }
 
     private fun generateAssistantReply(context: Context, prompt: String, presetResearch: WebResearch? = null) {
+        stopRequested = false
         generationJob = viewModelScope.launch {
             try {
                 if (!uiState.value.modelReady) {
@@ -1027,6 +1031,11 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         .collect { chunk ->
                             if (firstTokenAtMs == null && chunk.isNotBlank()) firstTokenAtMs = System.currentTimeMillis()
                             output.append(chunk)
+                            if (stopRequested) throw StopGeneration("Stopped.")
+                            degenerateRepetitionStart(output)?.let { start ->
+                                output.setLength(start)
+                                throw StopGeneration("Stopped because the model started repeating itself.")
+                            }
                             val now = System.currentTimeMillis()
                             if (now - lastUiUpdate > 80L) {
                                 lastUiUpdate = now
@@ -1036,20 +1045,35 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         }
                 }
 
-                val reply = output.toString().trim()
+                // Stopping early still keeps what was written; the session is reset by the engine.
+                val stopNote = (result.exceptionOrNull() as? StopGeneration)?.reason
+                val reply = output.toString().trim().let { if (stopNote != null && it.isNotBlank()) "$it\n\n_${stopNote}_" else it }
                 val text = when {
                     reply.isNotBlank() -> reply
+                    stopNote != null -> "_${stopNote}_"
                     result.isFailure -> "Sorry, the model stopped with an error: ${result.exceptionOrNull()?.message ?: "unknown error"}"
                     else -> "The model returned an empty reply. Try asking again."
                 }
                 if (result.isFailure || reply.isBlank()) engine.resetSession()
+                // Small models sometimes invent prices; flag any number that isn't in the sources.
+                val unverified = if (research != null && reply.isNotBlank()) {
+                    unverifiedNumbers(reply, research.pages.map { it.text })
+                } else {
+                    emptyList()
+                }
+                val checkedText = if (unverified.isEmpty()) text else {
+                    text + "\n\n> ⚠️ These numbers weren't found in the sources and may be wrong: " +
+                        unverified.take(6).joinToString(", ") + ". Check the source pages before relying on them."
+                }
                 // The app appends the links itself, so they're always correct even if the model garbles them.
                 val withSources = if (research != null && research.pages.isNotEmpty() && reply.isNotBlank()) {
-                    text + "\n\n**Sources**\n" + research.pages.mapIndexed { i, page ->
-                        "${i + 1}. [${page.title.ifBlank { hostOf(page.url) }.replace("]", ")")}](${page.url})"
+                    checkedText + "\n\n**Sources**\n" + research.pages.mapIndexed { i, page ->
+                        // Encode brackets so URLs like .../Gemini_(language_model) don't end the link early.
+                        val url = page.url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
+                        "${i + 1}. [${page.title.ifBlank { hostOf(page.url) }.replace("[", "(").replace("]", ")")}]($url)"
                     }.joinToString("\n")
                 } else {
-                    text
+                    checkedText
                 }
                 val metrics = buildGenerationMetrics(startedAtMs, firstTokenAtMs)
                 val finalMessages = uiState.value.messages +
@@ -1071,6 +1095,19 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 _uiState.update { it.copy(isBusy = false, streamingReply = null, liveActivity = emptyList()) }
                 refreshContextUsage()
             }
+        }
+    }
+
+    /**
+     * Stop button. Assistant replies stop at the next token and keep what was written; Studio
+     * generations (multi-step file writes) are cancelled outright so no half-written file is saved.
+     */
+    fun stopGeneration() {
+        if (!generationInProgress) return
+        stopRequested = true
+        if (uiState.value.activeKind == CHAT_KIND_STUDIO) {
+            generationJob?.cancel()
+            _uiState.update { it.copy(status = "Stopped.") }
         }
     }
 
@@ -1128,7 +1165,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
         val pages = mutableListOf<PageText>()
         for (result in results) {
-            if (pages.size >= MAX_WEB_PAGES) break
+            if (pages.size >= MAX_WEB_PAGES || stopRequested) break
             val host = hostOf(result.url)
             if (pages.any { hostOf(it.url) == host }) continue
             show(ActivityStep(ACTIVITY_READ, "Reading $host", result.url))
@@ -1168,8 +1205,12 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             }
             if (pages.isEmpty() && unread.isEmpty()) append("No web sources could be loaded.\n\n")
             append("User's request: $request\n\n")
-            append("Reply in Markdown: a direct answer first, then details. Use a table when comparing products or prices. ")
-            append("Cite sources like [1]. If the sources don't contain the answer, say what's missing instead of guessing.")
+            append("Reply in Markdown: one or two sentences answering directly, then details. ")
+            // Small models garble long tables (wrong digits, endless "|" rows), so ask for a short list.
+            append("When listing products or prices, use a bulleted list of at most 6 items in the form ")
+            append("\"**Name**: price — one key detail [n]\", copying names and prices exactly as written in the sources. ")
+            append("Never invent or round numbers. Cite sources like [1]. ")
+            append("If the sources don't contain the answer, say what's missing instead of guessing.")
         }
     }
 

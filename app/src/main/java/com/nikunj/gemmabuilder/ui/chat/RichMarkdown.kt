@@ -48,6 +48,7 @@ private sealed class MdBlock {
     data class ListItem(val marker: String, val text: String, val indent: Int) : MdBlock()
     data class Quote(val text: String) : MdBlock()
     data class Code(val language: String, val code: String) : MdBlock()
+    data class Table(val rows: List<List<String>>) : MdBlock()
     data object Rule : MdBlock()
 }
 
@@ -77,6 +78,18 @@ private fun parseBlocks(text: String): List<MdBlock> {
                     code.appendLine(lines[i]); i++
                 }
                 blocks += MdBlock.Code(language, code.toString().trimEnd())
+            }
+            trimmed.startsWith("|") -> {
+                flush()
+                val rows = mutableListOf<List<String>>()
+                while (i < lines.size && lines[i].trim().startsWith("|")) {
+                    val row = lines[i].trim().trim('|').split("|").map { it.trim() }
+                    // Skip the |---|:---:| separator row.
+                    if (!row.all { cell -> cell.isNotEmpty() && cell.all { it == '-' || it == ':' } }) rows += row
+                    i++
+                }
+                i--
+                if (rows.isNotEmpty()) blocks += MdBlock.Table(rows)
             }
             trimmed.isEmpty() -> flush()
             trimmed == "---" || trimmed == "***" -> { flush(); blocks += MdBlock.Rule }
@@ -188,6 +201,7 @@ fun RichMarkdown(text: String, fontScale: Float, modifier: Modifier = Modifier, 
                         )
                     }
                     is MdBlock.Code -> CodeBlock(block.language, block.code, body)
+                    is MdBlock.Table -> MarkdownTable(block.rows, body, codeBackground, linkColor)
                     MdBlock.Rule -> HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
@@ -228,6 +242,40 @@ private fun CodeBlock(language: String, code: String, body: TextStyle) {
                     .horizontalScroll(rememberScrollState())
                     .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun MarkdownTable(rows: List<List<String>>, body: TextStyle, codeBackground: Color, linkColor: Color) {
+    val columns = rows.maxOf { it.size }
+    // Width per column from its longest cell, within sensible bounds.
+    val widths = (0 until columns).map { c -> (rows.maxOf { it.getOrNull(c)?.length ?: 0 }.coerceIn(4, 28) * 8 + 24).dp }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.horizontalScroll(rememberScrollState())) {
+            rows.forEachIndexed { r, row ->
+                Row {
+                    (0 until columns).forEach { c ->
+                        Text(
+                            inlineMarkdown(row.getOrNull(c).orEmpty(), codeBackground, linkColor),
+                            style = body.copy(fontSize = body.fontSize * 0.88f, fontWeight = if (r == 0) FontWeight.SemiBold else null),
+                            modifier = Modifier
+                                .width(widths[c])
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+                if (r < rows.lastIndex) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.width(widths.fold(0.dp) { total, w -> total + w })
+                    )
+                }
+            }
         }
     }
 }

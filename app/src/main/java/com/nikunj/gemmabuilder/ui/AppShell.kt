@@ -191,7 +191,8 @@ fun OnDeviceApp(
                             vm.generate(app)
                         },
                         onToggleWeb = { vm.setWebSearchEnabled(app, it) },
-                        onOpenLink = { url -> vm.openInBrowserTab(url) }
+                        onOpenLink = { url -> vm.openInBrowserTab(url) },
+                        onStop = vm::stopGeneration
                     )
                     AppTab.Browser -> BrowserScreen(
                         requestedUrl = state.browserUrl,
@@ -222,7 +223,8 @@ fun OnDeviceApp(
                             fileSaver.launch(path.substringAfterLast('/'))
                         },
                         onSaveZip = { zipSaver.launch("OnDeviceStudioProject.zip") },
-                        onSavePwaZip = { pwaZipSaver.launch("OnDeviceStudioPWA.zip") }
+                        onSavePwaZip = { pwaZipSaver.launch("OnDeviceStudioPWA.zip") },
+                        onStop = vm::stopGeneration
                     )
                     AppTab.Models -> ModelDownloadsScreen(
                         state = state,

@@ -110,6 +110,38 @@ fun looksBlocked(page: PageText): Boolean {
     return markers.any { it in title || it in start }
 }
 
+private val numberRegex = Regex("""\$?\d[\d,]*(?:\.\d+)?""")
+
+/**
+ * Price-like numbers in [answer] that appear nowhere in [sources]: likely invented by the model.
+ * Checks amounts with a "$" and any number with a decimal point or four or more digits, ignoring
+ * citation markers like [1] and years.
+ */
+fun unverifiedNumbers(answer: String, sources: List<String>): List<String> {
+    val sourceText = normalizeAmounts(sources.joinToString("\n"))
+    return numberRegex.findAll(answer.replace(Regex("""\[\d+(?:,\s*\d+)*]"""), ""))
+        .map { it.value.trimEnd('.', ',') }
+        .filter { value ->
+            val digits = value.removePrefix("$").replace(",", "")
+            val isYear = digits.length == 4 && !digits.contains('.') && digits.toIntOrNull() in 1900..2100
+            !isYear && (value.startsWith("$") || digits.contains('.') || digits.length >= 4)
+        }
+        .filterNot { value -> amountPattern(value).containsMatchIn(sourceText) }
+        .distinct()
+        .toList()
+}
+
+/** Drops thousands separators and a zero cents part, so "$1,099.00" and "$1099" compare equal. */
+private fun normalizeAmounts(text: String): String =
+    text.replace(Regex("""(?<=\d),(?=\d{3})"""), "").replace(Regex("""(?<=\d)\.00?(?!\d)"""), "")
+
+/** Matches [value] only as a whole amount, so "$19" doesn't count as found inside "$199". */
+private fun amountPattern(value: String): Regex {
+    val digits = Regex.escape(normalizeAmounts(value.removePrefix("$")))
+    val prefix = if (value.startsWith("$")) """\$\s?""" else """(?<![\d.])"""
+    return Regex(prefix + digits + """(?!\d|\.\d)""")
+}
+
 /** Pages the research recipe reads per question; more rarely helps a small model and costs time. */
 const val MAX_WEB_PAGES = 3
 

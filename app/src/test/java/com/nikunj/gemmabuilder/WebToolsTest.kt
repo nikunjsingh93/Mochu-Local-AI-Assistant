@@ -91,6 +91,20 @@ class WebToolsTest {
     }
 
     @Test
+    fun flagsNumbersNotInSources() {
+        val sources = listOf("MacBook Air M4 now \$799.00, Dell XPS 13 for \$1,099.99 (2026 model)")
+        val answer = "- **MacBook Air**: \$799.00 [1]\n- **Dell XPS 13**: \$1,099.99 [1]\n- **HP OmniBook**: 1699.9999 [2]\n- Released in 2026, with 16 GB."
+        assertEquals(listOf("1699.9999"), unverifiedNumbers(answer, sources))
+    }
+
+    @Test
+    fun numberCheckMatchesWholeAmountsOnly() {
+        val sources = listOf("Chromebooks from \$199. Save \$100 on gaming laptops. MacBook Air \$699.00, now 1,299.50 off.")
+        val answer = "- Save \$10 on gaming [1]\n- MacBook Air: \$699 [1]\n- From \$19 [1]\n- Chromebooks from \$199\n- 1299.5 and 1,299.50"
+        assertEquals(listOf("\$10", "\$19", "1299.5"), unverifiedNumbers(answer, sources))
+    }
+
+    @Test
     fun detectsBotCheckPages() {
         assertTrue(looksBlocked(PageText("Just a moment...", "https://x.com", "Checking your browser")))
         assertFalse(looksBlocked(PageText("Laptop deals", "https://x.com", "MacBook Air $799")))

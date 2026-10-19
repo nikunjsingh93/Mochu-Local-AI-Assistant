@@ -202,7 +202,8 @@ fun StudioScreen(
     onDeleteFile: (String) -> Unit,
     onSaveFile: (String) -> Unit,
     onSaveZip: () -> Unit,
-    onSavePwaZip: () -> Unit
+    onSavePwaZip: () -> Unit,
+    onStop: () -> Unit = {}
 ) {
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -250,7 +251,8 @@ fun StudioScreen(
                     onAddFiles = onImportFiles,
                     onOpenImagePreview = onOpenImagePreview,
                     chatFontScale = state.chatFontScale,
-                    liftInputForKeyboard = state.workPanelCollapsed
+                    liftInputForKeyboard = state.workPanelCollapsed,
+                    onStop = onStop
                 )
                 WorkPanel(
                     modifier = Modifier
@@ -295,7 +297,8 @@ fun StudioScreen(
                             onAddFiles = onImportFiles,
                             onOpenImagePreview = onOpenImagePreview,
                             chatFontScale = state.chatFontScale,
-                            liftInputForKeyboard = false
+                            liftInputForKeyboard = false,
+                            onStop = onStop
                         )
                     }
                     Box(
@@ -325,7 +328,8 @@ fun StudioScreen(
                         onAddFiles = onImportFiles,
                         onOpenImagePreview = onOpenImagePreview,
                         chatFontScale = state.chatFontScale,
-                        liftInputForKeyboard = false
+                        liftInputForKeyboard = false,
+                        onStop = onStop
                     )
                     WorkPanel(
                         modifier = Modifier.fillMaxSize(),
