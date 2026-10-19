@@ -414,6 +414,8 @@ fun ProcessingBubble(status: String, chatFontScale: Float) {
         text = when {
             status.contains("Loading", ignoreCase = true) -> "Loading model..."
             status.contains("Thinking", ignoreCase = true) || status.contains("Generating", ignoreCase = true) -> "Thinking..."
+            status.startsWith("Writing") -> "Writing code…"
+            status.startsWith("Checking") -> "Checking the code…"
             else -> "Processing..."
         },
         style = MaterialTheme.typography.bodySmall.copy(fontSize = MaterialTheme.typography.bodySmall.fontSize * chatFontScale),
