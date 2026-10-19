@@ -57,7 +57,7 @@ private sealed class MdBlock {
     data class Code(val language: String, val code: String) : MdBlock()
     data class Table(val rows: List<List<String>>) : MdBlock()
     /** Text under a label like "Option 1:" (a drafted note, message, caption...), shown as a copyable card. */
-    data class Note(val label: MdBlock, val body: List<MdBlock>) : MdBlock()
+    data class Note(val label: MdBlock?, val body: List<MdBlock>) : MdBlock()
     data object Rule : MdBlock()
 }
 
@@ -79,6 +79,18 @@ private fun groupNotes(blocks: List<MdBlock>): List<MdBlock> {
     var i = 0
     while (i < blocks.size) {
         val block = blocks[i]
+        // Text framed by two --- rules is a drafted note too ("Here's a note:" --- Hi Nick, … --- ).
+        if (block == MdBlock.Rule) {
+            val close = (i + 1 until blocks.size).firstOrNull { blocks[it] == MdBlock.Rule }
+            val inside = close?.let { blocks.subList(i + 1, it) }
+            if (inside != null && inside.isNotEmpty() &&
+                inside.all { it is MdBlock.Paragraph || it is MdBlock.ListItem || it is MdBlock.Quote }
+            ) {
+                out += MdBlock.Note(null, inside.toList())
+                i = close + 1
+                continue
+            }
+        }
         if (isNoteLabel(block)) {
             var j = i + 1
             // Stop at the next label, or at a bold lead-in like "**Tips:**" that starts another part.
@@ -306,7 +318,7 @@ private fun MarkdownBlock(
                         )
                     }
                     is MdBlock.Note -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MarkdownBlock(block.label, body, fontScale, color, codeBackground, linkColor)
+                        block.label?.let { MarkdownBlock(it, body, fontScale, color, codeBackground, linkColor) }
                         CopyCard(notePlainText(block.body)) {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 block.body.forEach { MarkdownBlock(it, body, fontScale, color, codeBackground, linkColor, inCard = true) }
