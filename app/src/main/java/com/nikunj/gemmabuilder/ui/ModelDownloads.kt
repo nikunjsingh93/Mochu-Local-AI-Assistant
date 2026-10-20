@@ -193,9 +193,7 @@ private fun ModelSection(
             usage = if (isActive) state else null,
             contextTokens = state.modelContextTokens[model.fileName],
             onContextChange = { onContextChange(model.fileName, it) },
-            visionStatus = model.visionId?.let { id -> MODEL_CATALOG.firstOrNull { it.id == id } }
-                ?.let { it to (state.modelDownloads[it.id] ?: ModelDownloadState()) },
-            onDownloadVision = onDownload,
+            visionStatus = model.visionId?.let { id -> state.modelDownloads[id] ?: ModelDownloadState() },
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
@@ -215,8 +213,7 @@ private fun ModelCard(
     usage: BuilderUiState?,
     contextTokens: Int?,
     onContextChange: (Int) -> Unit,
-    visionStatus: Pair<CatalogModel, ModelDownloadState>?,
-    onDownloadVision: (String) -> Unit,
+    visionStatus: ModelDownloadState?,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -249,16 +246,15 @@ private fun ModelCard(
             }
             Text(model.summary, style = MaterialTheme.typography.bodySmall)
             usage?.let { ModelUsage(it) }
-            visionStatus?.let { (vision, visionDownload) ->
+            // Photo support downloads with its model; only its progress shows here.
+            visionStatus?.let { visionDownload ->
                 when (visionDownload.phase) {
                     DownloadPhase.Downloaded -> Text("Sees photos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     in ACTIVE_DOWNLOAD_PHASES -> {
                         Text("Photo support: ${visionDownload.message ?: "downloading…"}", style = MaterialTheme.typography.labelSmall)
                         LinearProgressIndicator(progress = { visionDownload.progress }, modifier = Modifier.fillMaxWidth())
                     }
-                    else -> if (download.phase == DownloadPhase.Downloaded) {
-                        OutlinedButton(onClick = { onDownloadVision(vision.id) }) { Text("Add photo support (${formatBytes(vision.sizeBytes)})") }
-                    }
+                    else -> Unit
                 }
             }
             if (download.phase == DownloadPhase.Downloaded && contextTokens != null) {

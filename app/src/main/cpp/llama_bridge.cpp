@@ -61,6 +61,7 @@ struct Session {
     std::string pending;              // trailing bytes of an incomplete UTF-8 character
     int max_output = 0;
     bool thinking = false;            // let reasoning models think first (their template decides how)
+    std::string lead;                 // text to emit before the first token (a <think> the prompt opened)
     int generated = 0;
     bool generating = false;
 };
@@ -145,7 +146,16 @@ jbyteArray to_bytes(JNIEnv *env, const std::string &text) {
 
 Session *session(jlong handle) { return reinterpret_cast<Session *>(handle); }
 
-void start_reply(Session *s, int max_output) {
+// Some templates (Qwen3.5) end the prompt with "<think>", so the model's output starts mid-thought and
+// only the closing tag shows up. Emitting the opening tag first lets the app show thinking as it streams.
+bool prompt_opens_thinking(const std::string &prompt) {
+    const size_t end = prompt.find_last_not_of(" \t\r\n");
+    const std::string tag = "<think>";
+    return end != std::string::npos && end + 1 >= tag.size() && prompt.compare(end + 1 - tag.size(), tag.size(), tag) == 0;
+}
+
+void start_reply(Session *s, int max_output, const std::string &prompt) {
+    s->lead = prompt_opens_thinking(prompt) ? "<think>\n" : "";
     common_sampler_reset(s->sampler);
     s->reply.clear();
     s->pending.clear();
@@ -214,7 +224,7 @@ int send_with_images(Session *s, const std::string &text, const std::vector<std:
     // re-processes the whole chat instead of reusing a prefix that contained image embeddings.
     s->cached.assign(static_cast<size_t>(new_n_past), -1);
     s->messages.back().content = std::string("[photo] ") + text;
-    start_reply(s, max_output);
+    start_reply(s, max_output, prompt);
     return SEND_OK;
 }
 
@@ -406,12 +416,7 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeSendUser(JNIEnv *env, jobject,
         s->cached.insert(s->cached.end(), tokens.begin() + static_cast<long>(i), tokens.begin() + static_cast<long>(end));
     }
 
-    common_sampler_reset(s->sampler);
-    s->reply.clear();
-    s->pending.clear();
-    s->generated = 0;
-    s->max_output = max_output > 0 ? max_output : n_ctx;
-    s->generating = true;
+    start_reply(s, max_output, prompt);
     return SEND_OK;
 }
 
@@ -420,6 +425,11 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeNextToken(JNIEnv *env, jobject, jlong handle) {
     Session *s = session(handle);
     if (!s->generating) return nullptr;
+    if (!s->lead.empty()) {
+        const std::string lead = s->lead;
+        s->lead.clear();
+        return to_bytes(env, lead);
+    }
 
     const int n_ctx = static_cast<int>(llama_n_ctx(s->ctx));
     if (s->generated >= s->max_output || static_cast<int>(s->cached.size()) >= n_ctx - 1) {

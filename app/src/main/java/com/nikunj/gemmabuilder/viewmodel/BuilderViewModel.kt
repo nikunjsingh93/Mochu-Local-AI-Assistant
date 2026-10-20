@@ -107,6 +107,7 @@ class BuilderViewModel : ViewModel() {
         cancelLegacySystemDownloads(context)
         learnFromLowMemoryKill(context)?.let { notice -> _uiState.update { it.copy(memoryNotice = notice) } }
         refreshModelDownloads(context)
+        ensurePhotoSupport(context)
         refreshPredictedWindow(context)
         // Tasks: re-arm alarms (an app update clears them) and reload chats a scheduled task adds.
         TaskAlarms.rescheduleAll(context.applicationContext)
@@ -132,7 +133,15 @@ class BuilderViewModel : ViewModel() {
         viewModelScope.launch {
             ModelDownloadTracker.completed.collect { id ->
                 refreshModelDownloads(context)
-                if (!generationInProgress && !uiState.value.isBusy) useDownloadedModel(context, id)
+                if (generationInProgress || uiState.value.isBusy) return@collect
+                val owner = MODEL_CATALOG.firstOrNull { it.visionId == id }
+                if (owner != null) {
+                    // Photo support finished: reload the model that uses it so it can see photos.
+                    if (owner.fileName == savedModelName(context)) useDownloadedModel(context, owner.id)
+                } else {
+                    useDownloadedModel(context, id)
+                    ensurePhotoSupport(context)
+                }
             }
         }
     }
@@ -162,9 +171,19 @@ class BuilderViewModel : ViewModel() {
             ModelDownloadTracker.set(id, ModelDownloadState(DownloadPhase.Failed, message = "Could not start download: ${it.message ?: "unknown error"}"))
         }
         // GGUF models that can see photos fetch their photo-support file right after.
-        model.visionId?.let { visionId ->
-            val vision = MODEL_CATALOG.firstOrNull { it.id == visionId }
-            if (vision != null && !downloadedModelFile(appContext, vision).exists()) runCatching { ModelDownloadService.start(appContext, visionId) }
+        ensurePhotoSupport(appContext)
+    }
+
+    /** Downloads the photo-support file of every downloaded (or downloading) GGUF model that lacks one. */
+    private fun ensurePhotoSupport(context: Context) {
+        val appContext = context.applicationContext
+        val live = ModelDownloadTracker.states.value
+        MODEL_CATALOG.forEach { model ->
+            val vision = model.visionId?.let { id -> MODEL_CATALOG.firstOrNull { it.id == id } } ?: return@forEach
+            val modelWanted = downloadedModelFile(appContext, model).exists() || live[model.id]?.phase in ACTIVE_DOWNLOAD_PHASES
+            if (modelWanted && !downloadedModelFile(appContext, vision).exists() && live[vision.id]?.phase !in ACTIVE_DOWNLOAD_PHASES) {
+                runCatching { ModelDownloadService.start(appContext, vision.id) }
+            }
         }
     }
 
@@ -704,6 +723,8 @@ class BuilderViewModel : ViewModel() {
         _uiState.update { it.copy(prompt = text) }
         // Only Chat replies are read aloud; Code replies are mostly code.
         voiceTurnPending = uiState.value.activeKind == CHAT_KIND_ASSISTANT
+        // Start the speech engine now so it is ready when the reply finishes.
+        if (voiceTurnPending && speaker == null) attachSpeaker(Speaker(context))
         generate(context)
     }
 
@@ -1109,7 +1130,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 // A GGUF model sees photos only with its photo-support file: say so before loading it.
                 if (images.isNotEmpty() && isGgufModel(savedModelName(context)) && visionFileFor(context, savedModelName(context)) == null) {
                     val reply = if (hasVisionSupport(savedModelName(context))) {
-                        "_Download photo support for ${modelDisplayName(uiState.value.modelName)} on the Models page to send it photos._"
+                        ensurePhotoSupport(context)
+                        "_Photo support for ${modelDisplayName(uiState.value.modelName)} is still downloading. Send the photo again once it finishes (see the Models page)._"
                     } else {
                         "_${modelDisplayName(uiState.value.modelName)} can't see photos. Gemma 4 E2B, Qwen3.5 4B and Bonsai 27B can: switch in the Models tab._"
                     }
@@ -1277,7 +1299,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     )
                 persistActiveConversation(context, finalMessages)
                 if (spokenTurn && uiState.value.speakVoiceReplies && reply.isNotBlank()) {
-                    finalMessages.last().let { speaker?.speak(it.timestamp, it.text) }
+                    val voice = speaker ?: Speaker(context).also { attachSpeaker(it) }
+                    finalMessages.last().let { voice.speak(it.timestamp, it.text) }
                 }
                 _uiState.update {
                     it.copy(
