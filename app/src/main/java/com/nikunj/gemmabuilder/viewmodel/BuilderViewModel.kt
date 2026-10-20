@@ -1823,10 +1823,39 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         generate(context)
     }
 
+    /** The name an exported app gets: the project's name. */
+    fun exportAppName(): String {
+        val active = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
+        val name = active?.let { uiState.value.projectNames[it.projectKey] } ?: active?.title?.takeUnless { it == "New chat" }
+        return name?.replace(Regex("[^A-Za-z0-9 _-]"), "")?.trim()?.take(40)?.ifBlank { null } ?: "Mochu App"
+    }
+
+    /** Builds and signs an installable APK of the project and saves it where the user picked. */
+    fun exportAndroidApk(context: Context, destination: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(status = "Building the app…") }
+            val name = exportAppName()
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val active = conversations.first { it.id == uiState.value.activeConversationId }
+                    val apk = File(context.cacheDir, "export.apk").apply { delete() }
+                    exportProjectApk(context, activeProjectRoot(context), name, exportPackageName(name, active.projectKey), apk)
+                    context.contentResolver.openOutputStream(destination).use { output ->
+                        requireNotNull(output) { "Could not open the destination." }
+                        apk.inputStream().use { it.copyTo(output) }
+                    }
+                    apk.delete()
+                }
+            }
+            val message = if (result.isSuccess) "Saved $name.apk. Open it from your Files app to install it." else "Couldn't build the app: ${result.exceptionOrNull()?.message ?: "unknown error"}"
+            _uiState.update { it.copy(status = message) }
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
+    }
+
     fun exportCapacitorProjectZip(context: Context, destination: Uri) {
         viewModelScope.launch {
-            val title = conversations.firstOrNull { it.id == uiState.value.activeConversationId }?.title
-                ?.takeUnless { it == "New chat" } ?: "Mochu App"
+            val title = exportAppName()
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(destination).use { output ->

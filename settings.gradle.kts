@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "GemmaAndroidBuilderMVP"
 include(":app")
 include(":imagegen")
+include(":webshell")

@@ -294,6 +294,6 @@ After changing the web code later, run ${if (kind == ProjectKind.React) "`npm ru
 }
 
 /** Code actions the work panel's Console and Files tabs need, provided by the app shell. */
-data class CodeActions(val saveCapacitorZip: () -> Unit = {}, val fixErrors: () -> Unit = {})
+data class CodeActions(val saveCapacitorZip: () -> Unit = {}, val fixErrors: () -> Unit = {}, val saveApk: () -> Unit = {})
 
 val LocalCodeActions = androidx.compose.runtime.staticCompositionLocalOf { CodeActions() }

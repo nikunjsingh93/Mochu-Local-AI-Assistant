@@ -127,8 +127,15 @@ fun OnDeviceApp(
     val capacitorZipSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) vm.exportCapacitorProjectZip(app, uri)
     }
+    val apkSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")) { uri ->
+        if (uri != null) vm.exportAndroidApk(app, uri)
+    }
     val codeActions = remember(vm) {
-        CodeActions(saveCapacitorZip = { capacitorZipSaver.launch("MochuCapacitor.zip") }, fixErrors = { vm.fixPreviewErrors(app) })
+        CodeActions(
+            saveCapacitorZip = { capacitorZipSaver.launch("MochuCapacitor.zip") },
+            fixErrors = { vm.fixPreviewErrors(app) },
+            saveApk = { apkSaver.launch(vm.exportAppName() + ".apk") }
+        )
     }
 
     // Browser and Models are standalone tabs; otherwise the tab follows the active chat's space.

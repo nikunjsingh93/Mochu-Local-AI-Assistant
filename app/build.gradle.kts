@@ -100,6 +100,7 @@ kotlin {
 
 dependencies {
     implementation(project(":imagegen"))
+    implementation("com.android.tools.build:apksig:8.12.1")
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.compose.ui:ui")
@@ -128,3 +129,14 @@ dependencies {
     // Android's org.json is a stub in local unit tests.
     testImplementation("org.json:json:20240303")
 }
+
+// "Export as Android app" fills in the :webshell APK, which ships inside this app's assets.
+val webShellAssets = layout.buildDirectory.dir("generated/webShellAssets")
+val copyWebShell = tasks.register<Copy>("copyWebShell") {
+    dependsOn(":webshell:assembleRelease")
+    from(project(":webshell").layout.buildDirectory.file("outputs/apk/release/webshell-release-unsigned.apk"))
+    into(webShellAssets.map { it.dir("shell") })
+    rename { "webshell.apk" }
+}
+android.sourceSets.getByName("main").assets.srcDir(webShellAssets)
+tasks.named("preBuild") { dependsOn(copyWebShell) }

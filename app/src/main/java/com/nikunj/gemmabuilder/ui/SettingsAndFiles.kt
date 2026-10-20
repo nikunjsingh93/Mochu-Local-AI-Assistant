@@ -381,6 +381,11 @@ fun FilesPane(
                     )
                     val codeActions = LocalCodeActions.current
                     DropdownMenuItem(
+                        text = { Text("Export as Android app (APK)") },
+                        enabled = state.files.isNotEmpty(),
+                        onClick = { toolsMenuOpen = false; codeActions.saveApk() }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Save as Android project (Capacitor)") },
                         enabled = state.files.isNotEmpty(),
                         onClick = { toolsMenuOpen = false; codeActions.saveCapacitorZip() }
