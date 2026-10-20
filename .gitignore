@@ -22,3 +22,5 @@ output-metadata.json
 keystore.properties
 *.jks
 *.keystore
+imagegen/build/
+imagegen/.cxx/

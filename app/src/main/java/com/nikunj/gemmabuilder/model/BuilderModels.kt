@@ -160,6 +160,8 @@ data class BuilderUiState(
     val thinkingEnabled: Boolean = true,
     /** How hard Chat thinks when thinking is on: 1 quick, 2 balanced, 3 deep. */
     val thinkingLevel: Int = 3,
+    /** True while Chat is creating an image (a placeholder shows where it will appear). */
+    val imageGenerating: Boolean = false,
     /** Number type GGUF models keep their KV cache in. */
     val kvCacheType: KvCacheType = KvCacheType.F16,
     /** Steps of the web research running right now, shown live above the streaming reply. */

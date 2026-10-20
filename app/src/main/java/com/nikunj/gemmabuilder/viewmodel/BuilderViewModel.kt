@@ -1385,7 +1385,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         sessionFingerprint = null
         refreshContextUsage()
         _uiState.update {
-            it.copy(gemmaLoaded = false, engineLabel = "Not loaded", status = "Creating image…", streamingReply = "_Creating an image of $prompt…_")
+            it.copy(gemmaLoaded = false, engineLabel = "Not loaded", status = "Creating image…", imageGenerating = true, streamingReply = "_Creating an image of $prompt…_")
         }
         val generator = ImageGenerator(context.applicationContext).also { imageGenerator = it }
         val started = System.currentTimeMillis()
@@ -1403,6 +1403,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         } finally {
             ticker.cancel()
             imageGenerator = null
+            _uiState.update { it.copy(imageGenerating = false) }
         }
         if (file == null) {
             return ChatMessage("assistant", if (stopRequested) "_Stopped._" else "_The image couldn't be created. The phone may be low on memory: close other apps and try again._")

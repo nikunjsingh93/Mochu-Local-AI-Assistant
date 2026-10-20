@@ -441,6 +441,7 @@ private fun MessageList(state: BuilderUiState, onToggleSpeak: (ChatMessage) -> U
                         partial.isNotBlank() -> RichMarkdown(partial, state.chatFontScale / 1.2f)
                         state.streamingThinking == null -> ThinkingDots()
                     }
+                    if (state.imageGenerating) ImagePlaceholder()
                 }
             }
         }
@@ -890,6 +891,29 @@ private fun CreatedImage(path: String) {
             Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("Save to Photos")
+        }
+    }
+}
+
+/** Where an image being created will appear: a softly pulsing square with a spinner. */
+@Composable
+private fun ImagePlaceholder() {
+    val pulse = rememberInfiniteTransition(label = "image-placeholder")
+    val alpha by pulse.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "image-placeholder-alpha"
+    )
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alpha),
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            CircularProgressIndicator(modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
+            Spacer(Modifier.height(12.dp))
+            Text("Creating image…", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
