@@ -56,7 +56,7 @@ val MODEL_CATALOG = listOf(
         sizeBytes = 2_588_147_712,
         sha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
         minRamGb = 6,
-        summary = "Recommended. Fast on the GPU, sees photos, and stays within memory even at a 16K context."
+        summary = "Fast on the GPU, sees photos, and stays within memory at a 16K context on phones with 8 GB of RAM or more."
     ),
     CatalogModel(
         id = "gemma-4-e4b-litert",
@@ -97,6 +97,32 @@ val MODEL_CATALOG = listOf(
         sha256 = "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
         minRamGb = 4,
         summary = "Trained for code. Small enough to be quick on the CPU."
+    ),
+    CatalogModel(
+        id = "lfm2.5-1.2b-gguf",
+        name = "LFM2.5 1.2B",
+        engine = "GGUF",
+        repo = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF",
+        revision = "8ed288026e23958ad9dfa92d53ed773a8eee7125",
+        fileName = "LFM2.5-1.2B-Instruct-Q4_0.gguf",
+        maxContext = 32768, kvBytesPerToken = 12_288L,
+        sizeBytes = 695_751_488,
+        sha256 = "2ea801949d760cdf1a2cc04a54262c22c3c0c54f0769d57760c9adeb0e59233f",
+        minRamGb = 3,
+        summary = "Small and quick on the CPU: the best pick for phones with 6 GB of RAM or less (e.g. Helio G-series). Good for chat, notes and web answers. LFM Open License."
+    ),
+    CatalogModel(
+        id = "gemma-3-1b-gguf",
+        name = "Gemma 3 1B",
+        engine = "GGUF",
+        repo = "unsloth/gemma-3-1b-it-GGUF",
+        revision = "f0b45be0aac41bd6a100a4b5734cad5f67255bfb",
+        fileName = "gemma-3-1b-it-Q4_0.gguf",
+        maxContext = 32768, kvBytesPerToken = 5_120L,
+        sizeBytes = 721_918_496,
+        sha256 = "27ee88e03be02e9ba73def9a819d570d8ad73716e50769e87f374ae394b0276e",
+        minRamGb = 3,
+        summary = "Google's smallest Gemma, light on memory and fine on low-end phones. Simple answers; no photos."
     ),
     CatalogModel(
         id = "qwen3-4b-2507-gguf",
@@ -233,10 +259,13 @@ fun visionFileFor(context: Context, modelFileName: String): java.io.File? {
 fun hasVisionSupport(modelFileName: String): Boolean = MODEL_CATALOG.any { it.fileName == modelFileName && it.visionId != null }
 
 /**
- * The model to suggest: Gemma 4 E2B on every phone. It runs on the GPU, handles photos, and stays
- * within memory at a 16K context even on 12 GB phones, where E4B can run out.
+ * The model to suggest. Phones with 6 GB of RAM or less (they report under about 7 GB) get a 1B-class
+ * model on the CPU: Gemma 4 E2B needs more memory than they can spare and can crash them.
  */
-fun recommendedModel(context: Context): CatalogModel = MODEL_CATALOG.first { it.id == "gemma-4-e2b-litert" }
+fun recommendedModel(context: Context): CatalogModel {
+    val id = if (deviceRamGb(context) < 6.8) "lfm2.5-1.2b-gguf" else "gemma-4-e2b-litert"
+    return MODEL_CATALOG.first { it.id == id }
+}
 
 /** Downloaded models live in app-specific external storage: private to the app, no permission needed. */
 fun downloadedModelsDir(context: Context): File =
