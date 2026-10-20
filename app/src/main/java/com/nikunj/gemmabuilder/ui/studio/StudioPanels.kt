@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.TextButton
 import android.app.Activity
 import android.content.ContentResolver
@@ -375,15 +376,21 @@ fun WorkPanel(
             ) {
                 val consoleErrors = PreviewConsole.entries.collectAsState().value.count { it.level == "error" }
                 val tabs = listOf("Preview", "Code", "Files", if (consoleErrors > 0) "Console ($consoleErrors)" else "Console")
-                SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+                // Compact pills sized to their labels, so four tabs and the buttons fit a phone.
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     tabs.forEachIndexed { index, title ->
-                        SegmentedButton(
-                            selected = state.tab == index && !state.workPanelCollapsed,
+                        val selected = state.tab == index && !state.workPanelCollapsed
+                        Surface(
                             onClick = { onTab(index) },
-                            shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
-                            icon = {},
-                            label = { Text(title, maxLines = 1) }
-                        )
+                            shape = RoundedCornerShape(50),
+                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                            contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        ) {
+                            Text(title, maxLines = 1, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                        }
                     }
                 }
                 IconButton(onClick = onRefresh) {

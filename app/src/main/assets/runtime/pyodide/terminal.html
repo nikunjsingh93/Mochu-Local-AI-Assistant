@@ -58,6 +58,18 @@
     }
   }
 
+  // Drops Pyodide's own frames (File "/lib/..."), keeping the lines from the project's files.
+  function cleanTraceback(text) {
+    var out = [];
+    var skip = false;
+    text.split('\n').forEach(function (l) {
+      if (/^\s*File "\/lib\//.test(l)) { skip = true; return; }
+      if (/^\s*File "/.test(l)) skip = false;
+      if (!skip) out.push(l);
+    });
+    return out.join('\n');
+  }
+
   async function runMain() {
     runButton.disabled = true;
     write('$ python main.py\n', 'info');
@@ -70,8 +82,9 @@
       await py.runPythonAsync(code, { filename: 'main.py' });
       write('\n[finished]\n', 'info');
     } catch (e) {
-      write(String(e.message || e) + '\n', 'err');
-      console.error('Python error in main.py:\n' + String(e.message || e));
+      var message = cleanTraceback(String(e.message || e));
+      write(message + '\n', 'err');
+      console.error('Python error in main.py:\n' + message);
     } finally {
       runButton.disabled = false;
     }
