@@ -1,5 +1,9 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -139,6 +143,8 @@ fun AssistantChatScreen(
     onToggleSpeak: (ChatMessage) -> Unit,
     onStopSpeaking: () -> Unit,
     onRemovePhoto: (String) -> Unit,
+    onAttachDocument: () -> Unit,
+    onRemoveDocument: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onStop: () -> Unit
 ) {
@@ -211,14 +217,24 @@ fun AssistantChatScreen(
                     }
                 }
             }
+            if (state.chatDocs.isNotEmpty() || state.readingDocument) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    state.chatDocs.forEach { path -> DocumentChip(chatDocumentName(path), onRemove = { onRemoveDocument(path) }) }
+                    if (state.readingDocument) DocumentChip("Reading…", onRemove = null)
+                }
+            }
             if (state.messages.isNotEmpty()) ContextMeter(state, Modifier.padding(horizontal = 8.dp))
             Composer(
                 text = state.prompt,
                 enabled = !state.isBusy,
-                canSend = (state.prompt.isNotBlank() || state.chatImages.isNotEmpty()) && !state.isBusy && state.modelReady,
+                canSend = (state.prompt.isNotBlank() || state.chatImages.isNotEmpty() || state.chatDocs.isNotEmpty()) && !state.isBusy && !state.readingDocument && state.modelReady,
                 placeholder = when {
                     !state.modelReady -> "Download a model to start"
                     listening -> "Listening…"
+                    state.chatDocs.isNotEmpty() -> "Ask about the ${if (state.chatDocs.size == 1) "document" else "documents"}"
                     state.chatImages.isNotEmpty() -> "Ask about the photo"
                     state.webSearchEnabled -> "Search the web"
                     else -> "Message"
@@ -240,13 +256,7 @@ fun AssistantChatScreen(
                             )
                         }
                         ThinkingButton(state, onThinkingLevel)
-                        IconButton(onClick = onAttachPhoto, enabled = !state.isBusy && state.chatImages.size < 3) {
-                            Icon(
-                                Icons.Rounded.AddPhotoAlternate,
-                                contentDescription = "Add a photo",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        AttachMenu(state, onAttachPhoto, onAttachDocument)
                     }
                 }
             )
@@ -471,7 +481,13 @@ private fun UserMessage(message: ChatMessage, fontScale: Float) {
                 )
         ) {
             Column {
-                val photos = message.attachments.filter { File(it).isFile }
+                val photos = message.attachments.filter { File(it).isFile && !isChatDocument(it) }
+                val documents = message.attachments.filter(::isChatDocument)
+                if (documents.isNotEmpty()) {
+                    Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        documents.forEach { DocumentChip(chatDocumentName(it), onRemove = null) }
+                    }
+                }
                 if (photos.isNotEmpty()) {
                     Row(
                         Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp),
@@ -919,6 +935,53 @@ private fun ImagePlaceholder() {
             CircularProgressIndicator(modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
             Spacer(Modifier.height(12.dp))
             Text("Creating image…", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** The composer's + button: attach a photo or documents. */
+@Composable
+private fun AttachMenu(state: BuilderUiState, onPhoto: () -> Unit, onDocument: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = !state.isBusy) {
+            Icon(Icons.Rounded.Add, contentDescription = "Attach", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Photo") },
+                leadingIcon = { Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null) },
+                enabled = state.chatImages.size < 3,
+                onClick = { open = false; onPhoto() }
+            )
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text("Documents")
+                        Text("PDF, Word, text, CSV, code", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                enabled = state.chatDocs.size < MAX_CHAT_DOCUMENTS,
+                onClick = { open = false; onDocument() }
+            )
+        }
+    }
+}
+
+/** A document's name in a small pill, with a remove button while it is still being written. */
+@Composable
+private fun DocumentChip(name: String, onRemove: (() -> Unit)?) {
+    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp, end = if (onRemove == null) 12.dp else 2.dp)) {
+            Icon(Icons.Rounded.Description, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+            Text(name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 200.dp).padding(vertical = 8.dp))
+            if (onRemove != null) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Remove $name", modifier = Modifier.size(16.dp))
+                }
+            }
         }
     }
 }

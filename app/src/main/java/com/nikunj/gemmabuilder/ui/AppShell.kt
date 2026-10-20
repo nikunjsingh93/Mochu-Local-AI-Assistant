@@ -107,6 +107,9 @@ fun OnDeviceApp(
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importModel(app, uri)
     }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        vm.attachChatDocuments(app, uris)
+    }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) vm.attachChatImage(app, uri)
     }
@@ -281,6 +284,8 @@ fun OnDeviceApp(
                             photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
                         onRemovePhoto = vm::removeChatImage,
+                        onAttachDocument = { documentPicker.launch(CHAT_DOCUMENT_TYPES) },
+                        onRemoveDocument = vm::removeChatDocument,
                         onVoiceSend = { vm.sendVoice(app, it) },
                         onToggleSpeak = { vm.toggleSpeak(app, it) },
                         onStopSpeaking = vm::stopSpeaking,

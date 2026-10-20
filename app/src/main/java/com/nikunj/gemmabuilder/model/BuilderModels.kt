@@ -153,6 +153,10 @@ data class BuilderUiState(
     val projectNames: Map<String, String> = emptyMap(),
     /** Photos attached to the Chat message being written (absolute paths in app storage). */
     val chatImages: List<String> = emptyList(),
+    /** Documents attached to the Chat message being written (absolute paths in app storage). */
+    val chatDocs: List<String> = emptyList(),
+    /** True while an attached document is being copied and read. */
+    val readingDocument: Boolean = false,
     /** Facts the user asked Chat to remember, added to its system prompt when [memoryEnabled]. */
     val memories: List<String> = emptyList(),
     val memoryEnabled: Boolean = true,

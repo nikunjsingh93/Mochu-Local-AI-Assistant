@@ -670,3 +670,7 @@ $tail
 }
 
 
+
+/** PDF and Word text for Chat documents. */
+fun extractPdfText(file: File): String = extractTextFromPdf(file)
+fun extractDocxText(file: File): String = extractTextFromDocx(file)

@@ -801,7 +801,8 @@ class BuilderViewModel : ViewModel() {
         val typed = uiState.value.prompt.trim()
         // In Chat a photo alone is enough to send.
         val chatWithPhoto = uiState.value.activeKind == CHAT_KIND_ASSISTANT && uiState.value.chatImages.isNotEmpty()
-        val prompt = typed.ifBlank { if (chatWithPhoto) "What's in this photo?" else "" }
+        val chatWithDocs = uiState.value.activeKind == CHAT_KIND_ASSISTANT && uiState.value.chatDocs.isNotEmpty()
+        val prompt = typed.ifBlank { if (chatWithDocs) "Summarize ${if (uiState.value.chatDocs.size == 1) "this document" else "these documents"}." else if (chatWithPhoto) "What's in this photo?" else "" }
         if (prompt.isBlank() || uiState.value.isBusy || generationInProgress) return
         generationInProgress = true
         if (uiState.value.activeKind == CHAT_KIND_ASSISTANT) {
@@ -1190,12 +1191,14 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     return@launch
                 }
                 val images = if (presetResearch == null) uiState.value.chatImages else emptyList()
-                val pendingMessages = uiState.value.messages + ChatMessage("user", prompt, attachments = images)
+                val attachedDocs = if (presetResearch == null) uiState.value.chatDocs else emptyList()
+                val pendingMessages = uiState.value.messages + ChatMessage("user", prompt, attachments = images + attachedDocs)
                 _uiState.update {
                     it.copy(
                         isBusy = true,
                         prompt = "",
                         chatImages = if (presetResearch == null) emptyList() else it.chatImages,
+                        chatDocs = if (presetResearch == null) emptyList() else it.chatDocs,
                         status = "Thinking...",
                         messages = pendingMessages,
                         streamingReply = "",
@@ -1218,7 +1221,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     return@launch
                 }
                 // "Remember that...", "forget...", "what do you remember about me?" are handled by the app.
-                val memoryCommand = if (presetResearch == null && images.isEmpty()) memoryCommandFrom(prompt) else null
+                val memoryCommand = if (presetResearch == null && images.isEmpty() && attachedDocs.isEmpty()) memoryCommandFrom(prompt) else null
                 if (memoryCommand != null) {
                     val done = pendingMessages + ChatMessage("assistant", applyMemoryCommand(context, memoryCommand))
                     persistActiveConversation(context, done)
@@ -1226,7 +1229,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     return@launch
                 }
                 // "Draw ...", "generate an image of ..." go to the image model.
-                val imagePrompt = if (presetResearch == null && images.isEmpty()) imagePromptFrom(prompt) else null
+                val imagePrompt = if (presetResearch == null && images.isEmpty() && attachedDocs.isEmpty()) imagePromptFrom(prompt) else null
                 if (imagePrompt != null) {
                     val done = pendingMessages + createImageMessage(context, imagePrompt)
                     persistActiveConversation(context, done)
@@ -1234,7 +1237,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     return@launch
                 }
                 // Timers, reminders, the stopwatch and scheduled tasks are set by the app, not the model.
-                val taskCommand = if (presetResearch == null && images.isEmpty()) taskCommandFrom(prompt) else null
+                val taskCommand = if (presetResearch == null && images.isEmpty() && attachedDocs.isEmpty()) taskCommandFrom(prompt) else null
                 if (taskCommand != null) {
                     val done = pendingMessages + ChatMessage("assistant", applyTaskCommand(context.applicationContext, taskCommand))
                     persistActiveConversation(context, done)
@@ -1266,7 +1269,11 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 val sessionKey = uiState.value.activeConversationId.orEmpty()
                 // A follow-up question right after a web answer searches again rather than reusing old pages.
                 val lastTurnUsedWeb = pendingMessages.dropLast(1).lastOrNull { it.role == "assistant" }?.activity?.any { it.kind == ACTIVITY_SEARCH } == true
-                val useWeb = presetResearch == null && webConsentGiven(context) &&
+                val chatDocuments = attachedDocs.ifEmpty {
+                    pendingMessages.dropLast(1).lastOrNull { msg -> msg.role == "user" && msg.attachments.any(::isChatDocument) }
+                        ?.attachments?.filter { File(it).exists() && isChatDocument(it) }.orEmpty()
+                }
+                val useWeb = chatDocuments.isEmpty() && presetResearch == null && webConsentGiven(context) &&
                     (if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) || (lastTurnUsedWeb && isWebFollowUp(prompt)) else looksLikeSearchRequest(prompt))
                 // A web turn starts a fresh session anyway; closing the old one first frees its memory
                 // while pages load in the background reader.
@@ -1281,6 +1288,12 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     return@launch
                 }
                 val message = when {
+                    // Questions about attached documents: their text (or best passages) with the question.
+                    chatDocuments.isNotEmpty() -> {
+                        engine.resetSession()
+                        compactHistoryIfNeeded(context, pendingMessages)
+                        buildAssistantSnapshot(pendingMessages, finalUserText = documentQuestionPrompt(prompt, chatDocuments, snapshotCharBudget(activeTokenWindow) * 3 / 4))
+                    }
                     // Web sources are large, so a web turn always starts a fresh session with short history.
                     research != null -> {
                         engine.resetSession()
@@ -1617,6 +1630,26 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 else it.copy(chatImages = (it.chatImages + path).takeLast(MAX_CHAT_IMAGES))
             }
         }
+    }
+
+    /** Copies picked documents into app storage and reads their text, for questions about them. */
+    fun attachChatDocuments(context: Context, uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(readingDocument = true, status = "Reading document...") }
+            val failures = mutableListOf<String>()
+            val saved = withContext(Dispatchers.IO) {
+                uris.take(MAX_CHAT_DOCUMENTS).mapNotNull { uri ->
+                    runCatching { saveChatDocument(context, uri) }.onFailure { failures += it.message ?: "Couldn't read a file." }.getOrNull()
+                }
+            }
+            _uiState.update { it.copy(readingDocument = false, chatDocs = (it.chatDocs + saved).distinct().takeLast(MAX_CHAT_DOCUMENTS), status = "Ready.") }
+            failures.firstOrNull()?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    fun removeChatDocument(path: String) {
+        _uiState.update { it.copy(chatDocs = it.chatDocs - path) }
     }
 
     fun removeChatImage(path: String) {
