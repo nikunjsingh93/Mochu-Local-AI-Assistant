@@ -451,6 +451,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
     // Servers outside your network get your messages: ask once per address before connecting.
     var confirmOutside by remember { mutableStateOf<String?>(null) }
     var allowedOutside by remember { mutableStateOf(setOf<String>()) }
+    var enabled by remember { mutableStateOf(active != null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -461,7 +462,10 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            // Off by default; turning it off while a server model is in use goes back to the phone's.
+            Switch(checked = enabled, onCheckedChange = { on -> enabled = on; if (!on && active != null) onStop() })
         }
+        if (enabled) {
         if (active != null) {
             Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
                 Text("In use: ${active.model}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
@@ -515,6 +519,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             Button(enabled = chosen != null, onClick = { chosen?.let { onUse(RemoteModelConfig(normalizeBaseUrl(url), key, it)) } }) { Text("Use this model") }
         }
         message?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+        }
     }
     confirmOutside?.let { base ->
         AlertDialog(
