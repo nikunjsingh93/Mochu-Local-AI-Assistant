@@ -141,37 +141,10 @@ fun AssistantChatScreen(
         }
     }
     val context = LocalContext.current
-    val voice = remember { VoiceInput(context) }
-    var listening by remember { mutableStateOf(false) }
-    var micLevel by remember { mutableFloatStateOf(0f) }
-    DisposableEffect(Unit) { onDispose { voice.stop() } }
-    fun startListening() {
-        onStopSpeaking()
-        listening = true
-        voice.start(
-            onLevel = { micLevel = it },
-            onPartial = onPromptChange,
-            onFinal = { text ->
-                listening = false
-                if (text.isNotBlank()) onVoiceSend(text)
-            },
-            onError = { message ->
-                listening = false
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-            }
-        )
-    }
-    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening() else Toast.makeText(context, "Allow the microphone to talk to the assistant.", Toast.LENGTH_SHORT).show()
-    }
-    val onMic: () -> Unit = {
-        when {
-            listening -> voice.finish()
-            !voice.available -> Toast.makeText(context, "This phone has no speech recognizer.", Toast.LENGTH_SHORT).show()
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED -> startListening()
-            else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
+    val mic = rememberVoiceMic(onPartial = onPromptChange, onFinal = onVoiceSend, onStart = onStopSpeaking)
+    val listening = mic.listening
+    val micLevel = mic.level
+    val onMic = mic.onMic
     CompositionLocalProvider(LocalUriHandler provides inAppLinks) {
     Column(Modifier.fillMaxSize()) {
         TopAppBar(

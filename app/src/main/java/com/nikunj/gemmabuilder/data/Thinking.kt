@@ -40,3 +40,28 @@ private fun withoutPartialCloseTag(text: String): String {
     }
     return text
 }
+
+/**
+ * Rewrites a model's own reasoning markers to <think>...</think> as text streams in. Gemma 4 GGUF
+ * writes "<|channel>thought ... <channel|>"; Qwen-style models already use <think> and pass through.
+ * A marker split across chunks is held back until it is complete.
+ */
+class ThinkTagTranslator {
+    private val replacements = listOf("<|channel>thought" to "<think>", "<channel|>" to "</think>")
+    private val pending = StringBuilder()
+
+    fun feed(chunk: String): String {
+        pending.append(chunk)
+        var text = pending.toString()
+        replacements.forEach { (from, to) -> text = text.replace(from, to) }
+        // Keep a tail that could be the start of a marker.
+        val hold = replacements.maxOf { (from, _) ->
+            (minOf(from.length - 1, text.length) downTo 1).firstOrNull { text.endsWith(from.take(it)) } ?: 0
+        }
+        pending.setLength(0)
+        pending.append(text.takeLast(hold))
+        return text.dropLast(hold)
+    }
+
+    fun flush(): String = pending.toString().also { pending.setLength(0) }
+}

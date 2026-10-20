@@ -63,8 +63,13 @@ data class ChatConversation(
     val summary: String = "",
     val summarizedCount: Int = 0,
     /** [CHAT_KIND_ASSISTANT] for general chat, [CHAT_KIND_STUDIO] for a web-app project. */
-    val kind: String = CHAT_KIND_STUDIO
-)
+    val kind: String = CHAT_KIND_STUDIO,
+    /** Code chats in the same project share its files; blank means the chat is its own project. */
+    val projectId: String = ""
+) {
+    /** The folder this chat's files live in (projects/<projectKey>). */
+    val projectKey: String get() = projectId.ifBlank { id }
+}
 
 /** A general-purpose assistant chat (the Chat space). */
 const val CHAT_KIND_ASSISTANT = "assistant"
@@ -76,7 +81,8 @@ data class ConversationInfo(
     val title: String,
     val updatedAt: Long,
     val messageCount: Int,
-    val kind: String = CHAT_KIND_STUDIO
+    val kind: String = CHAT_KIND_STUDIO,
+    val projectKey: String = id
 )
 
 data class BuilderUiState(

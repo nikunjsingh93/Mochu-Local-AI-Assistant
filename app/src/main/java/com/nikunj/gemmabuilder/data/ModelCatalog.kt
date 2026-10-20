@@ -22,9 +22,15 @@ data class CatalogModel(
     val sizeBytes: Long,
     val sha256: String,
     val minRamGb: Int,
-    val summary: String
+    val summary: String,
+    /** A support file (a GGUF vision projector) listed under its model rather than on its own. */
+    val hidden: Boolean = false,
+    /** Id of the vision projector that lets this GGUF model see photos. */
+    val visionId: String? = null,
+    /** File name in the repo when it differs from the local [fileName]. */
+    val sourceFileName: String = fileName
 ) {
-    val url: String get() = "https://huggingface.co/$repo/resolve/$revision/$fileName"
+    val url: String get() = "https://huggingface.co/$repo/resolve/$revision/$sourceFileName"
     val isGguf: Boolean get() = isGgufModel(fileName)
 }
 
@@ -39,7 +45,7 @@ val MODEL_CATALOG = listOf(
         sizeBytes = 2_588_147_712,
         sha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
         minRamGb = 6,
-        summary = "Recommended for most phones. Fast on the GPU and light on memory."
+        summary = "Recommended. Fast on the GPU, sees photos, and stays within memory even at a 16K context."
     ),
     CatalogModel(
         id = "gemma-4-e4b-litert",
@@ -52,7 +58,7 @@ val MODEL_CATALOG = listOf(
         sha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
         // Runs at full precision on the GPU (exact numbers) and peaks around 6.5 GB.
         minRamGb = 12,
-        summary = "Recommended for phones with 12 GB of RAM. Clearly smarter than E2B."
+        summary = "Smarter than E2B but slower and much heavier on memory. Best on 12 GB+ phones with a smaller context."
     ),
     CatalogModel(
         id = "qwen3-0.6b-litert",
@@ -97,6 +103,7 @@ val MODEL_CATALOG = listOf(
         repo = "ggml-org/gemma-4-E2B-it-GGUF",
         revision = "b4243c156154b6dca9324415f8c7ccc098b4aed1",
         fileName = "gemma-4-E2B-it-Q4_0.gguf",
+        visionId = "gemma-4-e2b-gguf-vision",
         sizeBytes = 2_841_481_184,
         sha256 = "8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52",
         minRamGb = 6,
@@ -109,6 +116,7 @@ val MODEL_CATALOG = listOf(
         repo = "unsloth/Qwen3.5-4B-GGUF",
         revision = "e87f176479d0855a907a41277aca2f8ee7a09523",
         fileName = "Qwen3.5-4B-Q4_0.gguf",
+        visionId = "qwen3.5-4b-gguf-vision",
         sizeBytes = 2_583_221_408,
         sha256 = "298fcb5fe7a77ccc79745ae24751560c5ac56874caff4bb39b1f2055bd72b8bb",
         minRamGb = 8,
@@ -133,26 +141,52 @@ val MODEL_CATALOG = listOf(
         repo = "prism-ml/Bonsai-27B-gguf",
         revision = "f10afb355f104535e3e3e98cf7ab7795c72bd292",
         fileName = "Bonsai-27B-Q1_0.gguf",
+        visionId = "bonsai-27b-gguf-vision",
         sizeBytes = 3_803_452_480,
         sha256 = "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
         minRamGb = 12,
         summary = "Experimental. Qwen3.6 27B at 1 bit per weight, the largest model that fits a phone. Slow on the CPU; needs a 12 GB flagship."
     )
+) + VISION_FILES
+
+/** Vision projectors for the GGUF models above (downloaded with their model). */
+private val VISION_FILES: List<CatalogModel> get() = listOf(
+    CatalogModel(
+        id = "gemma-4-e2b-gguf-vision", name = "Gemma 4 E2B photo support", engine = "GGUF",
+        repo = "ggml-org/gemma-4-E2B-it-GGUF", revision = "6938c58e698502037401a5f19f6905f2fb2f7dee",
+        fileName = "mmproj-gemma-4-E2B-it-Q8_0.gguf", sizeBytes = 557_368_064,
+        sha256 = "9406f99c16d68cda4f1f0552192dcc99021ea1fc6d2fd50b1dc3ccf30d04b292", minRamGb = 0, summary = "", hidden = true
+    ),
+    CatalogModel(
+        id = "qwen3.5-4b-gguf-vision", name = "Qwen3.5 4B photo support", engine = "GGUF",
+        repo = "unsloth/Qwen3.5-4B-GGUF", revision = "e87f176479d0855a907a41277aca2f8ee7a09523",
+        fileName = "Qwen3.5-4B-mmproj-F16.gguf", sizeBytes = 672_423_616,
+        sha256 = "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864", minRamGb = 0, summary = "", hidden = true,
+        sourceFileName = "mmproj-F16.gguf"
+    ),
+    CatalogModel(
+        id = "bonsai-27b-gguf-vision", name = "Bonsai 27B photo support", engine = "GGUF",
+        repo = "prism-ml/Bonsai-27B-gguf", revision = "f10afb355f104535e3e3e98cf7ab7795c72bd292",
+        fileName = "Bonsai-27B-mmproj-Q8_0.gguf", sizeBytes = 629_246_880,
+        sha256 = "eb561d41a7bbeb0fcf04883c8af11078ef6cae0a66862a0b68443cfca495269d", minRamGb = 0, summary = "", hidden = true
+    )
 )
 
-/**
- * The model to suggest for this phone: E4B on 12 GB+ phones, E2B on 6–8 GB phones, and the small
- * Qwen3 0.6B below that. Phones report less than they are sold with (12 GB shows as ~10.9, 6 GB as ~5.5).
- */
-fun recommendedModel(context: Context): CatalogModel {
-    val ram = deviceRamGb(context)
-    val id = when {
-        ram >= 10.5 -> "gemma-4-e4b-litert"
-        ram >= 5.0 -> "gemma-4-e2b-litert"
-        else -> "qwen3-0.6b-litert"
-    }
-    return MODEL_CATALOG.first { it.id == id }
+/** The vision projector file for a downloaded GGUF model, if it has one and it's downloaded. */
+fun visionFileFor(context: Context, modelFileName: String): java.io.File? {
+    val visionId = MODEL_CATALOG.firstOrNull { it.fileName == modelFileName }?.visionId ?: return null
+    val vision = MODEL_CATALOG.firstOrNull { it.id == visionId } ?: return null
+    return downloadedModelFile(context, vision).takeIf { it.exists() }
 }
+
+/** Whether this GGUF model can see photos once its projector is downloaded. */
+fun hasVisionSupport(modelFileName: String): Boolean = MODEL_CATALOG.any { it.fileName == modelFileName && it.visionId != null }
+
+/**
+ * The model to suggest: Gemma 4 E2B on every phone. It runs on the GPU, handles photos, and stays
+ * within memory at a 16K context even on 12 GB phones, where E4B can run out.
+ */
+fun recommendedModel(context: Context): CatalogModel = MODEL_CATALOG.first { it.id == "gemma-4-e2b-litert" }
 
 /** Downloaded models live in app-specific external storage: private to the app, no permission needed. */
 fun downloadedModelsDir(context: Context): File =

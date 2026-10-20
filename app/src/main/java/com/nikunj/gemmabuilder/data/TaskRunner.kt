@@ -56,13 +56,13 @@ object AppEvents {
 /** What a running scheduled task has done so far: its steps and the answer written so far. */
 data class TaskProgress(val chatId: String, val steps: List<ActivityStep>, val text: String, val status: String)
 
-const val EXTRA_OPEN_CHAT = "com.nikunj.ondevicestudio.OPEN_CHAT"
-const val EXTRA_OPEN_TASKS = "com.nikunj.ondevicestudio.OPEN_TASKS"
-const val EXTRA_RUN_TASK = "com.nikunj.ondevicestudio.RUN_TASK"
+const val EXTRA_OPEN_CHAT = "com.nikunj.mochu.OPEN_CHAT"
+const val EXTRA_OPEN_TASKS = "com.nikunj.mochu.OPEN_TASKS"
+const val EXTRA_RUN_TASK = "com.nikunj.mochu.RUN_TASK"
 private const val EXTRA_TASK_ID = "taskId"
 private const val EXTRA_CHAT_ID = "chatId"
-private const val ACTION_TASK_ALARM = "com.nikunj.ondevicestudio.TASK_ALARM"
-private const val ACTION_DISMISS = "com.nikunj.ondevicestudio.DISMISS"
+private const val ACTION_TASK_ALARM = "com.nikunj.mochu.TASK_ALARM"
+private const val ACTION_DISMISS = "com.nikunj.mochu.DISMISS"
 
 object TaskAlarms {
     fun canBeExact(context: Context): Boolean =

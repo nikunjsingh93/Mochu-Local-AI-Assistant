@@ -18,6 +18,8 @@
 #include "ggml-backend.h"
 #include "llama.h"
 #include "sampling.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 
 #define LOG_TAG "ondevice-llama"
 #define LOGi(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -51,12 +53,14 @@ struct Session {
     common_batch batch;
     common_chat_templates_ptr templates;
     common_sampler *sampler = nullptr;
+    mtmd_context *mtmd = nullptr;     // vision encoder (mmproj), when the model has one
 
     std::vector<common_chat_msg> messages;
     std::vector<llama_token> cached;  // tokens currently in the KV cache (sequence 0)
     std::string reply;                // assistant reply being generated
     std::string pending;              // trailing bytes of an incomplete UTF-8 character
     int max_output = 0;
+    bool thinking = false;            // let reasoning models think first (their template decides how)
     int generated = 0;
     bool generating = false;
 };
@@ -112,7 +116,7 @@ std::string render_chat(Session *s) {
     common_chat_templates_inputs inputs;
     inputs.messages = s->messages;
     inputs.add_generation_prompt = true;
-    inputs.enable_thinking = false;
+    inputs.enable_thinking = s->thinking;
     try {
         inputs.use_jinja = true;
         return common_chat_templates_apply(s->templates.get(), inputs).prompt;
@@ -140,6 +144,79 @@ jbyteArray to_bytes(JNIEnv *env, const std::string &text) {
 }
 
 Session *session(jlong handle) { return reinterpret_cast<Session *>(handle); }
+
+void start_reply(Session *s, int max_output) {
+    common_sampler_reset(s->sampler);
+    s->reply.clear();
+    s->pending.clear();
+    s->generated = 0;
+    s->max_output = max_output > 0 ? max_output : static_cast<int>(llama_n_ctx(s->ctx));
+    s->generating = true;
+}
+
+// A turn with photos: the chat is rendered with a media marker per photo, the photos are encoded
+// by the vision model, and everything is evaluated from an empty cache. Afterwards the message keeps
+// a "[photo]" note instead of the markers, so later turns re-render as plain text.
+int send_with_images(Session *s, const std::string &text, const std::vector<std::string> &images, int max_output) {
+    std::string markers;
+    for (size_t i = 0; i < images.size(); i++) markers += mtmd_default_marker();
+    common_chat_msg user;
+    user.role = "user";
+    user.content = markers + "\n" + text;
+    s->messages.push_back(user);
+
+    std::string prompt;
+    try {
+        prompt = render_chat(s);
+    } catch (const std::exception &e) {
+        LOGe("Chat template failed: %s", e.what());
+        s->messages.pop_back();
+        return SEND_TEMPLATE_FAILED;
+    }
+
+    std::vector<mtmd_bitmap *> bitmaps;
+    for (const auto &path : images) {
+        mtmd_bitmap *bmp = mtmd_helper_bitmap_init_from_file(s->mtmd, path.c_str(), false, mtmd_helper_init_opt_default()).bitmap;
+        if (bmp) bitmaps.push_back(bmp);
+        else LOGw("Could not read image %s", path.c_str());
+    }
+    auto free_bitmaps = [&]() { for (auto *b : bitmaps) mtmd_bitmap_free(b); };
+    if (bitmaps.size() != images.size()) {
+        free_bitmaps();
+        s->messages.pop_back();
+        return SEND_DECODE_FAILED;
+    }
+
+    mtmd_input_chunks *chunks = mtmd_input_chunks_init();
+    mtmd_input_text input{prompt.c_str(), prompt.size(), true, true};
+    const int32_t tok = mtmd_tokenize(s->mtmd, chunks, &input, const_cast<const mtmd_bitmap **>(bitmaps.data()), bitmaps.size());
+    free_bitmaps();
+    const int n_ctx = static_cast<int>(llama_n_ctx(s->ctx));
+    if (tok != 0 || static_cast<int>(mtmd_helper_get_n_tokens(chunks)) >= n_ctx - 8) {
+        mtmd_input_chunks_free(chunks);
+        s->messages.pop_back();
+        return tok != 0 ? SEND_DECODE_FAILED : SEND_CONTEXT_FULL;
+    }
+
+    llama_memory_t mem = llama_get_memory(s->ctx);
+    llama_memory_clear(mem, false);
+    s->cached.clear();
+    llama_pos new_n_past = 0;
+    const int32_t res = mtmd_helper_eval_chunks(s->mtmd, s->ctx, chunks, 0, 0, BATCH_SIZE, true, &new_n_past);
+    mtmd_input_chunks_free(chunks);
+    if (res != 0) {
+        LOGe("Image prompt eval failed (%d).", res);
+        llama_memory_clear(mem, false);
+        s->messages.pop_back();
+        return SEND_DECODE_FAILED;
+    }
+    // Positions continue from new_n_past; -1 never matches a real token, so the next text turn
+    // re-processes the whole chat instead of reusing a prefix that contained image embeddings.
+    s->cached.assign(static_cast<size_t>(new_n_past), -1);
+    s->messages.back().content = std::string("[photo] ") + text;
+    start_reply(s, max_output);
+    return SEND_OK;
+}
 
 }  // namespace
 
@@ -212,6 +289,27 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jst
     return reinterpret_cast<jlong>(s);
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoadVision(JNIEnv *env, jobject, jlong handle, jstring jmmproj_path, jint n_threads) {
+    Session *s = session(handle);
+    if (s->mtmd) return JNI_TRUE;
+    const char *path = env->GetStringUTFChars(jmmproj_path, nullptr);
+    mtmd_context_params params = mtmd_context_params_default();
+    params.use_gpu = false;
+    params.n_threads = n_threads;
+    params.print_timings = false;
+    params.warmup = false;
+    params.media_marker = mtmd_default_marker();
+    s->mtmd = mtmd_init_from_file(path, s->model, params);
+    env->ReleaseStringUTFChars(jmmproj_path, path);
+    if (s->mtmd && !mtmd_support_vision(s->mtmd)) {
+        mtmd_free(s->mtmd);
+        s->mtmd = nullptr;
+    }
+    if (!s->mtmd) LOGw("Vision projector could not be loaded.");
+    return s->mtmd ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeContextSize(JNIEnv *, jobject, jlong handle) {
     return static_cast<jint>(llama_n_ctx(session(handle)->ctx));
@@ -241,13 +339,27 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeStartChat(JNIEnv *env, jobject
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeSendUser(JNIEnv *env, jobject, jlong handle, jstring juser_text, jint max_output) {
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeSendUser(JNIEnv *env, jobject, jlong handle, jstring juser_text, jint max_output, jboolean thinking, jobjectArray jimages) {
     Session *s = session(handle);
+    s->thinking = thinking;
     const char *text = env->GetStringUTFChars(juser_text, nullptr);
+    const std::string user_text = text;
+    env->ReleaseStringUTFChars(juser_text, text);
+
+    std::vector<std::string> images;
+    const jsize n_images = jimages ? env->GetArrayLength(jimages) : 0;
+    for (jsize i = 0; i < n_images; i++) {
+        auto jpath = static_cast<jstring>(env->GetObjectArrayElement(jimages, i));
+        const char *p = env->GetStringUTFChars(jpath, nullptr);
+        images.emplace_back(p);
+        env->ReleaseStringUTFChars(jpath, p);
+        env->DeleteLocalRef(jpath);
+    }
+    if (!images.empty() && s->mtmd) return send_with_images(s, user_text, images, max_output);
+
     common_chat_msg user;
     user.role = "user";
-    user.content = text;
-    env->ReleaseStringUTFChars(juser_text, text);
+    user.content = user_text;
     s->messages.push_back(user);
 
     std::string prompt;
@@ -350,6 +462,7 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeFree(JNIEnv *, jobject, jlong 
     Session *s = session(handle);
     if (!s) return;
     common_sampler_free(s->sampler);
+    if (s->mtmd) mtmd_free(s->mtmd);
     s->templates.reset();
     s->batch = common_batch();
     llama_free(s->ctx);

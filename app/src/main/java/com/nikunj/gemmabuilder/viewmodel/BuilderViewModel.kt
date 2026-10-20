@@ -74,7 +74,7 @@ class BuilderViewModel : ViewModel() {
             saveConversationFile(context, blank)
         }
         val active = conversations.maxByOrNull { it.updatedAt } ?: conversations.first()
-        ensureProjectForConversation(context, active.id, migrateLegacy = true)
+        ensureProjectForConversation(context, active.projectKey, migrateLegacy = true)
         refreshWorkspace(context, active.id)
         _uiState.update {
             val hasModel = modelFile(context).exists()
@@ -160,6 +160,11 @@ class BuilderViewModel : ViewModel() {
         runCatching { ModelDownloadService.start(appContext, id) }.onFailure {
             ModelDownloadTracker.set(id, ModelDownloadState(DownloadPhase.Failed, message = "Could not start download: ${it.message ?: "unknown error"}"))
         }
+        // GGUF models that can see photos fetch their photo-support file right after.
+        model.visionId?.let { visionId ->
+            val vision = MODEL_CATALOG.firstOrNull { it.id == visionId }
+            if (vision != null && !downloadedModelFile(appContext, vision).exists()) runCatching { ModelDownloadService.start(appContext, visionId) }
+        }
     }
 
     fun cancelModelDownload(context: Context, id: String) {
@@ -223,6 +228,8 @@ class BuilderViewModel : ViewModel() {
             saveModelName(appContext, "")
         }
         file.delete()
+        // Its photo-support file is no use without it.
+        model.visionId?.let { visionId -> MODEL_CATALOG.firstOrNull { it.id == visionId }?.let { downloadedModelFile(appContext, it).delete() } }
         if (wasActive) {
             _uiState.update {
                 it.copy(
@@ -342,11 +349,12 @@ class BuilderViewModel : ViewModel() {
         if (recent != null) selectConversation(context, recent.id) else newConversation(context, kind)
     }
 
-    fun newConversation(context: Context, kind: String = uiState.value.activeKind) {
-        val conv = newBlankConversation(kind)
+    /** Starts a chat; in Code, [projectKey] puts it in an existing project (sharing its files). */
+    fun newConversation(context: Context, kind: String = uiState.value.activeKind, projectKey: String? = null) {
+        val conv = newBlankConversation(kind).let { if (projectKey != null) it.copy(projectId = projectKey) else it }
         conversations.add(0, conv)
         saveConversationFile(context, conv)
-        ensureProjectForConversation(context, conv.id, migrateLegacy = false)
+        ensureProjectForConversation(context, conv.projectKey, migrateLegacy = false)
         refreshWorkspace(context, conv.id)
         _uiState.update {
             it.copy(
@@ -369,7 +377,7 @@ class BuilderViewModel : ViewModel() {
 
     fun selectConversation(context: Context, id: String) {
         val conv = conversations.firstOrNull { it.id == id } ?: return
-        ensureProjectForConversation(context, conv.id, migrateLegacy = false)
+        ensureProjectForConversation(context, conv.projectKey, migrateLegacy = false)
         refreshWorkspace(context, conv.id)
         _uiState.update {
             it.copy(
@@ -397,20 +405,21 @@ class BuilderViewModel : ViewModel() {
         val deleted = conversations.firstOrNull { it.id == id } ?: return
         conversations = conversations.filterNot { it.id == id }.toMutableList()
         File(chatsRoot(context), "$id.chat").delete()
-        File(projectsRoot(context), id).deleteRecursively()
+        // A project's files go only with its last chat.
+        if (conversations.none { it.projectKey == deleted.projectKey }) File(projectsRoot(context), deleted.projectKey).deleteRecursively()
         // Stay in the same space: fall back to that space's newest chat, or a fresh one.
         if (conversations.none { it.kind == deleted.kind }) {
             val fresh = newBlankConversation(deleted.kind)
             conversations.add(fresh)
             saveConversationFile(context, fresh)
-            ensureProjectForConversation(context, fresh.id, migrateLegacy = false)
+            ensureProjectForConversation(context, fresh.projectKey, migrateLegacy = false)
         }
         val next = if (uiState.value.activeConversationId == id) {
             conversations.filter { it.kind == deleted.kind }.maxByOrNull { it.updatedAt } ?: conversations.first()
         } else {
             conversations.firstOrNull { it.id == uiState.value.activeConversationId } ?: conversations.maxByOrNull { it.updatedAt } ?: conversations.first()
         }
-        ensureProjectForConversation(context, next.id, migrateLegacy = false)
+        ensureProjectForConversation(context, next.projectKey, migrateLegacy = false)
         refreshWorkspace(context, next.id)
         _uiState.update {
             it.copy(
@@ -632,7 +641,7 @@ class BuilderViewModel : ViewModel() {
         // Returns (where it runs, optional status note).
         val result = runCatching {
             if (isGgufModel(savedModelName(context))) {
-                val newEngine = LlamaCppEngine(context.applicationContext, file.absolutePath, maxNumTokens)
+                val newEngine = LlamaCppEngine(context.applicationContext, file.absolutePath, maxNumTokens, visionFileFor(context, savedModelName(context))?.absolutePath)
                 newEngine.load()
                 engine = newEngine
                 "llama.cpp CPU" to " (${newEngine.description})"
@@ -692,7 +701,8 @@ class BuilderViewModel : ViewModel() {
     fun sendVoice(context: Context, text: String) {
         if (text.isBlank()) return
         _uiState.update { it.copy(prompt = text) }
-        voiceTurnPending = true
+        // Only Chat replies are read aloud; Code replies are mostly code.
+        voiceTurnPending = uiState.value.activeKind == CHAT_KIND_ASSISTANT
         generate(context)
     }
 
@@ -1095,9 +1105,13 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
-                // GGUF models here have no image encoder: say so before spending time loading one.
-                if (images.isNotEmpty() && isGgufModel(savedModelName(context))) {
-                    val reply = "_${modelDisplayName(uiState.value.modelName)} can't see photos. Gemma 4 E2B and E4B can: switch in the Models tab._"
+                // A GGUF model sees photos only with its photo-support file: say so before loading it.
+                if (images.isNotEmpty() && isGgufModel(savedModelName(context)) && visionFileFor(context, savedModelName(context)) == null) {
+                    val reply = if (hasVisionSupport(savedModelName(context))) {
+                        "_Download photo support for ${modelDisplayName(uiState.value.modelName)} on the Models page to send it photos._"
+                    } else {
+                        "_${modelDisplayName(uiState.value.modelName)} can't see photos. Gemma 4 E2B, Qwen3.5 4B and Bonsai 27B can: switch in the Models tab._"
+                    }
                     val done = pendingMessages + ChatMessage("assistant", reply)
                     persistActiveConversation(context, done)
                     _uiState.update { it.copy(messages = done) }
@@ -1671,15 +1685,33 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         }
     }
 
+    private fun projectKeyOf(conversationId: String): String =
+        conversations.firstOrNull { it.id == conversationId }?.projectKey ?: conversationId
+
+    /** Deletes a Code project: all its chats and its files. */
+    fun deleteProject(context: Context, projectKey: String) {
+        if (generationInProgress || uiState.value.isBusy) return
+        val chats = conversations.filter { it.projectKey == projectKey }
+        if (chats.isEmpty()) return
+        val keepActive = uiState.value.activeConversationId.let { id -> chats.none { it.id == id } }
+        chats.drop(1).forEach { chat ->
+            conversations = conversations.filterNot { it.id == chat.id }.toMutableList()
+            File(chatsRoot(context), "${chat.id}.chat").delete()
+        }
+        // The last one goes through deleteConversation, which also removes the files and picks what to show next.
+        deleteConversation(context, chats.first().id)
+        if (keepActive) _uiState.update { it.copy(sidebarOpen = false) }
+    }
+
     private fun activeProjectRoot(context: Context): File {
         val id = uiState.value.activeConversationId ?: conversations.firstOrNull()?.id
         require(!id.isNullOrBlank()) { "No active conversation." }
-        return ensureProjectForConversation(context, id, migrateLegacy = false)
+        return ensureProjectForConversation(context, projectKeyOf(id), migrateLegacy = false)
     }
 
     private fun refreshWorkspace(context: Context, conversationId: String? = null) {
         val root = if (conversationId != null) {
-            ensureProjectForConversation(context, conversationId, migrateLegacy = false)
+            ensureProjectForConversation(context, projectKeyOf(conversationId), migrateLegacy = false)
         } else {
             activeProjectRoot(context)
         }
@@ -2126,7 +2158,7 @@ Write at most 120 words: what the user is building, requirements and preferences
 
     private fun conversationInfos(): List<ConversationInfo> = conversations
         .sortedByDescending { it.updatedAt }
-        .map { ConversationInfo(it.id, it.title, it.updatedAt, it.messages.size, it.kind) }
+        .map { ConversationInfo(it.id, it.title, it.updatedAt, it.messages.size, it.kind, it.projectKey) }
 
     override fun onCleared() {
         super.onCleared()

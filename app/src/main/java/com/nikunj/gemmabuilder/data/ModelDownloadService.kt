@@ -158,7 +158,7 @@ class ModelDownloadService : Service() {
             connectTimeout = 15_000
             readTimeout = 30_000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "OnDeviceStudio")
+            setRequestProperty("User-Agent", "MochuAI")
             if (existing in 1 until model.sizeBytes) setRequestProperty("Range", "bytes=$existing-")
         }
         try {

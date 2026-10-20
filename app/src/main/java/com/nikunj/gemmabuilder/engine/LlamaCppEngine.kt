@@ -33,7 +33,8 @@ internal object LlamaCppNative {
     external fun nativeContextSize(handle: Long): Int
     external fun nativeDescribe(handle: Long): String
     external fun nativeStartChat(handle: Long, systemPrompt: String)
-    external fun nativeSendUser(handle: Long, userText: String, maxOutput: Int): Int
+    external fun nativeSendUser(handle: Long, userText: String, maxOutput: Int, thinking: Boolean, images: Array<String>): Int
+    external fun nativeLoadVision(handle: Long, mmprojPath: String, nThreads: Int): Boolean
     external fun nativeNextToken(handle: Long): ByteArray?
     external fun nativeTokenCount(handle: Long): Int
     external fun nativeFree(handle: Long)
@@ -43,8 +44,13 @@ internal object LlamaCppNative {
 class LlamaCppEngine(
     private val context: Context,
     private val modelPath: String,
-    private val maxNumTokens: Int
+    private val maxNumTokens: Int,
+    /** The model's vision projector (mmproj .gguf), so it can see photos; null for text-only. */
+    private val visionPath: String? = null
 ) : BuilderEngine {
+    override var supportsImages: Boolean = false
+        private set
+
     // llama.cpp contexts are not thread-safe, so every native call runs on this one thread.
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "llama-cpp") }
     private val dispatcher = executor.asCoroutineDispatcher()
@@ -69,6 +75,10 @@ class LlamaCppEngine(
         require(loaded != 0L) { "llama.cpp could not load this .gguf model (unsupported architecture or not enough memory)." }
         handle = loaded
         contextSize = LlamaCppNative.nativeContextSize(loaded)
+        // A failed projector only costs photos; the model still works for text.
+        if (visionPath != null && java.io.File(visionPath).exists()) {
+            supportsImages = runCatching { LlamaCppNative.nativeLoadVision(loaded, visionPath, threads) }.getOrDefault(false)
+        }
         val cpuLabel = variant.removePrefix("libggml-cpu-").removeSuffix(".so")
         description = "${LlamaCppNative.nativeDescribe(loaded)} · $cpuLabel"
     }
@@ -87,7 +97,7 @@ class LlamaCppEngine(
         }
         var finished = false
         try {
-            when (LlamaCppNative.nativeSendUser(h, message, contextSize / 2)) {
+            when (LlamaCppNative.nativeSendUser(h, message, contextSize / 2, thinking, if (supportsImages) images.toTypedArray() else emptyArray())) {
                 LlamaCppNative.SEND_OK -> Unit
                 LlamaCppNative.SEND_CONTEXT_FULL -> error("Prompt is larger than the $contextSize-token context window.")
                 LlamaCppNative.SEND_TEMPLATE_FAILED -> error("This model's chat template could not be applied.")
@@ -95,12 +105,14 @@ class LlamaCppEngine(
             }
             val decodeStart = System.nanoTime()
             var tokens = 0
+            val tags = ThinkTagTranslator()
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val bytes = LlamaCppNative.nativeNextToken(h) ?: break
                 tokens++
-                if (bytes.isNotEmpty()) emit(String(bytes, Charsets.UTF_8))
+                if (bytes.isNotEmpty()) tags.feed(String(bytes, Charsets.UTF_8)).takeIf { it.isNotEmpty() }?.let { emit(it) }
             }
+            tags.flush().takeIf { it.isNotEmpty() }?.let { emit(it) }
             finished = true
             lastStats = GenerationStats(tokens, (System.nanoTime() - decodeStart) / 1e9)
         } finally {

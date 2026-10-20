@@ -31,4 +31,12 @@ class ThinkingTest {
         // Non-thinking Qwen3 replies start with an empty block.
         assertEquals(ThinkingSplit("", "Hi!", stillThinking = false), splitThinking("<think>\n\n</think>\n\nHi!"))
     }
+
+    @Test
+    fun translatesGemmaThinkingMarkersAcrossChunks() {
+        val t = ThinkTagTranslator()
+        val out = listOf("<|chan", "nel>thought\nPlan it", ".<chan", "nel|>Hello <b>", "!").joinToString("") { t.feed(it) } + t.flush()
+        assertEquals("<think>\nPlan it.</think>Hello <b>!", out)
+        assertEquals(ThinkingSplit("Plan it.", "Hello <b>!", stillThinking = false), splitThinking(out))
+    }
 }

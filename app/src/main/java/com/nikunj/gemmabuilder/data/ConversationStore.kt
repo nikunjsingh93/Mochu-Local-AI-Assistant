@@ -35,6 +35,7 @@ fun readConversationFile(file: File): ChatConversation {
     var summary = ""
     var summarizedCount = 0
     var kind = CHAT_KIND_STUDIO
+    var projectId = ""
     var updatedAt = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis()
     val messages = mutableListOf<ChatMessage>()
     file.readLines().forEach { line ->
@@ -43,6 +44,7 @@ fun readConversationFile(file: File): ChatConversation {
             line.startsWith("updated\t") -> updatedAt = line.substringAfter("updated\t").toLongOrNull() ?: updatedAt
             line.startsWith("summary\t") -> summary = decodeText(line.substringAfter("summary\t"))
             line.startsWith("kind\t") -> kind = line.substringAfter("kind\t").ifBlank { CHAT_KIND_STUDIO }
+            line.startsWith("project\t") -> projectId = line.substringAfter("project\t")
             line.startsWith("summarized\t") -> summarizedCount = line.substringAfter("summarized\t").toIntOrNull() ?: 0
             line.startsWith("msg	") -> {
                 val parts = line.split("	", limit = 8)
@@ -81,7 +83,8 @@ fun readConversationFile(file: File): ChatConversation {
         messages = messages,
         summary = summary,
         summarizedCount = summarizedCount.coerceIn(0, messages.size),
-        kind = kind
+        kind = kind,
+        projectId = projectId
     )
 }
 
@@ -93,6 +96,7 @@ fun saveConversationFile(context: Context, conversation: ChatConversation) {
         appendLine("title\t${encodeText(conversation.title)}")
         appendLine("updated\t${conversation.updatedAt}")
         appendLine("kind\t${conversation.kind}")
+        if (conversation.projectId.isNotBlank()) appendLine("project\t${conversation.projectId}")
         if (conversation.summary.isNotBlank()) {
             appendLine("summary\t${encodeText(conversation.summary)}")
             appendLine("summarized\t${conversation.summarizedCount}")

@@ -128,7 +128,7 @@ fun ModelDownloadsScreen(
 
                 ModelSection(
                     title = "LiteRT · fastest, runs on GPU",
-                    models = MODEL_CATALOG.filter { !it.isGguf },
+                    models = MODEL_CATALOG.filter { !it.isGguf && !it.hidden },
                     state = state,
                     ramGb = ramGb,
                     recommended = recommendedId,
@@ -140,7 +140,7 @@ fun ModelDownloadsScreen(
                 )
                 ModelSection(
                     title = "GGUF · llama.cpp, runs on CPU",
-                    models = MODEL_CATALOG.filter { it.isGguf },
+                    models = MODEL_CATALOG.filter { it.isGguf && !it.hidden },
                     state = state,
                     ramGb = ramGb,
                     recommended = recommendedId,
@@ -193,6 +193,9 @@ private fun ModelSection(
             usage = if (isActive) state else null,
             contextTokens = state.modelContextTokens[model.fileName],
             onContextChange = { onContextChange(model.fileName, it) },
+            visionStatus = model.visionId?.let { id -> MODEL_CATALOG.firstOrNull { it.id == id } }
+                ?.let { it to (state.modelDownloads[it.id] ?: ModelDownloadState()) },
+            onDownloadVision = onDownload,
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
@@ -212,6 +215,8 @@ private fun ModelCard(
     usage: BuilderUiState?,
     contextTokens: Int?,
     onContextChange: (Int) -> Unit,
+    visionStatus: Pair<CatalogModel, ModelDownloadState>?,
+    onDownloadVision: (String) -> Unit,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -244,6 +249,18 @@ private fun ModelCard(
             }
             Text(model.summary, style = MaterialTheme.typography.bodySmall)
             usage?.let { ModelUsage(it) }
+            visionStatus?.let { (vision, visionDownload) ->
+                when (visionDownload.phase) {
+                    DownloadPhase.Downloaded -> Text("Sees photos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    in ACTIVE_DOWNLOAD_PHASES -> {
+                        Text("Photo support: ${visionDownload.message ?: "downloading…"}", style = MaterialTheme.typography.labelSmall)
+                        LinearProgressIndicator(progress = { visionDownload.progress }, modifier = Modifier.fillMaxWidth())
+                    }
+                    else -> if (download.phase == DownloadPhase.Downloaded) {
+                        OutlinedButton(onClick = { onDownloadVision(vision.id) }) { Text("Add photo support (${formatBytes(vision.sizeBytes)})") }
+                    }
+                }
+            }
             if (download.phase == DownloadPhase.Downloaded && contextTokens != null) {
                 ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp))
             }

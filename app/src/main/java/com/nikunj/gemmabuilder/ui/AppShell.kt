@@ -23,6 +23,9 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.rounded.Add
@@ -71,11 +74,11 @@ import kotlinx.coroutines.launch
 private enum class AppTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     Chat("Chat", Icons.Outlined.ChatBubbleOutline, Icons.Rounded.ChatBubble),
     Browser("Browser", Icons.Outlined.Language, Icons.Rounded.Language),
-    Studio("Studio", Icons.Outlined.Widgets, Icons.Rounded.Widgets),
+    Studio("Code", Icons.Outlined.Code, Icons.Rounded.Code),
     Models("Models", Icons.Outlined.Memory, Icons.Rounded.Memory)
 }
 
-/** Top-level layout: Chat / Browser / Studio / Models tabs, a history drawer, and full-screen overlays. */
+/** Top-level layout: Chat / Browser / Code / Models tabs, a history drawer, and full-screen overlays. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OnDeviceApp(
@@ -172,6 +175,12 @@ fun OnDeviceApp(
                     vm.newConversation(app, kind)
                     scope.launch { drawerState.close() }
                 },
+                onNewInProject = { projectKey ->
+                    pinnedTab = null
+                    vm.newConversation(app, CHAT_KIND_STUDIO, projectKey)
+                    scope.launch { drawerState.close() }
+                },
+                onDeleteProject = { projectKey -> vm.deleteProject(app, projectKey) },
                 onSelect = { id ->
                     pinnedTab = null
                     vm.selectConversation(app, id)
@@ -276,8 +285,8 @@ fun OnDeviceApp(
                             pendingExportPath = path
                             fileSaver.launch(path.substringAfterLast('/'))
                         },
-                        onSaveZip = { zipSaver.launch("OnDeviceStudioProject.zip") },
-                        onSavePwaZip = { pwaZipSaver.launch("OnDeviceStudioPWA.zip") },
+                        onSaveZip = { zipSaver.launch("MochuProject.zip") },
+                        onSavePwaZip = { pwaZipSaver.launch("MochuPWA.zip") },
                         onStop = vm::stopGeneration
                     )
                     AppTab.Models -> ModelDownloadsScreen(
@@ -367,11 +376,14 @@ private fun HistoryDrawer(
     onNew: (String) -> Unit,
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onNewInProject: (String) -> Unit,
+    onDeleteProject: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenTasks: () -> Unit
 ) {
     val studio = kind == CHAT_KIND_STUDIO
     var pendingDelete by remember { mutableStateOf<ConversationInfo?>(null) }
+    var pendingDeleteProject by remember { mutableStateOf<Pair<String, String>?>(null) }
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
             Spacer(Modifier.height(20.dp))
@@ -394,7 +406,50 @@ private fun HistoryDrawer(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
             )
             LazyColumn(Modifier.weight(1f)) {
-                items(state.conversations.filter { it.kind == kind }, key = { it.id }) { chat ->
+                if (studio) {
+                    // Code: chats grouped under their project, newest project first.
+                    val groups = state.conversations.filter { it.kind == kind }.groupBy { it.projectKey }
+                        .entries.sortedByDescending { group -> group.value.maxOf { it.updatedAt } }
+                    groups.forEach { (projectKey, chats) ->
+                        item(key = "project-$projectKey") {
+                            val name = chats.minByOrNull { it.updatedAt }?.title?.takeUnless { it == "New chat" } ?: "New project"
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 12.dp, top = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                IconButton(onClick = { onNewInProject(projectKey) }, enabled = !state.isBusy) {
+                                    Icon(Icons.Rounded.Add, contentDescription = "New chat in this project", modifier = Modifier.size(20.dp))
+                                }
+                                IconButton(onClick = { pendingDeleteProject = projectKey to name }, enabled = !state.isBusy) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete project", modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                        items(chats.sortedByDescending { it.updatedAt }, key = { it.id }) { chat ->
+                            NavigationDrawerItem(
+                                label = {
+                                    Column {
+                                        Text(chat.title.takeUnless { it == "New chat" } ?: "New chat", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(formatChatTimestamp(chat.updatedAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                },
+                                selected = chat.id == state.activeConversationId,
+                                onClick = { onSelect(chat.id) },
+                                badge = if (chats.size > 1) {
+                                    {
+                                        IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete chat", modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                } else null,
+                                modifier = Modifier.padding(start = 16.dp)
+                            )
+                        }
+                    }
+                } else items(state.conversations.filter { it.kind == kind }, key = { it.id }) { chat ->
                     NavigationDrawerItem(
                         label = {
                             Column {
@@ -437,13 +492,22 @@ private fun HistoryDrawer(
             )
         }
     }
+    pendingDeleteProject?.let { (projectKey, name) ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            title = { Text("Delete project?") },
+            text = { Text("\"$name\", its chats and its files will be deleted. This can't be undone.") },
+            confirmButton = { DangerButton("Delete") { onDeleteProject(projectKey); pendingDeleteProject = null } },
+            dismissButton = { TextButton(onClick = { pendingDeleteProject = null }) { Text("Cancel") } }
+        )
+    }
     pendingDelete?.let { chat ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text(if (studio) "Delete project?" else "Delete chat?") },
+            title = { Text("Delete chat?") },
             text = {
                 Text(
-                    if (studio) "\"${chat.title}\" and its files will be deleted. This can't be undone."
+                    if (studio) "\"${chat.title}\" will be deleted. The project's files stay."
                     else "\"${chat.title}\" will be deleted. This can't be undone."
                 )
             },

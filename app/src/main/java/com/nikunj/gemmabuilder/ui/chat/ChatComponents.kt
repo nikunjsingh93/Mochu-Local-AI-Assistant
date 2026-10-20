@@ -276,15 +276,20 @@ fun ChatPanel(
             }
             ContextMeter(state)
             var addMenuOpen by remember { mutableStateOf(false) }
+            // Talk instead of typing: words appear in the box, and the request is sent when you pause.
+            val mic = rememberVoiceMic(onPartial = onPromptChange, onFinal = { text -> onPromptChange(text); onGenerate() })
             Composer(
                 text = state.prompt,
                 enabled = !state.isBusy,
                 canSend = state.prompt.isNotBlank() && !state.isBusy && state.modelReady,
-                placeholder = if (state.messages.isEmpty()) SAMPLE_PLACEHOLDER else "Ask for a change",
+                placeholder = if (mic.listening) "Listening…" else if (state.messages.isEmpty()) SAMPLE_PLACEHOLDER else "Ask for a change",
                 onTextChange = onPromptChange,
                 onSend = onGenerate,
                 busy = state.isBusy,
                 onStop = onStop,
+                onMic = if (state.modelReady) mic.onMic else null,
+                listening = mic.listening,
+                micLevel = mic.level,
                 leading = {
                     Box {
                         IconButton(onClick = { addMenuOpen = true }, enabled = !state.isBusy) {

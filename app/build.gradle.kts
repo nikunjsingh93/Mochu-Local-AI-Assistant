@@ -41,7 +41,7 @@ android {
     defaultConfig {
         // Changed from com.nikunj.gemmabuilder in 1.0.7: the original signing key was lost, so this
         // ships as a new app that installs next to 1.0.6 instead of failing to update it.
-        applicationId = "com.nikunj.ondevicestudio"
+        applicationId = "com.nikunj.mochu"
         minSdk = 31
         // Google Play requires API 36 for new apps and updates from August 31, 2026.
         targetSdk = 36
