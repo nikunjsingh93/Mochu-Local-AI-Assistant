@@ -144,7 +144,19 @@ fun ModelDownloadsScreen(
                 KvCacheChoice(state.kvCacheType, onKvCacheTypeChange)
                 ModelSection(
                     title = "",
-                    models = MODEL_CATALOG.filter { it.isGguf && !it.hidden },
+                    models = MODEL_CATALOG.filter { it.isGguf && !it.hidden && !it.isImage },
+                    state = state,
+                    ramGb = ramGb,
+                    recommended = recommendedId,
+                    onDownload = startDownload,
+                    onCancel = onCancel,
+                    onUse = onUse,
+                    onDelete = { pendingDelete = it },
+                    onContextChange = onContextChange
+                )
+                ModelSection(
+                    title = "Image generation · runs on CPU",
+                    models = MODEL_CATALOG.filter { it.isImage },
                     state = state,
                     ramGb = ramGb,
                     recommended = recommendedId,
@@ -196,7 +208,7 @@ private fun ModelSection(
             isActive = isActive,
             recommended = model.id == recommended,
             usage = if (isActive) state else null,
-            contextTokens = state.modelContextTokens[model.fileName],
+            contextTokens = if (model.isImage) null else state.modelContextTokens[model.fileName],
             onContextChange = { onContextChange(model.fileName, it) },
             visionStatus = model.visionId?.let { id -> state.modelDownloads[id] ?: ModelDownloadState() },
             ramEstimate = { tokens -> estimatedRamBytes(context, model, tokens, state.kvCacheType) },
@@ -321,7 +333,7 @@ private fun ModelCard(
                         OutlinedButton(onClick = onCancel) { Text("Cancel") }
                     DownloadPhase.Verifying -> Unit
                     DownloadPhase.Downloaded -> {
-                        if (!isActive) Button(onClick = onUse) { Text("Use") }
+                        if (!isActive && !model.isImage) Button(onClick = onUse) { Text("Use") }
                         DangerOutlinedButton("Delete", onDelete)
                     }
                 }

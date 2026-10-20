@@ -36,6 +36,8 @@ data class CatalogModel(
 ) {
     val url: String get() = "https://huggingface.co/$repo/resolve/$revision/$sourceFileName"
     val isGguf: Boolean get() = isGgufModel(fileName)
+    /** An image-generation model (stable-diffusion.cpp), not a chat model. */
+    val isImage: Boolean get() = engine == "Image"
 }
 
 val MODEL_CATALOG = listOf(
@@ -160,13 +162,24 @@ val MODEL_CATALOG = listOf(
         minRamGb = 12,
         summary = "Experimental. Qwen3.6 27B at 1 bit per weight, the largest model that fits a phone. Slow on the CPU; needs a 12 GB flagship."
     )
-) + VISION_FILES
+) + VISION_FILES + IMAGE_MODELS
 
 // Gemma 4 keeps most layers on a short sliding window, so only a few layers grow with the context.
 private const val GEMMA4_E2B_KV = 24_576L
 private const val GEMMA4_E4B_KV = 36_864L
 
 /** Vision projectors for the GGUF models above (downloaded with their model). */
+/** Models that create images from a description in Chat. */
+private val IMAGE_MODELS: List<CatalogModel> get() = listOf(
+    CatalogModel(
+        id = IMAGE_MODEL_ID, name = "SD-Turbo", engine = "Image",
+        repo = "Green-Sky/SD-Turbo-GGUF", revision = "19a31586d02d64a73b4419bc193b3ecfaf38e1f0",
+        fileName = "sd_turbo-f16-q8_0.gguf", sizeBytes = 2_023_745_376,
+        sha256 = "d50be7655f0a554cf8041c145d88b210bd5f3c545423119dee62ae08cae51580", minRamGb = 6,
+        summary = "Stable Diffusion Turbo: creates 512×512 images in a few steps. Ask in Chat, e.g. \"draw a cat astronaut\". Free for personal, non-commercial use."
+    )
+)
+
 private val VISION_FILES: List<CatalogModel> get() = listOf(
     CatalogModel(
         id = "gemma-4-e2b-gguf-vision", name = "Gemma 4 E2B photo support", engine = "GGUF",

@@ -2,3 +2,7 @@
 	path = app/src/main/cpp/llama.cpp
 	url = https://github.com/ggml-org/llama.cpp
 	shallow = true
+[submodule "app/src/main/cpp/stable-diffusion.cpp"]
+	path = imagegen/src/main/cpp/stable-diffusion.cpp
+	url = https://github.com/leejet/stable-diffusion.cpp
+	shallow = true

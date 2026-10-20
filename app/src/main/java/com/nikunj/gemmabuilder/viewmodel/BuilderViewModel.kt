@@ -136,6 +136,8 @@ class BuilderViewModel : ViewModel() {
             ModelDownloadTracker.completed.collect { id ->
                 refreshModelDownloads(context)
                 if (generationInProgress || uiState.value.isBusy) return@collect
+                // An image model is used from Chat when asked; it never replaces the chat model.
+                if (MODEL_CATALOG.firstOrNull { it.id == id }?.isImage == true) return@collect
                 val owner = MODEL_CATALOG.firstOrNull { it.visionId == id }
                 if (owner != null) {
                     // Photo support finished: reload the model that uses it so it can see photos.
@@ -204,7 +206,7 @@ class BuilderViewModel : ViewModel() {
 
     fun useDownloadedModel(context: Context, id: String) {
         val appContext = context.applicationContext
-        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        val model = MODEL_CATALOG.firstOrNull { it.id == id }?.takeUnless { it.isImage } ?: return
         val file = downloadedModelFile(appContext, model)
         if (!file.exists()) return
         if (generationInProgress || uiState.value.isBusy) {
@@ -1170,6 +1172,14 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     _uiState.update { it.copy(messages = done) }
                     return@launch
                 }
+                // "Draw ...", "generate an image of ..." go to the image model.
+                val imagePrompt = if (presetResearch == null && images.isEmpty()) imagePromptFrom(prompt) else null
+                if (imagePrompt != null) {
+                    val done = pendingMessages + createImageMessage(context, imagePrompt)
+                    persistActiveConversation(context, done)
+                    _uiState.update { it.copy(messages = done, streamingReply = null) }
+                    return@launch
+                }
                 // Timers, reminders, the stopwatch and scheduled tasks are set by the app, not the model.
                 val taskCommand = if (presetResearch == null && images.isEmpty()) taskCommandFrom(prompt) else null
                 if (taskCommand != null) {
@@ -1352,10 +1362,58 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
     fun stopGeneration() {
         if (!generationInProgress) return
         stopRequested = true
+        imageGenerator?.cancel()
         if (uiState.value.activeKind == CHAT_KIND_STUDIO) {
             generationJob?.cancel()
             _uiState.update { it.copy(status = "Stopped.") }
         }
+    }
+
+    // ---- Image generation (Chat space) ----
+
+    @Volatile private var imageGenerator: ImageGenerator? = null
+
+    /** Makes an image for [prompt] with the image model, freeing the chat model's memory first. */
+    private suspend fun createImageMessage(context: Context, prompt: String): ChatMessage {
+        val model = MODEL_CATALOG.first { it.id == IMAGE_MODEL_ID }
+        if (!downloadedModelFile(context, model).exists()) {
+            return ChatMessage("assistant", "_To create images, download **${model.name}** (${formatBytes(model.sizeBytes)}) under **Image generation** on the Models page, then ask again._")
+        }
+        // The image model and a chat model rarely fit in memory together.
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        refreshContextUsage()
+        _uiState.update {
+            it.copy(gemmaLoaded = false, engineLabel = "Not loaded", status = "Creating image…", streamingReply = "_Creating an image of $prompt…_")
+        }
+        val generator = ImageGenerator(context.applicationContext).also { imageGenerator = it }
+        val started = System.currentTimeMillis()
+        val ticker = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(400)
+                val (step, steps) = generator.progress()
+                // After the drawing steps the image is decoded, which reports its own (much longer) progress.
+                val label = if (steps in 1..IMAGE_STEPS && step > 0) "step ${step} of ${steps}" else if (step > 0) "finishing" else null
+                if (label != null) _uiState.update { it.copy(streamingReply = "_Creating an image of $prompt… ${label}_") }
+            }
+        }
+        val file = try {
+            generator.generate(prompt)
+        } finally {
+            ticker.cancel()
+            imageGenerator = null
+        }
+        if (file == null) {
+            return ChatMessage("assistant", if (stopRequested) "_Stopped._" else "_The image couldn't be created. The phone may be low on memory: close other apps and try again._")
+        }
+        val seconds = (System.currentTimeMillis() - started) / 1000.0
+        return ChatMessage(
+            "assistant",
+            "Here's your image: *$prompt*",
+            attachments = listOf(file.absolutePath),
+            statsInline = String.format(java.util.Locale.US, "${model.name} · 512×512 · %.0fs", seconds)
+        )
     }
 
     // ---- Web research (Chat space) ----

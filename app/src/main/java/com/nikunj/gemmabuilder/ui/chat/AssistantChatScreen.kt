@@ -1,5 +1,7 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.DropdownMenu
@@ -520,6 +522,7 @@ private fun AssistantMessage(message: ChatMessage, fontScale: Float, speaking: B
             ThinkingSection(message.thinking, message.thinkingSeconds, live = false, fontScale = fontScale)
             Spacer(Modifier.height(10.dp))
         }
+        message.attachments.filter { File(it).isFile }.forEach { path -> CreatedImage(path) }
         RichMarkdown(message.text, fontScale)
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
@@ -870,6 +873,23 @@ private fun ThinkingButton(state: BuilderUiState, onLevel: (Int) -> Unit) {
                     onClick = { onLevel(level); open = false }
                 )
             }
+        }
+    }
+}
+
+/** An image Mochu created, shown full width with a button to save it to the phone's Photos. */
+@Composable
+private fun CreatedImage(path: String) {
+    val context = LocalContext.current
+    Column(Modifier.padding(bottom = 6.dp)) {
+        PhotoThumbnail(path, Modifier.fillMaxWidth().aspectRatio(1f))
+        TextButton(onClick = {
+            val saved = saveImageToGallery(context, path)
+            Toast.makeText(context, if (saved) "Saved to Pictures/Mochu" else "Couldn't save the image", Toast.LENGTH_SHORT).show()
+        }) {
+            Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Save to Photos")
         }
     }
 }
