@@ -517,6 +517,7 @@ fun needsWeb(request: String): Boolean =
 
 /** Loads the selected model for a task when the app hasn't loaded one; the caller closes it. */
 internal suspend fun loadModelForTask(context: Context): BuilderEngine? {
+    savedRemoteModelConfig(context)?.takeIf { remoteModelActive(context) }?.let { return RemoteEngine(it) }
     val file = modelFile(context)
     if (!file.exists()) return null
     val window = safeTokenWindow(context, file, savedModelContextTokens(context, savedModelName(context)))

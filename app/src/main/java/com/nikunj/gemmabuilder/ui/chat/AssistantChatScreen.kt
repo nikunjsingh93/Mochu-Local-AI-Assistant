@@ -120,7 +120,7 @@ import androidx.compose.ui.unit.dp
 
 /** Name shown for the selected model, e.g. "Gemma 4 E2B" for gemma-4-E2B-it.litertlm. */
 fun modelDisplayName(fileName: String): String =
-    MODEL_CATALOG.firstOrNull { it.fileName == fileName }?.name
+    MODEL_CATALOG.firstOrNull { it.fileName == fileName }?.name ?: fileName.takeUnless { it.contains('.') && it.substringAfterLast('.') in setOf("gguf", "litertlm", "task") }
         ?: fileName.substringBeforeLast('.').ifBlank { "No model" }
 
 /** The Chat space: a general assistant conversation. */

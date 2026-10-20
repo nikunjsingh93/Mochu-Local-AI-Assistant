@@ -77,7 +77,7 @@ class BuilderViewModel : ViewModel() {
         ensureProjectForConversation(context, active.projectKey, migrateLegacy = true)
         refreshWorkspace(context, active.id)
         _uiState.update {
-            val hasModel = modelFile(context).exists()
+            val hasModel = modelAvailable(context)
             it.copy(
                 conversations = conversationInfos(),
                 projectNames = savedProjectNames(context),
@@ -225,6 +225,7 @@ class BuilderViewModel : ViewModel() {
         sessionFingerprint = null
         saveModelName(appContext, model.fileName)
         saveActiveModelPath(appContext, file.absolutePath)
+        setRemoteModelActive(appContext, false)
         _uiState.update {
             it.copy(
                 modelName = model.fileName,
@@ -264,7 +265,7 @@ class BuilderViewModel : ViewModel() {
             _uiState.update {
                 it.copy(
                     modelName = savedModelName(appContext),
-                    modelReady = modelFile(appContext).exists(),
+                    modelReady = modelAvailable(appContext),
                     gemmaLoaded = false,
                     engineLabel = "Not loaded",
                     status = "Deleted ${model.name}."
@@ -285,7 +286,8 @@ class BuilderViewModel : ViewModel() {
         val imageSettings = MODEL_CATALOG.filter { it.isImage }.associate { it.fileName to savedImageSettings(appContext, it) }
         _uiState.update {
             it.copy(
-                modelDownloads = states, activeModelPath = savedActiveModelPath(appContext), modelContextTokens = contexts,
+                modelDownloads = states, activeModelPath = if (remoteModelActive(appContext)) null else savedActiveModelPath(appContext), modelContextTokens = contexts,
+                remoteModel = savedRemoteModelConfig(appContext)?.takeIf { remoteModelActive(appContext) },
                 activeImageModelId = activeImageModel(appContext)?.id, imageSettings = imageSettings
             )
         }
@@ -702,7 +704,56 @@ class BuilderViewModel : ViewModel() {
         viewModelScope.launch { loadGemmaInternal(context.applicationContext) }
     }
 
+    /** Switches Chat and Code to a model on the user's own server. */
+    fun useRemoteModel(context: Context, config: RemoteModelConfig) {
+        if (generationInProgress || uiState.value.isBusy) return
+        val appContext = context.applicationContext
+        saveRemoteModelConfig(appContext, config)
+        setRemoteModelActive(appContext, true)
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        refreshContextUsage()
+        _uiState.update {
+            it.copy(
+                modelName = config.model, modelReady = true, gemmaLoaded = false, engineLabel = "Not loaded",
+                modelSupportsMultimodal = false, multimodalBackendReady = false, activeModelPath = null,
+                remoteModel = config, status = "${config.model} on your server selected. Send a message to use it."
+            )
+        }
+    }
+
+    /** Back to the on-phone model from the user's own server. */
+    fun stopUsingRemoteModel(context: Context) {
+        if (generationInProgress || uiState.value.isBusy) return
+        val appContext = context.applicationContext
+        setRemoteModelActive(appContext, false)
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        _uiState.update {
+            it.copy(
+                modelName = savedModelName(appContext), modelReady = modelAvailable(appContext), gemmaLoaded = false, engineLabel = "Not loaded",
+                activeModelPath = savedActiveModelPath(appContext), remoteModel = null, status = "Using the model on this phone."
+            )
+        }
+    }
+
     private suspend fun loadGemmaInternal(context: Context): Boolean {
+        // A model on the user's own server: nothing to load into memory here.
+        savedRemoteModelConfig(context)?.takeIf { remoteModelActive(context) }?.let { config ->
+            engine.close()
+            engine = RemoteEngine(config)
+            sessionFingerprint = null
+            activeTokenWindow = 32_768
+            _uiState.update {
+                it.copy(
+                    isBusy = false, gemmaLoaded = true, modelName = config.model, engineLabel = "${config.model} · your server",
+                    contextWindowTokens = null, contextUsedTokens = null, status = "Using ${config.model} on your server..."
+                )
+            }
+            return true
+        }
         val file = modelFile(context)
         if (!file.exists()) {
             _uiState.update { it.copy(isBusy = false, status = "Import a .litertlm or .gguf model from the ⋮ menu first.") }
@@ -2050,7 +2101,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 modelName = modelNameNow,
                 modelSupportsMultimodal = isLikelyMultimodalModel(modelNameNow),
                 multimodalBackendReady = multimodalEngine?.isReady() == true,
-                modelReady = modelFile(context).exists()
+                modelReady = modelAvailable(context)
             )
         }
     }

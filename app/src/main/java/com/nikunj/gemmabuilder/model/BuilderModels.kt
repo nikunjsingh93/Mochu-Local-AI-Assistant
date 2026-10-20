@@ -170,6 +170,8 @@ data class BuilderUiState(
     val thinkingLevel: Int = 3,
     /** True while Chat is creating an image (a placeholder shows where it will appear). */
     val imageGenerating: Boolean = false,
+    /** The model on the user's own server, when Chat and Code use it instead of the phone's. */
+    val remoteModel: RemoteModelConfig? = null,
     /** Image model Chat uses, and each image model's size and steps (file name → size to steps). */
     val activeImageModelId: String? = null,
     val imageSettings: Map<String, ImageOptions> = emptyMap(),

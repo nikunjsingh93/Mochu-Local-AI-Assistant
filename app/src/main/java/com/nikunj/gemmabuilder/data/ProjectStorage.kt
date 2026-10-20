@@ -47,6 +47,10 @@ fun ensureProjectForConversation(context: Context, conversationId: String, migra
 }
 
 fun savedModelName(context: Context): String =
+    savedRemoteModelConfig(context)?.model?.takeIf { remoteModelActive(context) } ?: savedLocalModelName(context)
+
+/** The selected on-phone model, whether or not a remote model is in use. */
+fun savedLocalModelName(context: Context): String =
     context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         .getString("modelName", null)
         ?.takeIf { it.isNotBlank() }
@@ -336,3 +340,6 @@ fun thinkingBudget(level: Int): Int = when (level) {
     2 -> 2048
     else -> -1
 }
+
+/** True when there is a model to answer with: on the phone, or the user's own server. */
+fun modelAvailable(context: Context): Boolean = remoteModelActive(context) || modelFile(context).exists()

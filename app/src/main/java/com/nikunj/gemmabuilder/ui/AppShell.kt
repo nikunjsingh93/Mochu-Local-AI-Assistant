@@ -337,6 +337,8 @@ fun OnDeviceApp(
                         onContextChange = { file, tokens -> vm.setModelContextTokens(app, file, tokens) },
                         onKvCacheTypeChange = { vm.setKvCacheType(app, it) },
                         onImageSettingsChange = { file, options -> vm.setImageSettings(app, file, options) },
+                        onUseRemote = { vm.useRemoteModel(app, it) },
+                        onStopRemote = { vm.stopUsingRemoteModel(app) },
                         onDismiss = null
                     )
                 }

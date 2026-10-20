@@ -1,5 +1,11 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.horizontalScroll
 import android.Manifest
@@ -57,6 +63,8 @@ fun ModelDownloadsScreen(
     onContextChange: (String, Int) -> Unit,
     onKvCacheTypeChange: (KvCacheType) -> Unit,
     onImageSettingsChange: (String, ImageOptions) -> Unit,
+    onUseRemote: (RemoteModelConfig) -> Unit,
+    onStopRemote: () -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
 ) {
@@ -114,6 +122,9 @@ fun ModelDownloadsScreen(
                 )
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                     Box(Modifier.padding(12.dp)) { ApiServerSetting() }
+                }
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Box(Modifier.padding(12.dp)) { RemoteModelSetting(state.remoteModel, onUseRemote, onStopRemote) }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -422,5 +433,84 @@ private fun ImageSettings(model: CatalogModel, options: ImageOptions, onChange: 
             valueRange = 1f..model.imageMaxSteps.toFloat(),
             steps = (model.imageMaxSteps - 2).coerceAtLeast(0)
         )
+    }
+}
+
+/** A model on the user's own computer or server (Ollama, LM Studio, llama.cpp, vLLM, another Mochu). */
+@Composable
+private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelConfig) -> Unit, onStop: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val saved = remember { savedRemoteModelConfig(context) }
+    var url by remember { mutableStateOf(saved?.baseUrl ?: "") }
+    var key by remember { mutableStateOf(saved?.apiKey ?: "") }
+    var models by remember { mutableStateOf<List<String>>(emptyList()) }
+    var chosen by remember { mutableStateOf(saved?.model) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Model on your own server")
+                Text(
+                    "Use a bigger model running on your computer on the same Wi-Fi, through its OpenAI-compatible API (Ollama, LM Studio, llama.cpp server, vLLM, or another phone with Mochu's API server).",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (active != null) {
+            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
+                Text("In use: ${active.model}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
+            }
+        }
+        OutlinedTextField(
+            value = url, onValueChange = { url = it; models = emptyList(); message = null }, singleLine = true,
+            label = { Text("Server address") }, placeholder = { Text("192.168.1.20:11434") }, modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = key, onValueChange = { key = it.trim() }, singleLine = true,
+            label = { Text("API key (if the server needs one)") }, modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "Ollama: port 11434 · LM Studio: 1234 · llama.cpp: 8080 · Mochu: 8080. Only addresses on your own network (or Tailscale) are allowed.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(enabled = url.isNotBlank() && !checking, onClick = {
+                val base = normalizeBaseUrl(url)
+                checking = true
+                message = null
+                scope.launch {
+                    val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { isLocalNetworkHost(base) }
+                    if (!local) {
+                        message = "That address isn't on your local network. Use your computer's local IP (like 192.168.x.x) or a Tailscale address."
+                    } else {
+                        runCatching { listRemoteModels(base, key) }
+                            .onSuccess { list ->
+                                models = list
+                                url = base
+                                if (chosen !in list) chosen = list.firstOrNull()
+                                message = if (list.isEmpty()) "Connected, but the server lists no models. Load one on the server first." else null
+                            }
+                            .onFailure { e -> message = "Couldn't connect: ${e.message ?: "no answer"}. Check the address and that the server allows connections from your network." }
+                    }
+                    checking = false
+                }
+            }) { Text(if (checking) "Connecting…" else "Connect") }
+            if (active != null) TextButton(onClick = onStop) { Text("Use phone model") }
+        }
+        if (models.isNotEmpty()) {
+            Text("Models on the server", style = MaterialTheme.typography.labelLarge)
+            models.forEach { id ->
+                Row(Modifier.fillMaxWidth().clickable { chosen = id }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = chosen == id, onClick = { chosen = id })
+                    Text(id, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Button(enabled = chosen != null, onClick = { chosen?.let { onUse(RemoteModelConfig(normalizeBaseUrl(url), key, it)) } }) { Text("Use this model") }
+        }
+        message?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
     }
 }
