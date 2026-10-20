@@ -448,10 +448,13 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
     var chosen by remember { mutableStateOf(saved?.model) }
     var message by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
+    // Servers outside your network get your messages: ask once per address before connecting.
+    var confirmOutside by remember { mutableStateOf<String?>(null) }
+    var allowedOutside by remember { mutableStateOf(setOf<String>()) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Model on your own server")
+                Text("Load a model from your home server")
                 Text(
                     "Use a bigger model running on your computer on the same Wi-Fi, through its OpenAI-compatible API (Ollama, LM Studio, llama.cpp server, vLLM, or another phone with Mochu's API server).",
                     style = MaterialTheme.typography.labelSmall,
@@ -473,7 +476,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             label = { Text("API key (if the server needs one)") }, modifier = Modifier.fillMaxWidth()
         )
         Text(
-            "Ollama: port 11434 · LM Studio: 1234 · llama.cpp: 8080 · Mochu: 8080. Only addresses on your own network (or Tailscale) are allowed.",
+            "Ollama: port 11434 · LM Studio: 1234 · llama.cpp: 8080 · Mochu: 8080. A domain, or a cloud API like api.openai.com with your key, works too.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -484,8 +487,8 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                 message = null
                 scope.launch {
                     val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { isLocalNetworkHost(base) }
-                    if (!local) {
-                        message = "That address isn't on your local network. Use your computer's local IP (like 192.168.x.x) or a Tailscale address."
+                    if (!local && base !in allowedOutside) {
+                        confirmOutside = base
                     } else {
                         runCatching { listRemoteModels(base, key) }
                             .onSuccess { list ->
@@ -494,7 +497,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                                 if (chosen !in list) chosen = list.firstOrNull()
                                 message = if (list.isEmpty()) "Connected, but the server lists no models. Load one on the server first." else null
                             }
-                            .onFailure { e -> message = "Couldn't connect: ${e.message ?: "no answer"}. Check the address and that the server allows connections from your network." }
+                            .onFailure { e -> message = "Couldn't connect: ${e.message?.trimEnd('.') ?: "no answer"}. Check the address and that the server allows connections from your network." }
                     }
                     checking = false
                 }
@@ -512,5 +515,14 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             Button(enabled = chosen != null, onClick = { chosen?.let { onUse(RemoteModelConfig(normalizeBaseUrl(url), key, it)) } }) { Text("Use this model") }
         }
         message?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+    }
+    confirmOutside?.let { base ->
+        AlertDialog(
+            onDismissRequest = { confirmOutside = null },
+            title = { Text("Send chats to this server?") },
+            text = { Text("$base isn't on your local network. While you use its model, your messages (and any photos or documents you attach) are sent to it over the internet, so they no longer stay on your devices.") },
+            confirmButton = { TextButton(onClick = { allowedOutside = allowedOutside + base; confirmOutside = null; message = "Allowed. Tap Connect again." }) { Text("Allow") } },
+            dismissButton = { TextButton(onClick = { confirmOutside = null }) { Text("Cancel") } }
+        )
     }
 }

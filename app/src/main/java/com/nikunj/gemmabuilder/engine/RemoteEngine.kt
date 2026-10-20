@@ -45,7 +45,12 @@ fun setRemoteModelActive(context: Context, active: Boolean) {
 /** "http://192.168.1.20:11434" or "...:1234/v1" → the API root ending in /v1. */
 fun normalizeBaseUrl(input: String): String {
     var url = input.trim().trimEnd('/')
-    if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://$url"
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        // Addresses on your network usually serve plain http; domains like api.openai.com use https.
+        val host = url.substringBefore('/').substringBefore(':').lowercase()
+        val local = host == "localhost" || host.endsWith(".local") || host.endsWith(".lan") || Regex("""\d+\.\d+\.\d+\.\d+""").matches(host)
+        url = (if (local) "http://" else "https://") + url
+    }
     if (!url.substringAfter("://").contains("/")) url += "/v1"
     return url
 }

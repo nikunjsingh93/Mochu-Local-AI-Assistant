@@ -562,7 +562,7 @@ fun ApiServerSetting() {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Local API server")
+                Text("Launch a local API server from this device")
                 Text(
                     "Lets your other devices on the same Wi-Fi use this phone's model, through an OpenAI-compatible API (for apps like Open WebUI, scripts, or code editors).",
                     style = MaterialTheme.typography.labelSmall,
