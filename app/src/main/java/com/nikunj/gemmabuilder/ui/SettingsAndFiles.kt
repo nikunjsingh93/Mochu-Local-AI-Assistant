@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -259,22 +260,6 @@ fun SettingsScreen(
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Think before answering")
-                            Text(
-                                "Models that support it reason first in Chat. Better answers, slower replies.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(checked = thinkingEnabled, onCheckedChange = onThinkingChange)
-                    }
-                    HorizontalDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
@@ -287,8 +272,6 @@ fun SettingsScreen(
                         }
                         Switch(checked = speakVoiceReplies, onCheckedChange = onSpeakVoiceRepliesChange)
                     }
-                    HorizontalDivider()
-                    ApiServerSetting()
                     HorizontalDivider()
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -567,7 +550,7 @@ private fun fileTreeRows(files: List<String>, collapsed: Set<String>): List<File
 
 /** Turns the local API server on or off and shows the address and key other devices use. */
 @Composable
-private fun ApiServerSetting() {
+fun ApiServerSetting() {
     val context = LocalContext.current
     val server by ApiServerStatus.state.collectAsState()
     val clipboard = LocalClipboardManager.current
@@ -585,7 +568,26 @@ private fun ApiServerSetting() {
         }
         if (server.running) {
             val base = server.address ?: "http://<phone's IP>:$API_SERVER_PORT/v1"
-            val key = remember { apiServerKey(context) }
+            var key by remember { mutableStateOf(apiServerKey(context)) }
+            var editingKey by remember { mutableStateOf(false) }
+            if (editingKey) {
+                var draft by remember { mutableStateOf(key) }
+                val valid = isValidApiServerKey(draft)
+                AlertDialog(
+                    onDismissRequest = { editingKey = false },
+                    title = { Text("API key") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Other devices send this with each request. Use 4 to 32 letters or numbers.", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(value = draft, onValueChange = { draft = it.trim().take(32) }, singleLine = true, isError = !valid)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(enabled = valid, onClick = { saveApiServerKey(context, draft); key = draft; editingKey = false }) { Text("Save") }
+                    },
+                    dismissButton = { TextButton(onClick = { editingKey = false }) { Text("Cancel") } }
+                )
+            }
             SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Base URL: $base", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
@@ -596,6 +598,7 @@ private fun ApiServerSetting() {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { clipboard.setText(AnnotatedString(base)) }) { Text("Copy URL") }
                 OutlinedButton(onClick = { clipboard.setText(AnnotatedString(key)) }) { Text("Copy key") }
+                OutlinedButton(onClick = { editingKey = true }) { Text("Change") }
             }
             Text(
                 "Requests served: ${server.requests}. One request runs at a time, and Chat waits while one does. Turn it off when you're done: it keeps the model in memory.",

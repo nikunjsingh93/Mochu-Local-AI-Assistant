@@ -15,14 +15,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** Mochu's face on its pink tile, the same art as the launcher icon. */
+/** Mochu's face on its sky-blue tile, the same art as the launcher icon. */
 @Composable
 fun MochuLogo(size: Dp, modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(size)
             .clip(RoundedCornerShape(size * 0.3f))
-            .background(Color(0xFFFFD9E4)),
+            .background(Color(0xFFBFE6FF)),
         contentAlignment = Alignment.Center
     ) {
         // The launcher art leaves room for icon masks, so scale it up to fill the tile.

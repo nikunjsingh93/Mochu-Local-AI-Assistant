@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.horizontalScroll
 import android.Manifest
 import android.content.pm.PackageManager
@@ -111,6 +112,9 @@ fun ModelDownloadsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Box(Modifier.padding(12.dp)) { ApiServerSetting() }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,

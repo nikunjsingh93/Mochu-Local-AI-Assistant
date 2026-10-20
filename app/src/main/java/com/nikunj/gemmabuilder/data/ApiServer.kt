@@ -48,14 +48,20 @@ object ApiServerStatus {
     internal fun update(change: (ApiServerState) -> ApiServerState) { _state.value = change(_state.value) }
 }
 
-/** The key clients send as "Authorization: Bearer <key>"; made once and kept. */
+/** The key clients send as "Authorization: Bearer <key>": 4 random digits at first, changeable in the app. */
 fun apiServerKey(context: Context): String {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    prefs.getString("apiServerKey", null)?.let { return it }
-    val bytes = ByteArray(18).also { SecureRandom().nextBytes(it) }
-    val key = "mochu-" + bytes.joinToString("") { "%02x".format(it) }
+    // Keys from v1.8.0 were long random strings; those get a short one instead.
+    prefs.getString("apiServerKey", null)?.takeIf { isValidApiServerKey(it) && !it.startsWith("mochu-") }?.let { return it }
+    val key = (1000 + SecureRandom().nextInt(9000)).toString()
     prefs.edit().putString("apiServerKey", key).apply()
     return key
+}
+
+fun isValidApiServerKey(key: String): Boolean = key.length in 4..32 && key.all { it.isLetterOrDigit() }
+
+fun saveApiServerKey(context: Context, key: String) {
+    if (isValidApiServerKey(key)) context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("apiServerKey", key).apply()
 }
 
 /** The phone's address on the local network (Wi-Fi or hotspot), or null when offline. */
