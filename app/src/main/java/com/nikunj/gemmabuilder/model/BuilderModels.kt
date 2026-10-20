@@ -145,6 +145,8 @@ data class BuilderUiState(
     val modelLoading: Boolean = false,
     /** Context window chosen per downloaded model (file name → tokens), for the Models page sliders. */
     val modelContextTokens: Map<String, Int> = emptyMap(),
+    /** Names the user gave Code projects (project key → name). */
+    val projectNames: Map<String, String> = emptyMap(),
     /** Photos attached to the Chat message being written (absolute paths in app storage). */
     val chatImages: List<String> = emptyList(),
     /** Facts the user asked Chat to remember, added to its system prompt when [memoryEnabled]. */

@@ -278,3 +278,14 @@ fun savedWebSearchEnabled(context: Context): Boolean =
 fun saveWebSearchEnabled(context: Context, enabled: Boolean) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("webSearchEnabled", enabled).apply()
 }
+
+/** Names the user gave Code projects (project key → name); unnamed projects use their first chat's title. */
+fun savedProjectNames(context: Context): Map<String, String> =
+    context.getSharedPreferences("project_names", Context.MODE_PRIVATE).all
+        .mapNotNull { (key, value) -> (value as? String)?.let { key to it } }.toMap()
+
+fun saveProjectName(context: Context, projectKey: String, name: String?) {
+    context.getSharedPreferences("project_names", Context.MODE_PRIVATE).edit().apply {
+        if (name.isNullOrBlank()) remove(projectKey) else putString(projectKey, name.trim())
+    }.apply()
+}

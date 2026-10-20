@@ -53,6 +53,15 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -181,6 +190,7 @@ fun OnDeviceApp(
                     scope.launch { drawerState.close() }
                 },
                 onDeleteProject = { projectKey -> vm.deleteProject(app, projectKey) },
+                onRenameProject = { projectKey, name -> vm.renameProject(app, projectKey, name) },
                 onSelect = { id ->
                     pinnedTab = null
                     vm.selectConversation(app, id)
@@ -378,12 +388,14 @@ private fun HistoryDrawer(
     onDelete: (String) -> Unit,
     onNewInProject: (String) -> Unit,
     onDeleteProject: (String) -> Unit,
+    onRenameProject: (String, String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenTasks: () -> Unit
 ) {
     val studio = kind == CHAT_KIND_STUDIO
     var pendingDelete by remember { mutableStateOf<ConversationInfo?>(null) }
     var pendingDeleteProject by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingRenameProject by remember { mutableStateOf<Pair<String, String>?>(null) }
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
             Spacer(Modifier.height(20.dp))
@@ -412,7 +424,8 @@ private fun HistoryDrawer(
                         .entries.sortedByDescending { group -> group.value.maxOf { it.updatedAt } }
                     groups.forEach { (projectKey, chats) ->
                         item(key = "project-$projectKey") {
-                            val name = chats.minByOrNull { it.updatedAt }?.title?.takeUnless { it == "New chat" } ?: "New project"
+                            val name = state.projectNames[projectKey]
+                                ?: chats.minByOrNull { it.updatedAt }?.title?.takeUnless { it == "New chat" } ?: "New project"
                             Row(
                                 Modifier.fillMaxWidth().padding(start = 12.dp, top = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -420,6 +433,9 @@ private fun HistoryDrawer(
                                 Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.width(8.dp))
                                 Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                IconButton(onClick = { pendingRenameProject = projectKey to name }) {
+                                    Icon(Icons.Outlined.Edit, contentDescription = "Rename project", modifier = Modifier.size(18.dp))
+                                }
                                 IconButton(onClick = { onNewInProject(projectKey) }, enabled = !state.isBusy) {
                                     Icon(Icons.Rounded.Add, contentDescription = "New chat in this project", modifier = Modifier.size(20.dp))
                                 }
@@ -491,6 +507,29 @@ private fun HistoryDrawer(
                 modifier = Modifier.padding(vertical = 8.dp)
             )
         }
+    }
+    pendingRenameProject?.let { (projectKey, current) ->
+        var text by remember(projectKey) { mutableStateOf(TextFieldValue(current, TextRange(0, current.length))) }
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(projectKey) { focus.requestFocus() }
+        val save = { onRenameProject(projectKey, text.text); pendingRenameProject = null }
+        AlertDialog(
+            onDismissRequest = { pendingRenameProject = null },
+            title = { Text("Rename project") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    placeholder = { Text("Project name") },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (text.text.isNotBlank()) save() }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus)
+                )
+            },
+            confirmButton = { TextButton(onClick = save, enabled = text.text.isNotBlank()) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { pendingRenameProject = null }) { Text("Cancel") } }
+        )
     }
     pendingDeleteProject?.let { (projectKey, name) ->
         AlertDialog(

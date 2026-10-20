@@ -80,6 +80,7 @@ class BuilderViewModel : ViewModel() {
             val hasModel = modelFile(context).exists()
             it.copy(
                 conversations = conversationInfos(),
+                projectNames = savedProjectNames(context),
                 activeConversationId = active.id,
                 messages = active.messages,
                 chatSummarized = active.summary.isNotBlank(),
@@ -1688,6 +1689,12 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
     private fun projectKeyOf(conversationId: String): String =
         conversations.firstOrNull { it.id == conversationId }?.projectKey ?: conversationId
 
+    /** Renames a Code project; a blank name goes back to its first chat's title. */
+    fun renameProject(context: Context, projectKey: String, name: String) {
+        saveProjectName(context, projectKey, name)
+        _uiState.update { it.copy(projectNames = savedProjectNames(context)) }
+    }
+
     /** Deletes a Code project: all its chats and its files. */
     fun deleteProject(context: Context, projectKey: String) {
         if (generationInProgress || uiState.value.isBusy) return
@@ -1698,6 +1705,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             conversations = conversations.filterNot { it.id == chat.id }.toMutableList()
             File(chatsRoot(context), "${chat.id}.chat").delete()
         }
+        saveProjectName(context, projectKey, null)
+        _uiState.update { it.copy(projectNames = it.projectNames - projectKey) }
         // The last one goes through deleteConversation, which also removes the files and picks what to show next.
         deleteConversation(context, chats.first().id)
         if (keepActive) _uiState.update { it.copy(sidebarOpen = false) }
