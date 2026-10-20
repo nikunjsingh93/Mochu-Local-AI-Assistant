@@ -206,7 +206,13 @@ class BuilderViewModel : ViewModel() {
 
     fun useDownloadedModel(context: Context, id: String) {
         val appContext = context.applicationContext
-        val model = MODEL_CATALOG.firstOrNull { it.id == id }?.takeUnless { it.isImage } ?: return
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        if (model.isImage) {
+            // Image models don't replace the chat model; this picks which one Chat draws with.
+            saveActiveImageModel(appContext, model.id)
+            refreshModelDownloads(appContext)
+            return
+        }
         val file = downloadedModelFile(appContext, model)
         if (!file.exists()) return
         if (generationInProgress || uiState.value.isBusy) {
@@ -276,7 +282,13 @@ class BuilderViewModel : ViewModel() {
             model.id to (live[model.id] ?: storedDownloadState(appContext, model))
         }
         val contexts = MODEL_CATALOG.associate { it.fileName to savedModelContextTokens(appContext, it.fileName) }
-        _uiState.update { it.copy(modelDownloads = states, activeModelPath = savedActiveModelPath(appContext), modelContextTokens = contexts) }
+        val imageSettings = MODEL_CATALOG.filter { it.isImage }.associate { it.fileName to savedImageSettings(appContext, it) }
+        _uiState.update {
+            it.copy(
+                modelDownloads = states, activeModelPath = savedActiveModelPath(appContext), modelContextTokens = contexts,
+                activeImageModelId = activeImageModel(appContext)?.id, imageSettings = imageSettings
+            )
+        }
     }
 
     /** State for a model with no download in progress, from what is on disk. */
@@ -1373,12 +1385,20 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
     @Volatile private var imageGenerator: ImageGenerator? = null
 
+    /** The Models page's size and steps for an image model. */
+    fun setImageSettings(context: Context, modelFileName: String, size: Int, steps: Int) {
+        val model = MODEL_CATALOG.firstOrNull { it.fileName == modelFileName && it.isImage } ?: return
+        saveImageSettings(context, model, size, steps)
+        _uiState.update { it.copy(imageSettings = it.imageSettings + (modelFileName to savedImageSettings(context, model))) }
+    }
+
     /** Makes an image for [prompt] with the image model, freeing the chat model's memory first. */
     private suspend fun createImageMessage(context: Context, prompt: String): ChatMessage {
-        val model = MODEL_CATALOG.first { it.id == IMAGE_MODEL_ID }
-        if (!downloadedModelFile(context, model).exists()) {
-            return ChatMessage("assistant", "_To create images, download **${model.name}** (${formatBytes(model.sizeBytes)}) under **Image generation** on the Models page, then ask again._")
+        val model = activeImageModel(context) ?: run {
+            val suggested = MODEL_CATALOG.first { it.id == IMAGE_MODEL_ID }
+            return ChatMessage("assistant", "_To create images, download an image model such as **${suggested.name}** (${formatBytes(suggested.sizeBytes)}) under **Image generation** on the Models page, then ask again._")
         }
+        val (size, imageSteps) = savedImageSettings(context, model)
         // The image model and a chat model rarely fit in memory together.
         engine.close()
         engine = DemoBuilderEngine()
@@ -1394,12 +1414,12 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 kotlinx.coroutines.delay(400)
                 val (step, steps) = generator.progress()
                 // After the drawing steps the image is decoded, which reports its own (much longer) progress.
-                val label = if (steps in 1..IMAGE_STEPS && step > 0) "step ${step} of ${steps}" else if (step > 0) "finishing" else null
+                val label = if (steps == imageSteps && step > 0) "step ${step} of ${steps}" else if (step > 0) "finishing" else null
                 if (label != null) _uiState.update { it.copy(streamingReply = "_Creating an image of $prompt… ${label}_") }
             }
         }
         val file = try {
-            generator.generate(prompt)
+            generator.generate(model, prompt, size, imageSteps)
         } finally {
             ticker.cancel()
             imageGenerator = null
@@ -1413,7 +1433,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             "assistant",
             "Here's your image: *$prompt*",
             attachments = listOf(file.absolutePath),
-            statsInline = String.format(java.util.Locale.US, "${model.name} · 512×512 · %.0fs", seconds)
+            statsInline = String.format(java.util.Locale.US, "${model.name} · ${size}×${size} · $imageSteps steps · %.0fs", seconds)
         )
     }
 

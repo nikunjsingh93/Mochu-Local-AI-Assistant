@@ -16,18 +16,41 @@ internal object StableDiffusionNative {
     }
 
     external fun nativeLoad(modelPath: String, nThreads: Int): Long
-    external fun nativeGenerate(handle: Long, prompt: String, negativePrompt: String, width: Int, height: Int, steps: Int, seed: Long): ByteArray?
+    external fun nativeGenerate(handle: Long, prompt: String, negativePrompt: String, width: Int, height: Int, steps: Int, seed: Long, sampler: String): ByteArray?
     external fun nativeProgress(): IntArray
     external fun nativeCancel(handle: Long)
     external fun nativeFree(handle: Long)
 }
 
-/** The image model offered on the Models page. */
+/** The image model suggested first on the Models page. */
 val IMAGE_MODEL_ID = "sd-turbo-image"
 
-/** Turbo models are distilled to work in a few steps; 4 is a good balance of quality and time. */
-const val IMAGE_STEPS = 4
-private const val IMAGE_SIZE = 512
+/** Image sizes offered (square). Most of these models were trained at 512; bigger takes much longer. */
+val IMAGE_SIZE_OPTIONS = listOf(256, 384, 512, 768)
+
+/** The image model Chat uses: the one picked on the Models page, or else any downloaded one. */
+fun activeImageModel(context: Context): CatalogModel? {
+    val images = MODEL_CATALOG.filter { it.isImage && downloadedModelFile(context, it).exists() }
+    val saved = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("activeImageModel", null)
+    return images.firstOrNull { it.id == saved } ?: images.firstOrNull()
+}
+
+fun saveActiveImageModel(context: Context, id: String) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("activeImageModel", id).apply()
+}
+
+/** Image size and steps chosen for a model on the Models page (defaults: 512 and the model's own steps). */
+fun savedImageSettings(context: Context, model: CatalogModel): Pair<Int, Int> {
+    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    val size = prefs.getInt("imageSize_${model.fileName}", 512).takeIf { it in IMAGE_SIZE_OPTIONS } ?: 512
+    val steps = prefs.getInt("imageSteps_${model.fileName}", model.imageSteps).coerceIn(1, model.imageMaxSteps)
+    return size to steps
+}
+
+fun saveImageSettings(context: Context, model: CatalogModel, size: Int, steps: Int) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
+        .putInt("imageSize_${model.fileName}", size).putInt("imageSteps_${model.fileName}", steps.coerceIn(1, model.imageMaxSteps)).apply()
+}
 
 /**
  * Makes one image on the CPU with stable-diffusion.cpp. The model is loaded for each image and freed
@@ -37,8 +60,7 @@ class ImageGenerator(private val context: Context) {
     @Volatile private var handle = 0L
 
     /** Returns the saved PNG, or null if the model failed or [cancel] was called. */
-    suspend fun generate(prompt: String): File? = withContext(Dispatchers.Default) {
-        val model = MODEL_CATALOG.firstOrNull { it.id == IMAGE_MODEL_ID } ?: return@withContext null
+    suspend fun generate(model: CatalogModel, prompt: String, size: Int, steps: Int): File? = withContext(Dispatchers.Default) {
         val file = downloadedModelFile(context, model).takeIf { it.exists() } ?: return@withContext null
         val threads = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 6)
         val h = StableDiffusionNative.nativeLoad(file.absolutePath, threads)
@@ -46,9 +68,9 @@ class ImageGenerator(private val context: Context) {
         handle = h
         try {
             val rgb = StableDiffusionNative.nativeGenerate(
-                h, prompt, "blurry, low quality, deformed, watermark, text", IMAGE_SIZE, IMAGE_SIZE, IMAGE_STEPS, System.nanoTime() and 0x7fffffff
+                h, prompt, "blurry, low quality, deformed, watermark, text", size, size, steps, System.nanoTime() and 0x7fffffff, model.imageSampler
             ) ?: return@withContext null
-            savePng(rgb, IMAGE_SIZE, IMAGE_SIZE)
+            savePng(rgb, size, size)
         } finally {
             handle = 0L
             StableDiffusionNative.nativeFree(h)

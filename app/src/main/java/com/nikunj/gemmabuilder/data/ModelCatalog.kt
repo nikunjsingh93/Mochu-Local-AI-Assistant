@@ -32,7 +32,11 @@ data class CatalogModel(
     /** Largest context window offered for this model (what it was trained for, capped at 128K). */
     val maxContext: Int = 32768,
     /** Approximate context memory per token at F16, until a load measures the real figure. */
-    val kvBytesPerToken: Long = 0
+    val kvBytesPerToken: Long = 0,
+    /** Image models: default and largest sensible number of steps, and the sampler they need ("" = default). */
+    val imageSteps: Int = 4,
+    val imageMaxSteps: Int = 8,
+    val imageSampler: String = ""
 ) {
     val url: String get() = "https://huggingface.co/$repo/resolve/$revision/$sourceFileName"
     val isGguf: Boolean get() = isGgufModel(fileName)
@@ -176,7 +180,23 @@ private val IMAGE_MODELS: List<CatalogModel> get() = listOf(
         repo = "Green-Sky/SD-Turbo-GGUF", revision = "19a31586d02d64a73b4419bc193b3ecfaf38e1f0",
         fileName = "sd_turbo-f16-q8_0.gguf", sizeBytes = 2_023_745_376,
         sha256 = "d50be7655f0a554cf8041c145d88b210bd5f3c545423119dee62ae08cae51580", minRamGb = 6,
-        summary = "Stable Diffusion Turbo: creates 512×512 images in a few steps. Ask in Chat, e.g. \"draw a cat astronaut\". Free for personal, non-commercial use."
+        summary = "Stable Diffusion Turbo: detailed images in 4 steps. Ask in Chat, e.g. \"draw a cat astronaut\". Stability AI Community License: free, including commercial use for people and businesses under $1M a year. Powered by Stability AI."
+    ),
+    CatalogModel(
+        id = "sdxs-512-image", name = "SDXS-512", engine = "Image",
+        repo = "concedo/sdxs-512-tinySDdistilled-GGUF", revision = "3144d898d61492f8382ffcabec055733fc5b2a0e",
+        fileName = "sdxs-512-tinySDdistilled_Q8_0.gguf", sizeBytes = 682_847_200,
+        sha256 = "409ab23582ee074c6b9d5395784fc0741b0599fb9d138686c69087c71678eb6a", minRamGb = 4,
+        summary = "Tiny and the fastest: an image in a single step, with simpler detail than the others. OpenRAIL++ license: commercial use allowed.",
+        imageSteps = 1, imageMaxSteps = 4
+    ),
+    CatalogModel(
+        id = "dreamshaper-8-lcm-image", name = "DreamShaper 8 LCM", engine = "Image",
+        repo = "Lykon/dreamshaper-8-lcm", revision = "4645d8bc6a8e6b106d21606d63e8460cdad4f1a6",
+        fileName = "DreamShaper8_LCM.safetensors", sizeBytes = 2_133_804_992,
+        sha256 = "a4f3e1526c5dc4fcbe342f5c410d83ae202c7a415fcefcbb92e0f93fcd0a87c3", minRamGb = 6,
+        summary = "Artistic, detailed images (Stable Diffusion 1.5 tuned for speed) in about 6 steps. CreativeML OpenRAIL-M license: commercial use allowed.",
+        imageSteps = 6, imageMaxSteps = 12, imageSampler = "lcm"
     )
 )
 

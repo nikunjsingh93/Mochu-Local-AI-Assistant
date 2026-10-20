@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,6 +54,7 @@ fun ModelDownloadsScreen(
     onImportFile: () -> Unit,
     onContextChange: (String, Int) -> Unit,
     onKvCacheTypeChange: (KvCacheType) -> Unit,
+    onImageSettingsChange: (String, Int, Int) -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
 ) {
@@ -130,7 +132,7 @@ fun ModelDownloadsScreen(
 
                 ModelSection(
                     title = "LiteRT · fastest, runs on GPU",
-                    models = MODEL_CATALOG.filter { !it.isGguf && !it.hidden },
+                    models = MODEL_CATALOG.filter { !it.isGguf && !it.hidden && !it.isImage },
                     state = state,
                     ramGb = ramGb,
                     recommended = recommendedId,
@@ -164,7 +166,8 @@ fun ModelDownloadsScreen(
                     onCancel = onCancel,
                     onUse = onUse,
                     onDelete = { pendingDelete = it },
-                    onContextChange = onContextChange
+                    onContextChange = onContextChange,
+                    onImageSettingsChange = onImageSettingsChange
                 )
             }
         }
@@ -196,22 +199,25 @@ private fun ModelSection(
     onCancel: (String) -> Unit,
     onUse: (String) -> Unit,
     onDelete: (CatalogModel) -> Unit,
-    onContextChange: (String, Int) -> Unit
+    onContextChange: (String, Int) -> Unit,
+    onImageSettingsChange: (String, Int, Int) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     models.forEach { model ->
-        val isActive = state.activeModelPath?.endsWith("/${model.fileName}") == true
+        val isActive = if (model.isImage) state.activeImageModelId == model.id else state.activeModelPath?.endsWith("/${model.fileName}") == true
         ModelCard(
             model = model,
             download = state.modelDownloads[model.id] ?: ModelDownloadState(),
             isActive = isActive,
             recommended = model.id == recommended,
-            usage = if (isActive) state else null,
+            usage = if (isActive && !model.isImage) state else null,
             contextTokens = if (model.isImage) null else state.modelContextTokens[model.fileName],
             onContextChange = { onContextChange(model.fileName, it) },
             visionStatus = model.visionId?.let { id -> state.modelDownloads[id] ?: ModelDownloadState() },
             ramEstimate = { tokens -> estimatedRamBytes(context, model, tokens, state.kvCacheType) },
+            imageSettings = if (model.isImage) state.imageSettings[model.fileName] else null,
+            onImageSettingsChange = { size, steps -> onImageSettingsChange(model.fileName, size, steps) },
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
@@ -233,6 +239,8 @@ private fun ModelCard(
     onContextChange: (Int) -> Unit,
     visionStatus: ModelDownloadState?,
     ramEstimate: (Int) -> Long?,
+    imageSettings: Pair<Int, Int>?,
+    onImageSettingsChange: (Int, Int) -> Unit,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -290,6 +298,9 @@ private fun ModelCard(
                     else -> Unit
                 }
             }
+            if (download.phase == DownloadPhase.Downloaded && imageSettings != null) {
+                ImageSettings(model, imageSettings.first, imageSettings.second, onImageSettingsChange)
+            }
             if (download.phase == DownloadPhase.Downloaded && contextTokens != null) {
                 ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp), model.maxContext, ramEstimate)
             }
@@ -333,7 +344,7 @@ private fun ModelCard(
                         OutlinedButton(onClick = onCancel) { Text("Cancel") }
                     DownloadPhase.Verifying -> Unit
                     DownloadPhase.Downloaded -> {
-                        if (!isActive && !model.isImage) Button(onClick = onUse) { Text("Use") }
+                        if (!isActive) Button(onClick = onUse) { Text("Use") }
                         DangerOutlinedButton("Delete", onDelete)
                     }
                 }
@@ -373,6 +384,31 @@ private fun KvCacheChoice(current: KvCacheType, onChange: (KvCacheType) -> Unit)
             "How a GGUF model stores the chat it is reading. Q8_0 takes about half the memory of F16 with almost no change in answers; Q4_0 takes about a quarter, so very long chats fit, but answers can get a little worse.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** Size and steps for an image model. More steps add detail; a bigger size takes much longer. */
+@Composable
+private fun ImageSettings(model: CatalogModel, size: Int, steps: Int, onChange: (Int, Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+        Text("Image size", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            IMAGE_SIZE_OPTIONS.forEach { option ->
+                FilterChip(selected = option == size, onClick = { onChange(option, steps) }, label = { Text("$option") })
+            }
+        }
+        Text("Steps: $steps", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+        Text(
+            "More steps add detail but take longer. ${model.name} works best around ${model.imageSteps}.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Slider(
+            value = steps.toFloat(),
+            onValueChange = { onChange(size, kotlin.math.round(it).toInt()) },
+            valueRange = 1f..model.imageMaxSteps.toFloat(),
+            steps = (model.imageMaxSteps - 2).coerceAtLeast(0)
         )
     }
 }

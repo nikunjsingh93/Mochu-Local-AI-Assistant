@@ -310,6 +310,7 @@ fun OnDeviceApp(
                         onImportFile = { modelPicker.launch(arrayOf("*/*")) },
                         onContextChange = { file, tokens -> vm.setModelContextTokens(app, file, tokens) },
                         onKvCacheTypeChange = { vm.setKvCacheType(app, it) },
+                        onImageSettingsChange = { file, size, steps -> vm.setImageSettings(app, file, size, steps) },
                         onDismiss = null
                     )
                 }

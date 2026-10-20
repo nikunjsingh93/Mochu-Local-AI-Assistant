@@ -57,10 +57,12 @@ Java_com_nikunj_gemmabuilder_StableDiffusionNative_nativeLoad(JNIEnv *env, jobje
 // Returns RGB bytes (width * height * 3), or null if generation failed or was cancelled.
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_nikunj_gemmabuilder_StableDiffusionNative_nativeGenerate(JNIEnv *env, jobject, jlong handle, jstring jprompt,
-                                                                  jstring jnegative, jint width, jint height, jint steps, jlong seed) {
+                                                                  jstring jnegative, jint width, jint height, jint steps, jlong seed,
+                                                                  jstring jsampler) {
     auto *ctx = reinterpret_cast<sd_ctx_t *>(handle);
     const std::string prompt = from_java(env, jprompt);
     const std::string negative = from_java(env, jnegative);
+    const std::string sampler = from_java(env, jsampler);
     sd_img_gen_params_t params;
     sd_img_gen_params_init(&params);
     params.prompt = prompt.c_str();
@@ -70,9 +72,10 @@ Java_com_nikunj_gemmabuilder_StableDiffusionNative_nativeGenerate(JNIEnv *env, j
     params.seed = seed;
     params.batch_count = 1;
     params.sample_params.sample_steps = steps;
-    // Turbo models are distilled for no classifier-free guidance.
+    // Turbo and LCM models are distilled for no classifier-free guidance.
     params.sample_params.guidance.txt_cfg = 1.0f;
-    params.sample_params.sample_method = sd_get_default_sample_method(ctx);
+    // A model can ask for its own sampler (LCM models need "lcm"); otherwise the model's default.
+    params.sample_params.sample_method = sampler.empty() ? sd_get_default_sample_method(ctx) : str_to_sample_method(sampler.c_str());
     params.sample_params.scheduler = sd_get_default_scheduler(ctx, params.sample_params.sample_method);
     g_step = 0;
     g_steps = steps;
