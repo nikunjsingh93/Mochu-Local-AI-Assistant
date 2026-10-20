@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -51,6 +52,7 @@ fun ModelDownloadsScreen(
     onAllowMobileDataChange: (Boolean) -> Unit,
     onImportFile: () -> Unit,
     onContextChange: (String, Int) -> Unit,
+    onKvCacheTypeChange: (KvCacheType) -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
 ) {
@@ -138,8 +140,10 @@ fun ModelDownloadsScreen(
                     onDelete = { pendingDelete = it },
                     onContextChange = onContextChange
                 )
+                Text("GGUF · llama.cpp, runs on CPU", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                KvCacheChoice(state.kvCacheType, onKvCacheTypeChange)
                 ModelSection(
-                    title = "GGUF · llama.cpp, runs on CPU",
+                    title = "",
                     models = MODEL_CATALOG.filter { it.isGguf && !it.hidden },
                     state = state,
                     ramGb = ramGb,
@@ -182,7 +186,8 @@ private fun ModelSection(
     onDelete: (CatalogModel) -> Unit,
     onContextChange: (String, Int) -> Unit
 ) {
-    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    val context = LocalContext.current
+    if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     models.forEach { model ->
         val isActive = state.activeModelPath?.endsWith("/${model.fileName}") == true
         ModelCard(
@@ -194,6 +199,7 @@ private fun ModelSection(
             contextTokens = state.modelContextTokens[model.fileName],
             onContextChange = { onContextChange(model.fileName, it) },
             visionStatus = model.visionId?.let { id -> state.modelDownloads[id] ?: ModelDownloadState() },
+            ramEstimate = { tokens -> estimatedRamBytes(context, model, tokens, state.kvCacheType) },
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
@@ -214,6 +220,7 @@ private fun ModelCard(
     contextTokens: Int?,
     onContextChange: (Int) -> Unit,
     visionStatus: ModelDownloadState?,
+    ramEstimate: (Int) -> Long?,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -226,22 +233,36 @@ private fun ModelCard(
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (recommended) {
-                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text(
-                        "Recommended for this phone",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                    )
+            if (recommended || isActive) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isActive) {
+                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
+                            Text(
+                                "In use",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                    if (recommended) {
+                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Text(
+                                "Recommended for this phone",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(model.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Text(
-                    if (isActive) "In use" else formatBytes(model.sizeBytes),
+                    formatBytes(model.sizeBytes),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text(model.summary, style = MaterialTheme.typography.bodySmall)
@@ -258,7 +279,7 @@ private fun ModelCard(
                 }
             }
             if (download.phase == DownloadPhase.Downloaded && contextTokens != null) {
-                ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp))
+                ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp), model.maxContext, ramEstimate)
             }
             if (lowRam) {
                 Text(
@@ -324,4 +345,22 @@ private fun ModelUsage(state: BuilderUiState) {
         style = MaterialTheme.typography.labelSmall,
         color = muted
     )
+}
+
+/** KV cache number type for GGUF models. */
+@Composable
+private fun KvCacheChoice(current: KvCacheType, onChange: (KvCacheType) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("KV cache", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            KvCacheType.entries.forEach { type ->
+                FilterChip(selected = type == current, onClick = { onChange(type) }, label = { Text(type.label) })
+            }
+        }
+        Text(
+            "How a GGUF model stores the chat it is reading. Q8_0 takes about half the memory of F16 with almost no change in answers; Q4_0 takes about a quarter, so very long chats fit, but answers can get a little worse.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }

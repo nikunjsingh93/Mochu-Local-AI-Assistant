@@ -1,5 +1,10 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -126,6 +131,7 @@ fun AssistantChatScreen(
     onSend: () -> Unit,
     onBuildInStudio: (String) -> Unit,
     onToggleWeb: (Boolean) -> Unit,
+    onThinkingLevel: (Int) -> Unit,
     onAttachPhoto: () -> Unit,
     onVoiceSend: (String) -> Unit,
     onToggleSpeak: (ChatMessage) -> Unit,
@@ -231,6 +237,7 @@ fun AssistantChatScreen(
                                 tint = if (state.webSearchEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        ThinkingButton(state, onThinkingLevel)
                         IconButton(onClick = onAttachPhoto, enabled = !state.isBusy && state.chatImages.size < 3) {
                             Icon(
                                 Icons.Rounded.AddPhotoAlternate,
@@ -818,6 +825,50 @@ fun ActivityLog(steps: List<ActivityStep>, live: Boolean) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+private val THINKING_LEVELS = listOf(
+    Triple(0, "Off", "Answer right away"),
+    Triple(1, "Quick", "Think briefly first"),
+    Triple(2, "Balanced", "Think it through"),
+    Triple(3, "Deep", "Think as long as it needs")
+)
+
+/** Composer button for thinking: off, or how long the model may think before it answers. */
+@Composable
+private fun ThinkingButton(state: BuilderUiState, onLevel: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val current = if (state.thinkingEnabled) state.thinkingLevel else 0
+    Box {
+        IconButton(onClick = { open = true }, enabled = !state.isBusy) {
+            Icon(
+                if (current > 0) Icons.Rounded.Lightbulb else Icons.Outlined.Lightbulb,
+                contentDescription = "Thinking: ${THINKING_LEVELS[current].second}",
+                tint = if (current > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                "Thinking",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+            THINKING_LEVELS.forEach { (level, name, detail) ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(name, fontWeight = if (level == current) FontWeight.Bold else FontWeight.Normal)
+                            Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    trailingIcon = if (level == current) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    onClick = { onLevel(level); open = false }
+                )
             }
         }
     }

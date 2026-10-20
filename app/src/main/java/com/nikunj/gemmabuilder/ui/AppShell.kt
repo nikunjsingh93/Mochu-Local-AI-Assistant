@@ -256,6 +256,7 @@ fun OnDeviceApp(
                             vm.generate(app)
                         },
                         onToggleWeb = { vm.setWebSearchEnabled(app, it) },
+                        onThinkingLevel = { vm.setThinkingLevel(app, it) },
                         onAttachPhoto = {
                             photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
@@ -308,6 +309,7 @@ fun OnDeviceApp(
                         onAllowMobileDataChange = { vm.setAllowMobileDataDownloads(app, it) },
                         onImportFile = { modelPicker.launch(arrayOf("*/*")) },
                         onContextChange = { file, tokens -> vm.setModelContextTokens(app, file, tokens) },
+                        onKvCacheTypeChange = { vm.setKvCacheType(app, it) },
                         onDismiss = null
                     )
                 }

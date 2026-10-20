@@ -96,7 +96,7 @@ fun saveCodeFontScale(context: Context, scale: Float) {
 }
 
 /** Context window choices in Settings (tokens the model can hold: prompt plus reply). */
-val CONTEXT_TOKEN_OPTIONS = listOf(4096, 8192, 16384, 32768)
+val CONTEXT_TOKEN_OPTIONS = listOf(4096, 8192, 16384, 32768, 65536, 131072)
 
 fun savedContextTokens(context: Context): Int {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -288,4 +288,51 @@ fun saveProjectName(context: Context, projectKey: String, name: String?) {
     context.getSharedPreferences("project_names", Context.MODE_PRIVATE).edit().apply {
         if (name.isNullOrBlank()) remove(projectKey) else putString(projectKey, name.trim())
     }.apply()
+}
+
+/** Number types a GGUF model can keep its context (KV cache) in, with their size relative to F16. */
+enum class KvCacheType(val label: String, val ratio: Double) {
+    F16("F16", 1.0),
+    Q8_0("Q8_0", 34.0 / 64.0), // 32 values in 34 bytes; F16 takes 64
+    Q4_0("Q4_0", 18.0 / 64.0)
+}
+
+fun savedKvCacheType(context: Context): KvCacheType {
+    val name = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("kvCacheType", null)
+    return KvCacheType.entries.firstOrNull { it.name == name } ?: KvCacheType.F16
+}
+
+fun saveKvCacheType(context: Context, type: KvCacheType) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("kvCacheType", type.name).apply()
+}
+
+/** What llama.cpp reported for a model's context memory: bytes per token (at F16) and a fixed part. */
+fun saveMeasuredKv(context: Context, modelFileName: String, perTokenF16: Long, fixedBytes: Long) {
+    context.getSharedPreferences("kv_sizes", Context.MODE_PRIVATE).edit()
+        .putLong("perToken_$modelFileName", perTokenF16).putLong("fixed_$modelFileName", fixedBytes).apply()
+}
+
+/** Approximate memory a model uses with [tokens] of context: its weights plus the KV cache. */
+fun estimatedRamBytes(context: Context, model: CatalogModel, tokens: Int, kvType: KvCacheType): Long? {
+    val prefs = context.getSharedPreferences("kv_sizes", Context.MODE_PRIVATE)
+    val perToken = prefs.getLong("perToken_${model.fileName}", 0L).takeIf { it > 0 } ?: model.kvBytesPerToken.takeIf { it > 0 } ?: return null
+    val fixed = prefs.getLong("fixed_${model.fileName}", 0L)
+    val ratio = if (model.isGguf) kvType.ratio else 1.0
+    // Plus working buffers and the runtime itself.
+    return model.sizeBytes + fixed + (perToken * tokens * ratio).toLong() + 400L * 1024 * 1024
+}
+
+/** How hard Chat thinks: 1 quick, 2 balanced, 3 deep (no limit). */
+fun savedThinkingLevel(context: Context): Int =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getInt("thinkingLevel", 3).coerceIn(1, 3)
+
+fun saveThinkingLevel(context: Context, level: Int) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putInt("thinkingLevel", level.coerceIn(1, 3)).apply()
+}
+
+/** Thinking tokens allowed for a level; -1 is no limit. */
+fun thinkingBudget(level: Int): Int = when (level) {
+    1 -> 512
+    2 -> 2048
+    else -> -1
 }

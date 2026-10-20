@@ -96,6 +96,8 @@ class BuilderViewModel : ViewModel() {
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
                 thinkingEnabled = savedThinkingEnabled(context),
+                thinkingLevel = savedThinkingLevel(context),
+                kvCacheType = savedKvCacheType(context),
                 memories = loadMemories(context),
                 memoryEnabled = savedMemoryEnabled(context),
                 webSearchEnabled = savedWebSearchEnabled(context),
@@ -348,6 +350,26 @@ class BuilderViewModel : ViewModel() {
     fun setThinkingEnabled(context: Context, enabled: Boolean) {
         saveThinkingEnabled(context, enabled)
         _uiState.update { it.copy(thinkingEnabled = enabled) }
+    }
+
+    /** Chat's thinking button: 0 turns thinking off, 1–3 turn it on at that level. */
+    fun setThinkingLevel(context: Context, level: Int) {
+        if (level <= 0) return setThinkingEnabled(context, false)
+        saveThinkingLevel(context, level)
+        saveThinkingEnabled(context, true)
+        _uiState.update { it.copy(thinkingEnabled = true, thinkingLevel = savedThinkingLevel(context)) }
+    }
+
+    /** KV cache type for GGUF models; a loaded GGUF model reloads on the next message. */
+    fun setKvCacheType(context: Context, type: KvCacheType) {
+        if (type == uiState.value.kvCacheType) return
+        saveKvCacheType(context, type)
+        val reload = uiState.value.gemmaLoaded && isGgufModel(savedModelName(context))
+        _uiState.update {
+            if (reload) it.copy(kvCacheType = type, gemmaLoaded = false, engineLabel = "Not loaded", contextWindowTokens = null, contextUsedTokens = null,
+                status = "KV cache updated. Send a message to reload the model.")
+            else it.copy(kvCacheType = type)
+        }
     }
 
     fun setSpeculativeDecodingEnabled(context: Context, enabled: Boolean) {
@@ -1220,7 +1242,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 var thinkingStartedAtMs = 0L
                 var thinkingEndedAtMs = 0L
                 val result = runCatching {
-                    engine.generate(sessionKey, message, assistantSystemPrompt(), thinking = uiState.value.thinkingEnabled, images = images)
+                    engine.generate(sessionKey, message, assistantSystemPrompt(), thinking = uiState.value.thinkingEnabled, images = images,
+                        thinkingBudget = thinkingBudget(uiState.value.thinkingLevel))
                         .onCompletion { absorbGenerationStats() }
                         .collect { chunk ->
                             val now = System.currentTimeMillis()

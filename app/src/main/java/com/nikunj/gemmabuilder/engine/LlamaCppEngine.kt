@@ -29,7 +29,12 @@ internal object LlamaCppNative {
     }
 
     external fun nativeInitBackends(nativeLibraryDir: String): String
-    external fun nativeLoad(modelPath: String, nCtx: Int, nThreads: Int): Long
+    /** [kvType]: 0 F16, 1 Q8_0, 2 Q4_0. */
+    external fun nativeLoad(modelPath: String, nCtx: Int, nThreads: Int, kvType: Int): Long
+    /** {bytes per token, fixed bytes} of the KV cache llama.cpp allocated at load. */
+    external fun nativeKvBytes(handle: Long): LongArray
+    /** Adds [text] to the reply as if the model wrote it (used to end thinking at its budget). */
+    external fun nativeInject(handle: Long, text: String): Boolean
     external fun nativeContextSize(handle: Long): Int
     external fun nativeDescribe(handle: Long): String
     external fun nativeStartChat(handle: Long, systemPrompt: String)
@@ -71,10 +76,16 @@ class LlamaCppEngine(
         require(variant.isNotEmpty()) { "No llama.cpp CPU backend could be loaded on this device." }
         // Leave a couple of cores for the UI; big.LITTLE phones gain little past four threads.
         val threads = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 4)
-        val loaded = LlamaCppNative.nativeLoad(modelPath, maxNumTokens, threads)
+        val kvType = savedKvCacheType(context)
+        val loaded = LlamaCppNative.nativeLoad(modelPath, maxNumTokens, threads, kvType.ordinal)
         require(loaded != 0L) { "llama.cpp could not load this .gguf model (unsupported architecture or not enough memory)." }
         handle = loaded
         contextSize = LlamaCppNative.nativeContextSize(loaded)
+        // Remember the real context memory so the Models page can estimate other window sizes.
+        LlamaCppNative.nativeKvBytes(loaded).takeIf { it.size == 2 && it[0] > 0 }?.let { (perToken, fixed) ->
+            val perTokenF16 = (perToken / kvType.ratio).toLong()
+            saveMeasuredKv(context, java.io.File(modelPath).name, perTokenF16, fixed)
+        }
         // A failed projector only costs photos; the model still works for text.
         if (visionPath != null && java.io.File(visionPath).exists()) {
             supportsImages = runCatching { LlamaCppNative.nativeLoadVision(loaded, visionPath, threads) }.getOrDefault(false)
@@ -84,7 +95,7 @@ class LlamaCppEngine(
     }
 
     // Reasoning models here (Qwen3, Bonsai) write <think>...</think> into the text themselves.
-    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean, images: List<String>): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean, images: List<String>, thinkingBudget: Int): Flow<String> = flow {
         val h = handle
         if (h == 0L) {
             emit("Model is not loaded.")
@@ -106,11 +117,23 @@ class LlamaCppEngine(
             val decodeStart = System.nanoTime()
             var tokens = 0
             val tags = ThinkTagTranslator()
+            // Thinking past its budget is closed off so the model moves on to the answer.
+            var inThought = false
+            var thoughtTokens = 0
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val bytes = LlamaCppNative.nativeNextToken(h) ?: break
                 tokens++
-                if (bytes.isNotEmpty()) tags.feed(String(bytes, Charsets.UTF_8)).takeIf { it.isNotEmpty() }?.let { emit(it) }
+                val text = if (bytes.isNotEmpty()) tags.feed(String(bytes, Charsets.UTF_8)) else ""
+                if (text.isNotEmpty()) emit(text)
+                if ("<think>" in text) inThought = true
+                if ("</think>" in text) inThought = false
+                if (inThought && thinkingBudget > 0 && ++thoughtTokens > thinkingBudget) {
+                    val close = "\n</think>\n\n"
+                    if (LlamaCppNative.nativeInject(h, close)) emit(close)
+                    inThought = false
+                    thoughtTokens = Int.MIN_VALUE
+                }
             }
             tags.flush().takeIf { it.isNotEmpty() }?.let { emit(it) }
             finished = true

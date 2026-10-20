@@ -172,15 +172,31 @@ fun compactTokens(tokens: Int): String = when {
     else -> tokens.toString()
 }
 
-/** Context window picker (4K–32K). Follows the thumb while dragging and reports only on release. */
+/**
+ * Context window picker (4K up to [maxTokens]). Follows the thumb while dragging and reports only on
+ * release. [ramEstimate] gives the approximate memory used at a window size, when it is known.
+ */
 @Composable
-fun ContextSlider(tokens: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val options = CONTEXT_TOKEN_OPTIONS
+fun ContextSlider(
+    tokens: Int,
+    onChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    maxTokens: Int = 32768,
+    ramEstimate: ((Int) -> Long?)? = null
+) {
+    val options = CONTEXT_TOKEN_OPTIONS.filter { it <= maxTokens }
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
-    val savedIndex = options.indexOf(tokens).let { if (it >= 0) it else 2 }
+    val savedIndex = options.indexOf(tokens).let { if (it >= 0) it else options.indexOfLast { o -> o <= tokens }.coerceAtLeast(0) }
     val shown = options[draggingIndex ?: savedIndex]
     Column(modifier) {
         Text("Context window: ${shown / 1024}K tokens", style = MaterialTheme.typography.labelLarge)
+        ramEstimate?.invoke(shown)?.let { bytes ->
+            Text(
+                "About ${String.format(java.util.Locale.US, "%.1f", bytes / 1_073_741_824.0)} GB of RAM at this size",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
         Text(
             "How much of a chat the model remembers at once. Bigger uses more memory; if the phone runs out, it is lowered automatically.",
             style = MaterialTheme.typography.labelSmall,
@@ -199,7 +215,7 @@ fun ContextSlider(tokens: Int, onChange: (Int) -> Unit, modifier: Modifier = Mod
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             options.forEach { value ->
                 Text(
-                    "${value / 1024}K",
+                    if (value >= 1024 * 1024) "${value / (1024 * 1024)}M" else "${value / 1024}K",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (value == shown) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )

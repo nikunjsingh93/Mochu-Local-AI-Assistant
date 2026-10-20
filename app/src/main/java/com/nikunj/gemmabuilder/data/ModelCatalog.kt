@@ -28,7 +28,11 @@ data class CatalogModel(
     /** Id of the vision projector that lets this GGUF model see photos. */
     val visionId: String? = null,
     /** File name in the repo when it differs from the local [fileName]. */
-    val sourceFileName: String = fileName
+    val sourceFileName: String = fileName,
+    /** Largest context window offered for this model (what it was trained for, capped at 128K). */
+    val maxContext: Int = 32768,
+    /** Approximate context memory per token at F16, until a load measures the real figure. */
+    val kvBytesPerToken: Long = 0
 ) {
     val url: String get() = "https://huggingface.co/$repo/resolve/$revision/$sourceFileName"
     val isGguf: Boolean get() = isGgufModel(fileName)
@@ -42,6 +46,7 @@ val MODEL_CATALOG = listOf(
         repo = "litert-community/gemma-4-E2B-it-litert-lm",
         revision = "b3ca0d2f076785a8f4b2219ddbd2bdb99954eae1",
         fileName = "gemma-4-E2B-it.litertlm",
+        maxContext = 131072, kvBytesPerToken = GEMMA4_E2B_KV,
         sizeBytes = 2_588_147_712,
         sha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
         minRamGb = 6,
@@ -54,6 +59,7 @@ val MODEL_CATALOG = listOf(
         repo = "litert-community/gemma-4-E4B-it-litert-lm",
         revision = "2eee7ac325f20eb8c9ac1d0e972f7c84663062da",
         fileName = "gemma-4-E4B-it.litertlm",
+        maxContext = 131072, kvBytesPerToken = GEMMA4_E4B_KV,
         sizeBytes = 3_659_530_240,
         sha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
         // Runs at full precision on the GPU (exact numbers) and peaks around 6.5 GB.
@@ -67,6 +73,7 @@ val MODEL_CATALOG = listOf(
         repo = "litert-community/Qwen3-0.6B",
         revision = "e6687177e00897731e7716267eebd4eba0dde7c2",
         fileName = "Qwen3-0.6B.litertlm",
+        maxContext = 32768, kvBytesPerToken = 114_688L,
         sizeBytes = 613_722_264,
         sha256 = "c5f39b4191926786c3e6668b62af4d6eb15248dfc7a5348252a9b406f33f2108",
         minRamGb = 4,
@@ -79,6 +86,7 @@ val MODEL_CATALOG = listOf(
         repo = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
         revision = "f86cb2c1fa58255f8052cc32aeede1b7482d4361",
         fileName = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+        maxContext = 32768, kvBytesPerToken = 28_672L,
         sizeBytes = 1_117_320_768,
         sha256 = "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
         minRamGb = 4,
@@ -91,6 +99,7 @@ val MODEL_CATALOG = listOf(
         repo = "unsloth/Qwen3-4B-Instruct-2507-GGUF",
         revision = "a06e946bb6b655725eafa393f4a9745d460374c9",
         fileName = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        maxContext = 131072, kvBytesPerToken = 147_456L,
         sizeBytes = 2_497_281_120,
         sha256 = "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
         minRamGb = 8,
@@ -103,6 +112,7 @@ val MODEL_CATALOG = listOf(
         repo = "ggml-org/gemma-4-E2B-it-GGUF",
         revision = "b4243c156154b6dca9324415f8c7ccc098b4aed1",
         fileName = "gemma-4-E2B-it-Q4_0.gguf",
+        maxContext = 131072, kvBytesPerToken = GEMMA4_E2B_KV,
         visionId = "gemma-4-e2b-gguf-vision",
         sizeBytes = 2_841_481_184,
         sha256 = "8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52",
@@ -116,6 +126,7 @@ val MODEL_CATALOG = listOf(
         repo = "unsloth/Qwen3.5-4B-GGUF",
         revision = "e87f176479d0855a907a41277aca2f8ee7a09523",
         fileName = "Qwen3.5-4B-Q4_0.gguf",
+        maxContext = 131072, kvBytesPerToken = 32_768L,
         visionId = "qwen3.5-4b-gguf-vision",
         sizeBytes = 2_583_221_408,
         sha256 = "298fcb5fe7a77ccc79745ae24751560c5ac56874caff4bb39b1f2055bd72b8bb",
@@ -129,6 +140,7 @@ val MODEL_CATALOG = listOf(
         repo = "prism-ml/Bonsai-8B-gguf",
         revision = "48516770dd04643643e9f9019a2a349cf26c5dbd",
         fileName = "Bonsai-8B-Q1_0.gguf",
+        maxContext = 32768, kvBytesPerToken = 147_456L,
         sizeBytes = 1_158_654_496,
         sha256 = "284a335aa3fb2ced3b1b01fcb40b08aa783e3b70832767f0dd2e3fdfa134bd54",
         minRamGb = 6,
@@ -141,6 +153,7 @@ val MODEL_CATALOG = listOf(
         repo = "prism-ml/Bonsai-27B-gguf",
         revision = "f10afb355f104535e3e3e98cf7ab7795c72bd292",
         fileName = "Bonsai-27B-Q1_0.gguf",
+        maxContext = 131072, kvBytesPerToken = 65_536L,
         visionId = "bonsai-27b-gguf-vision",
         sizeBytes = 3_803_452_480,
         sha256 = "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
@@ -148,6 +161,10 @@ val MODEL_CATALOG = listOf(
         summary = "Experimental. Qwen3.6 27B at 1 bit per weight, the largest model that fits a phone. Slow on the CPU; needs a 12 GB flagship."
     )
 ) + VISION_FILES
+
+// Gemma 4 keeps most layers on a short sliding window, so only a few layers grow with the context.
+private const val GEMMA4_E2B_KV = 24_576L
+private const val GEMMA4_E4B_KV = 36_864L
 
 /** Vision projectors for the GGUF models above (downloaded with their model). */
 private val VISION_FILES: List<CatalogModel> get() = listOf(

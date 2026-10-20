@@ -158,6 +158,10 @@ data class BuilderUiState(
     val speakingMessageId: Long? = null,
     /** Lets models that support it reason before answering in Chat. */
     val thinkingEnabled: Boolean = true,
+    /** How hard Chat thinks when thinking is on: 1 quick, 2 balanced, 3 deep. */
+    val thinkingLevel: Int = 3,
+    /** Number type GGUF models keep their KV cache in. */
+    val kvCacheType: KvCacheType = KvCacheType.F16,
     /** Steps of the web research running right now, shown live above the streaming reply. */
     val liveActivity: List<ActivityStep> = emptyList(),
     /** Chat composer's "search the web" toggle. */
@@ -193,7 +197,9 @@ interface BuilderEngine {
         message: String,
         systemPrompt: String = BUILD_SYSTEM_PROMPT,
         thinking: Boolean = false,
-        images: List<String> = emptyList()
+        images: List<String> = emptyList(),
+        /** Most tokens the model may think for; -1 is no limit. */
+        thinkingBudget: Int = -1
     ): Flow<String>
     /** Whether [generate] can take [images] (absolute paths of photos to send with the message). */
     val supportsImages: Boolean get() = false

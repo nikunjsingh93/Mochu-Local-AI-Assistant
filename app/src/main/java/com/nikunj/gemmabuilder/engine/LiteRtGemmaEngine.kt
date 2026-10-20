@@ -196,6 +196,7 @@ class LiteRtGemmaEngine(
     private var conversationKey: String? = null
     private var conversationPrompt: String? = null
     private var conversationThinking = false
+    private var conversationBudget = -1
     private var tokenLimit: Int? = null
     @Volatile private var lastStats: GenerationStats? = null
 
@@ -276,7 +277,7 @@ class LiteRtGemmaEngine(
         throw firstError ?: IllegalStateException("Model load failed.")
     }
 
-    private fun newConversationConfig(systemPrompt: String, thinking: Boolean) = ConversationConfig(
+    private fun newConversationConfig(systemPrompt: String, thinking: Boolean, thinkingBudget: Int) = ConversationConfig(
         systemInstruction = Contents.of(systemPrompt),
         samplerConfig = SamplerConfig(
             topK = 20,
@@ -287,7 +288,7 @@ class LiteRtGemmaEngine(
         maxOutputToken = tokenLimit?.let { it / 2 },
         // Reasoning streams on its own channel, which generate() passes on as <think>...</think>.
         // Studio turns it off: its file-writing replies are long enough already.
-        thinkingConfig = ThinkingConfig(enableThinking = thinking)
+        thinkingConfig = ThinkingConfig(enableThinking = thinking, thinkingTokenBudget = thinkingBudget)
     )
 
     override fun generate(
@@ -295,21 +296,24 @@ class LiteRtGemmaEngine(
         message: String,
         systemPrompt: String,
         thinking: Boolean,
-        images: List<String>
+        images: List<String>,
+        thinkingBudget: Int
     ): Flow<String> = flow {
         val loadedEngine = engine ?: run {
             emit("Model is not loaded.")
             return@flow
         }
         val active = conversation?.takeIf {
-            conversationKey == sessionKey && conversationPrompt == systemPrompt && conversationThinking == thinking && it.isAlive
+            conversationKey == sessionKey && conversationPrompt == systemPrompt && conversationThinking == thinking &&
+                conversationBudget == thinkingBudget && it.isAlive
         } ?: run {
             resetSession()
-            loadedEngine.createConversation(newConversationConfig(systemPrompt, thinking)).also {
+            loadedEngine.createConversation(newConversationConfig(systemPrompt, thinking, thinkingBudget)).also {
                 conversation = it
                 conversationKey = sessionKey
                 conversationPrompt = systemPrompt
                 conversationThinking = thinking
+                conversationBudget = thinkingBudget
             }
         }
         var finished = false
@@ -389,7 +393,7 @@ class MediaPipeMultimodalEngine(
 }
 
 class DemoBuilderEngine : BuilderEngine {
-    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean, images: List<String>): Flow<String> = flow {
+    override fun generate(sessionKey: String, message: String, systemPrompt: String, thinking: Boolean, images: List<String>, thinkingBudget: Int): Flow<String> = flow {
         val lower = message.lowercase(Locale.US)
         val html = when {
             "calculator" in lower -> calculatorHtml()

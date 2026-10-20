@@ -64,9 +64,20 @@ struct Session {
     std::string lead;                 // text to emit before the first token (a <think> the prompt opened)
     int generated = 0;
     bool generating = false;
+    long long kv_per_token = 0;       // KV bytes that grow with each token of context
+    long long kv_fixed = 0;           // KV bytes that don't (sliding-window and recurrent state)
 };
 
+// KV cache sizes llama.cpp logs while creating a context ("size = X MiB (N cells, ..."), read back
+// after the load so the app knows how much memory the context takes.
+std::vector<std::pair<double, unsigned>> g_kv_lines;
+
 void android_log_callback(ggml_log_level level, const char *text, void * /*user*/) {
+    if (const char *at = strstr(text, "size = ")) {
+        double mib = 0;
+        unsigned cells = 0;
+        if (sscanf(at, "size = %lf MiB (%u cells", &mib, &cells) == 2) g_kv_lines.emplace_back(mib, cells);
+    }
     const int prio = level == GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR
                    : level == GGML_LOG_LEVEL_WARN  ? ANDROID_LOG_WARN
                    : level == GGML_LOG_LEVEL_INFO  ? ANDROID_LOG_INFO
@@ -242,7 +253,7 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeInitBackends(JNIEnv *env, jobj
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jstring jmodel_path, jint n_ctx, jint n_threads) {
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jstring jmodel_path, jint n_ctx, jint n_threads, jint kv_type) {
     const char *path = env->GetStringUTFChars(jmodel_path, nullptr);
     llama_model *model = llama_model_load_from_file(path, llama_model_default_params());
     env->ReleaseStringUTFChars(jmodel_path, path);
@@ -258,6 +269,14 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jst
     ctx_params.n_ubatch = BATCH_SIZE;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = n_threads;
+    if (kv_type == 1 || kv_type == 2) {
+        // A quantized V cache needs flash attention.
+        const ggml_type type = kv_type == 1 ? GGML_TYPE_Q8_0 : GGML_TYPE_Q4_0;
+        ctx_params.type_k = type;
+        ctx_params.type_v = type;
+        ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    }
+    g_kv_lines.clear();
     llama_context *ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
         LOGe("Could not create context (n_ctx=%d).", ctx_params.n_ctx);
@@ -268,6 +287,13 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jst
     auto *s = new Session();
     s->model = model;
     s->ctx = ctx;
+    const unsigned ctx_cells = llama_n_ctx(ctx);
+    for (const auto &[mib, cells] : g_kv_lines) {
+        const auto bytes = static_cast<long long>(mib * 1024.0 * 1024.0);
+        if (cells >= ctx_cells && cells > 0) s->kv_per_token += bytes / cells;
+        else s->kv_fixed += bytes;
+    }
+    g_kv_lines.clear();
     s->batch = common_batch(ctx);
     try {
         s->templates = common_chat_templates_init(model, "");
@@ -460,6 +486,42 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeNextToken(JNIEnv *env, jobject
     s->pending.erase(0, ready);
     s->reply += out;
     return to_bytes(env, out);
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeKvBytes(JNIEnv *env, jobject, jlong handle) {
+    Session *s = session(handle);
+    const jlong values[2] = {s->kv_per_token, s->kv_fixed};
+    jlongArray out = env->NewLongArray(2);
+    env->SetLongArrayRegion(out, 0, 2, values);
+    return out;
+}
+
+// Feeds text into the reply as though the model had written it, e.g. "</think>" when thinking runs
+// past its budget, so the next sampled token continues from there.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeInject(JNIEnv *env, jobject, jlong handle, jstring jtext) {
+    Session *s = session(handle);
+    if (!s->generating) return JNI_FALSE;
+    const char *chars = env->GetStringUTFChars(jtext, nullptr);
+    const std::string text = chars;
+    env->ReleaseStringUTFChars(jtext, chars);
+    const std::vector<llama_token> tokens = common_tokenize(s->ctx, text, false, true);
+    const int n_ctx = static_cast<int>(llama_n_ctx(s->ctx));
+    if (tokens.empty() || static_cast<int>(s->cached.size() + tokens.size()) >= n_ctx - 1) return JNI_FALSE;
+    s->batch.clear();
+    for (size_t i = 0; i < tokens.size(); i++) {
+        s->batch.add(tokens[i], static_cast<llama_pos>(s->cached.size() + i), 0, i == tokens.size() - 1);
+    }
+    if (llama_process(s->ctx, LLAMA_PROCESS_TYPE_DECODE, s->batch.get()) != 0) return JNI_FALSE;
+    for (const auto t : tokens) {
+        common_sampler_accept(s->sampler, t, true);
+        s->cached.push_back(t);
+    }
+    s->reply += s->pending + text;
+    s->pending.clear();
+    s->generated += static_cast<int>(tokens.size());
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jint JNICALL
