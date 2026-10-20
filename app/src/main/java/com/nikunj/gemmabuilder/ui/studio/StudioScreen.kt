@@ -360,7 +360,10 @@ fun StudioScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StudioTopBar(state: BuilderUiState, onOpenDrawer: () -> Unit, onNewProject: () -> Unit) {
-    val title = state.conversations.firstOrNull { it.id == state.activeConversationId }?.title ?: "New project"
+    val active = state.conversations.firstOrNull { it.id == state.activeConversationId }
+    // A fresh chat in a project that already has chats is a new chat, not a new project.
+    val inExistingProject = active != null && state.conversations.count { it.projectKey == active.projectKey } > 1
+    val title = active?.title?.takeUnless { it == "New chat" } ?: if (inExistingProject) "New chat" else "New project"
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onOpenDrawer) { Icon(Icons.Rounded.Menu, contentDescription = "Projects") }
@@ -368,7 +371,7 @@ private fun StudioTopBar(state: BuilderUiState, onOpenDrawer: () -> Unit, onNewP
         title = {
             Column {
                 Text(
-                    if (title == "New chat") "New project" else title,
+                    title,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

@@ -261,7 +261,7 @@ private val timerRegex = Regex(
 )
 private val reminderRegex = Regex("""^(?:please\s+)?(?:remind\s+me|set\s+(?:a\s+)?reminder)\b\s*(.*)$""", RegexOption.IGNORE_CASE)
 private val assistantVerbs = Regex(
-    """\b(check|summari[sz]e|search|look\s+up|find|get\s+me|tell\s+me|give\s+me|send\s+me|fetch|read|news|headlines|weather|prices?|deals?|briefing)\b""",
+    """\b(check|summari[sz]e|search|look\s+up|find|get\s+me|tell\s+me|give\s+me|send\s+me|show\s+me|fetch|read|news|headlines|weather|prices?|deals?|briefing|write|compose|make|create|generate|draft|share|suggest|recommend|plan|list|explain|teach|translate|quiz|motivate|inspire|jokes?|quotes?|poems?|story|facts?|tips?|riddles?|recipes?|affirmations?)\b""",
     RegexOption.IGNORE_CASE
 )
 private val scheduleHint = Regex("""^(?:please\s+)?(?:schedule|every\s*day|everyday|daily|each\s+day|every\s+(?:morning|evening)|tomorrow|tonight|at\s+\d|in\s+\d)""", RegexOption.IGNORE_CASE)
@@ -294,7 +294,8 @@ fun taskCommandFrom(message: String, now: ZonedDateTime = ZonedDateTime.now()): 
     if (scheduleHint.containsMatchIn(text) || dailyRegex.containsMatchIn(text) || timeAtEnd.containsMatchIn(text)) {
         val parsed = parseWhen(text, now) ?: return null
         val request = tidy(parsed.rest.replace(Regex("""^\s*(?:please\s+)?schedule\b""", RegexOption.IGNORE_CASE), ""))
-        if (request.length >= 4 && assistantVerbs.containsMatchIn(request)) {
+        // "Every night at 9pm <anything>" is clearly a scheduled request; a one-off time needs a task-like verb.
+        if (request.length >= 4 && (parsed.daily || assistantVerbs.containsMatchIn(request))) {
             return TaskCommand.Assistant(request.replaceFirstChar { it.uppercase() }, parsed.at, parsed.daily)
         }
     }

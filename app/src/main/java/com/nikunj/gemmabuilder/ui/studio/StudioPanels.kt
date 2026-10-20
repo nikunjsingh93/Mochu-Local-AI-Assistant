@@ -548,18 +548,20 @@ fun PreviewPane(state: BuilderUiState) {
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         // Python's input() and the page's prompt(): a dialog that shows what to enter.
                         override fun onJsPrompt(view: WebView, url: String?, message: String?, defaultValue: String?, result: android.webkit.JsPromptResult): Boolean {
-                            val field = android.widget.EditText(view.context).apply {
+                            val night = (view.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                            val builder = android.app.AlertDialog.Builder(view.context, if (night) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                            // Built from the dialog's themed context, so its text and hint follow dark mode.
+                            val field = android.widget.EditText(builder.context).apply {
                                 setText(defaultValue.orEmpty())
                                 isSingleLine = true
                                 hint = "Type your answer"
                             }
-                            val box = android.widget.FrameLayout(view.context).apply {
+                            val box = android.widget.FrameLayout(builder.context).apply {
                                 val pad = (20 * view.resources.displayMetrics.density).toInt()
                                 setPadding(pad, pad / 2, pad, 0)
                                 addView(field)
                             }
-                            val night = (view.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-                            android.app.AlertDialog.Builder(view.context, if (night) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                            builder
                                 .setTitle(message?.trim().takeUnless { it.isNullOrBlank() } ?: "Input")
                                 .setView(box)
                                 .setPositiveButton("OK") { _, _ -> result.confirm(field.text.toString()) }
@@ -585,8 +587,10 @@ fun PreviewPane(state: BuilderUiState) {
             },
             update = { webView ->
                 val path = indexPath
-                if (path != null && File(path).exists()) {
-                    val file = File(path)
+                val pythonProject = path != null && File(path).parentFile?.let { projectKind(it) } == ProjectKind.Python
+                if (path != null && (File(path).exists() || pythonProject)) {
+                    // Python projects may have no index.html; their main.py marks when to rerun.
+                    val file = if (File(path).exists()) File(path) else File(File(path).parentFile, "main.py")
                     val projectsRoot = File(webView.context.filesDir, "projects")
                     val relativeFromProjects = runCatching {
                         val projectPrefix = projectsRoot.canonicalPath.trimEnd(File.separatorChar) + File.separator
@@ -623,7 +627,7 @@ fun PreviewPane(state: BuilderUiState) {
                         webView.tag = emptyKey
                         webView.loadDataWithBaseURL(
                             "https://appassets.androidplatform.net/",
-                            "<html><body style='font-family:sans-serif;padding:24px'><h2>No index.html yet</h2><p>Ask the model to create an app.</p></body></html>",
+                            "<html><body style='font-family:sans-serif;padding:24px;color:#333'><h2>No index.html</h2><p>This project has no index.html to show. Ask the model to build a web app, or add an index.html in Files.</p><p>React projects run from src/main.tsx and Python projects from main.py.</p></body></html>",
                             "text/html",
                             "UTF-8",
                             null

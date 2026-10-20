@@ -362,6 +362,11 @@ fun FilesPane(
                         text = { Text("Import files") },
                         onClick = { toolsMenuOpen = false; onImportFiles() }
                     )
+                    val folderActions = LocalCodeActions.current
+                    DropdownMenuItem(
+                        text = { Text("Import folder") },
+                        onClick = { toolsMenuOpen = false; folderActions.importFolder() }
+                    )
                     DropdownMenuItem(
                         text = { Text("Save ZIP") },
                         enabled = state.files.isNotEmpty(),

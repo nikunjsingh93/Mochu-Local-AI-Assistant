@@ -78,4 +78,21 @@ class TasksTest {
         assertEquals(tasks, parseTasks(encodeTasks(tasks)))
         assertTrue(parseTasks("[]").isEmpty())
     }
+
+    @Test
+    fun parsesEverydayPhrasings() {
+        fun daily(text: String) = (taskCommandFrom(text, now) as? TaskCommand.Assistant)?.let { it.daily to it.request }
+        assertEquals(true to "Tell me a joke", daily("every day at 11pm tell me a joke"))
+        assertEquals(true to "Tell me a joke", daily("tell me a joke every day at 11pm"))
+        assertEquals(true to "Write me a short poem", daily("every night at 9pm write me a short poem"))
+        assertEquals(true to "Give me a motivational quote", daily("every morning at 7 give me a motivational quote"))
+        assertEquals(true to "Share a fun fact", daily("daily at 8am share a fun fact"))
+        assertEquals(true to "Suggest a dinner recipe", daily("suggest a dinner recipe everyday at 5 pm"))
+        assertEquals(false to "Tell me a joke", (taskCommandFrom("at 9pm tell me a joke", now) as? TaskCommand.Assistant)?.let { it.daily to it.request })
+        assertEquals(true to "Tell me a joke", daily("Everyday at 11 pm tell me a joke"))
+        assertEquals(true to "Tell me a joke", daily("every day at 11 p.m. tell me a joke"))
+        assertEquals(true to "Tell me a joke", daily("every day 11pm tell me a joke"))
+        assertNull(taskCommandFrom("what time is it", now))
+        assertNull(taskCommandFrom("tell me a joke", now))
+    }
 }

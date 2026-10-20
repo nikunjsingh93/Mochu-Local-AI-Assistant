@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -109,6 +110,9 @@ fun OnDeviceApp(
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) vm.attachChatImage(app, uri)
     }
+    val folderImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) vm.importFolder(app, uri)
+    }
     val fileImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) vm.importFiles(app, uris)
     }
@@ -134,7 +138,8 @@ fun OnDeviceApp(
         CodeActions(
             saveCapacitorZip = { capacitorZipSaver.launch("MochuCapacitor.zip") },
             fixErrors = { vm.fixPreviewErrors(app) },
-            saveApk = { apkSaver.launch(vm.exportAppName() + ".apk") }
+            saveApk = { apkSaver.launch(vm.exportAppName() + ".apk") },
+            importFolder = { folderImporter.launch(null) }
         )
     }
 
@@ -294,7 +299,8 @@ fun OnDeviceApp(
                     )
                     AppTab.Studio -> CompositionLocalProvider(LocalCodeActions provides codeActions) { StudioScreen(
                         state = state,
-                        compact = true,
+                        // Landscape puts the chat on the left and the preview/code on the right.
+                        compact = LocalConfiguration.current.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE,
                         onOpenDrawer = openDrawer,
                         onNewProject = { vm.newConversation(app, CHAT_KIND_STUDIO) },
                         onImportFiles = { fileImporter.launch(arrayOf("*/*")) },

@@ -560,7 +560,7 @@ private fun AssistantMessage(message: ChatMessage, fontScale: Float, speaking: B
 
 /** Shown under the user's message while the model loads into memory. */
 @Composable
-private fun LoadingModelRow(modelName: String) {
+internal fun LoadingModelRow(modelName: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))

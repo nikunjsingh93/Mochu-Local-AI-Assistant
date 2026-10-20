@@ -215,7 +215,9 @@ fun ChatPanel(
                     .verticalScroll(chatScrollState),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (state.messages.isEmpty()) {
+                if (state.messages.isEmpty() && state.modelReady) {
+                    CodeStarters(chatFontScale) { prompt -> onPromptChange(prompt); onGenerate() }
+                } else if (state.messages.isEmpty()) {
                     val emptyStateHint = if (state.modelReady) {
                         androidx.compose.ui.text.buildAnnotatedString {
                             append("Start by describing the web app you want. The result will appear in the preview below.")
@@ -249,7 +251,8 @@ fun ChatPanel(
                         if (thinking != null) {
                             ThinkingSection(thinking, seconds = 0, live = state.status.startsWith("Thinking"), fontScale = chatFontScale / 1.2f)
                         }
-                        if (thinking == null || !state.status.startsWith("Thinking")) ProcessingBubble(state.status, chatFontScale)
+                        if (state.modelLoading) LoadingModelRow(modelDisplayName(state.modelName))
+                        else if (thinking == null || !state.status.startsWith("Thinking")) ProcessingBubble(state.status, chatFontScale)
                     }
                 }
             }
@@ -529,3 +532,42 @@ fun parseInlineMarkdown(
 }
 
 
+
+
+private data class CodeStarter(val kind: String, val title: String, val prompt: String)
+
+private val CODE_STARTERS = listOf(
+    CodeStarter("Web app", "A tip calculator", "Build a tip calculator web app with a clean, modern design."),
+    CodeStarter("React", "A todo list in React", "Make a React todo app with add, complete and delete."),
+    CodeStarter("Python", "A number guessing game", "Write a Python number guessing game that asks for guesses with input()."),
+    CodeStarter("Game", "A snake game", "Build a snake game web app that works with touch controls.")
+)
+
+/** An empty Code project: what Code can build, with examples to start from. */
+@Composable
+private fun CodeStarters(fontScale: Float, onPick: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "What do you want to build? Code writes web apps, React + TypeScript apps and Python programs, and runs them below. Try one:",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        CODE_STARTERS.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { starter ->
+                    Surface(
+                        onClick = { onPick(starter.prompt) },
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(starter.kind, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Text(starter.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

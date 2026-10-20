@@ -266,7 +266,7 @@ fun welcomeHtml(): String = """
 <body>
   <main class="card">
     <h1>Mochu Code</h1>
-    <p>Ask the chat panel to build a calculator, game menu, landing page, or another tiny offline web app. The result will be written to index.html and previewed here.</p>
+    <p>Ask the chat to build a web app, a React + TypeScript app or a Python program. It runs right here as soon as it is written.</p>
     <span class="pill">Ready for Preview</span>
   </main>
 </body>

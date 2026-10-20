@@ -27,10 +27,17 @@ fun projectKind(root: File): ProjectKind {
     return ProjectKind.Web
 }
 
+/** The file Code and Files open first: main.py for Python, src/App.tsx for React, otherwise index.html. */
+fun mainFileOf(root: File): String? = when (projectKind(root)) {
+    ProjectKind.Python -> "main.py"
+    ProjectKind.React -> listOf("src/App.tsx", "src/App.jsx", "src/main.tsx").firstOrNull { File(root, it).exists() }
+    ProjectKind.Web -> "index.html".takeIf { File(root, it).exists() }
+}
+
 /** True when index.html is a page of the project's own, not the starter page every project begins with. */
 private fun hasOwnIndexHtml(root: File): Boolean {
     val index = File(root, "index.html")
-    return index.exists() && runCatching { index.readText() }.getOrDefault("").trim() != welcomeHtml().trim()
+    return index.exists() && !isStarterPage(index)
 }
 
 /**
@@ -47,6 +54,7 @@ fun seedProjectForRequest(root: File, request: String): ProjectKind? {
         else -> return null
     }
     files.forEach { (path, content) -> File(root, path).apply { parentFile?.mkdirs() }.writeText(content) }
+    if ("main.py" in files) File(root, "index.html").delete()
     return projectKind(root)
 }
 
@@ -294,6 +302,51 @@ After changing the web code later, run ${if (kind == ProjectKind.React) "`npm ru
 }
 
 /** Code actions the work panel's Console and Files tabs need, provided by the app shell. */
-data class CodeActions(val saveCapacitorZip: () -> Unit = {}, val fixErrors: () -> Unit = {}, val saveApk: () -> Unit = {})
+data class CodeActions(val saveCapacitorZip: () -> Unit = {}, val fixErrors: () -> Unit = {}, val saveApk: () -> Unit = {}, val importFolder: () -> Unit = {})
 
 val LocalCodeActions = androidx.compose.runtime.staticCompositionLocalOf { CodeActions() }
+
+private val SKIPPED_IMPORT_FOLDERS = setOf("node_modules", ".git", "dist", "build", ".gradle", ".idea", "__pycache__", ".venv", "venv", ".next")
+
+/** Copies a picked folder's files into [root], keeping subfolders. Returns how many files were copied. */
+fun copyDocumentTree(context: Context, treeUri: android.net.Uri, root: File): Int {
+    val resolver = context.contentResolver
+    var copied = 0
+    fun walk(documentId: String, relative: String) {
+        val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId)
+        resolver.query(children, arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE
+        ), null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0)
+                val name = cursor.getString(1).orEmpty().replace("/", "_")
+                if (name.isBlank() || name == "." || name == "..") continue
+                val path = if (relative.isEmpty()) name else "$relative/$name"
+                if (cursor.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
+                    if (name !in SKIPPED_IMPORT_FOLDERS) walk(id, path)
+                } else {
+                    val target = safeResolve(root, path)
+                    target.parentFile?.mkdirs()
+                    resolver.openInputStream(android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, id))?.use { input ->
+                        target.outputStream().use { input.copyTo(it) }
+                        copied++
+                    }
+                }
+            }
+        }
+    }
+    walk(android.provider.DocumentsContract.getTreeDocumentId(treeUri), "")
+    return copied
+}
+
+/** Python projects don't need the web starter page; it's removed once main.py exists. */
+fun removeUnusedStarterPage(root: File) {
+    val index = File(root, "index.html")
+    if (File(root, "main.py").exists() && isStarterPage(index)) index.delete()
+}
+
+/** The starter page new projects begin with (any version of its wording). */
+fun isStarterPage(file: File): Boolean = file.exists() && file.length() < 6000 &&
+    runCatching { file.readText() }.getOrDefault("").let { it.contains("<h1>Mochu Code</h1>") || it.trim() == welcomeHtml().trim() }

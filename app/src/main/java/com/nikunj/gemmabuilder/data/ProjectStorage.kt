@@ -30,7 +30,7 @@ fun ensureProjectForConversation(context: Context, conversationId: String, migra
     val root = projectRoot(context, conversationId)
     root.mkdirs()
     val index = File(root, "index.html")
-    if (!index.exists()) {
+    if (!index.exists() && root.listFiles().isNullOrEmpty()) {
         val legacy = legacyProjectRoot(context)
         val shouldMigrate = migrateLegacy && legacy.exists() && legacy.walkTopDown().any { it.isFile }
         if (shouldMigrate) {

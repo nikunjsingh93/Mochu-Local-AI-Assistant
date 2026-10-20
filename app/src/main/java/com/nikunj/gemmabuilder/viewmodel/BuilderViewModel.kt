@@ -651,6 +651,30 @@ class BuilderViewModel : ViewModel() {
         }
     }
 
+    /** Copies a whole folder (and its subfolders) into the project, skipping build output and dependencies. */
+    fun importFolder(context: Context, treeUri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBusy = true, status = "Importing folder...") }
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val root = activeProjectRoot(context)
+                    // A starter page would sit on top of the imported project.
+                    File(root, "index.html").takeIf { isStarterPage(it) }?.delete()
+                    copyDocumentTree(context, treeUri, root)
+                }
+            }
+            refreshWorkspace(context)
+            _uiState.update {
+                it.copy(
+                    isBusy = false,
+                    status = result.fold({ n -> "Imported $n file(s) from the folder." }, { e -> "Folder import failed: ${e.message ?: "unknown error"}" }),
+                    tab = 2,
+                    previewVersion = it.previewVersion + 1
+                )
+            }
+        }
+    }
+
     fun openImagePreview(context: Context, relativePath: String) {
         viewModelScope.launch {
             val result = runCatching {
@@ -799,11 +823,6 @@ class BuilderViewModel : ViewModel() {
                     _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
                     return@launch
                 }
-                if (!uiState.value.gemmaLoaded) {
-                    val loaded = loadGemmaInternal(context.applicationContext)
-                    if (!loaded) return@launch
-                }
-
                 val pendingAttachments = uiState.value.pendingAttachments
                 val userMessage = ChatMessage("user", prompt, attachments = pendingAttachments)
                 val hasImageOrAudioAttachment = pendingAttachments.any { path ->
@@ -832,6 +851,15 @@ class BuilderViewModel : ViewModel() {
                 withContext(Dispatchers.IO) { seedProjectForRequest(activeProjectRoot(context), prompt) }?.let { kind ->
                     refreshWorkspace(context)
                     _uiState.update { it.copy(status = "Set up a ${if (kind == ProjectKind.React) "React + TypeScript" else "Python"} project…") }
+                }
+                // The request shows first, then "Loading model" under it, as in Chat.
+                if (!uiState.value.gemmaLoaded) {
+                    val loaded = loadGemmaInternal(context.applicationContext)
+                    if (!loaded) {
+                        _uiState.update { it.copy(isBusy = false) }
+                        return@launch
+                    }
+                    _uiState.update { it.copy(isBusy = true, status = "Thinking...") }
                 }
                 turnOutputTokens = 0
                 turnDecodeSeconds = 0.0
@@ -1958,11 +1986,16 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         } else {
             activeProjectRoot(context)
         }
+        removeUnusedStarterPage(root)
         val index = File(root, "index.html")
         val files = root.walkTopDown().filter { it.isFile }.map { it.relativeTo(root).path }.sorted().toList()
         val selected = uiState.value.selectedCodePath
         val selectedFile = runCatching { safeResolve(root, selected) }.getOrNull()
+        val mainFile = mainFileOf(root)
+        // Switching projects opens that project's main file rather than one left over from the last.
         val effectivePath = when {
+            conversationId == null && selectedFile?.exists() == true -> selected
+            mainFile != null -> mainFile
             selectedFile?.exists() == true -> selected
             index.exists() -> "index.html"
             files.isNotEmpty() -> files.first()
