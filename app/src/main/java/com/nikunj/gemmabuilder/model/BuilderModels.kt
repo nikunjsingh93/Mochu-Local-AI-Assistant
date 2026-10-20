@@ -10,6 +10,10 @@ fun isCodeFile(path: String): Boolean {
         lower.endsWith(".css") ||
         lower.endsWith(".js") ||
         lower.endsWith(".mjs") ||
+        lower.endsWith(".ts") ||
+        lower.endsWith(".tsx") ||
+        lower.endsWith(".jsx") ||
+        lower.endsWith(".py") ||
         lower.endsWith(".json") ||
         lower.endsWith(".txt") ||
         lower.endsWith(".md") ||

@@ -766,6 +766,9 @@ class BuilderViewModel : ViewModel() {
 
     fun generate(context: Context) {
         speaker?.stop()
+        // A request the user sends starts the automatic-fix count over; a fix the app sends counts up.
+        if (!autoFixInFlight) autoFixRounds = 0
+        autoFixInFlight = false
         if (EngineHolder.backgroundRunning) {
             _uiState.update { it.copy(status = "A scheduled task is using the model. Try again in a moment.") }
             Toast.makeText(context, "A scheduled task is running. Try again in a moment.", Toast.LENGTH_SHORT).show()
@@ -825,6 +828,11 @@ class BuilderViewModel : ViewModel() {
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
+                // "Make a React app" / "write a Python script" on a new project starts from a working template.
+                withContext(Dispatchers.IO) { seedProjectForRequest(activeProjectRoot(context), prompt) }?.let { kind ->
+                    refreshWorkspace(context)
+                    _uiState.update { it.copy(status = "Set up a ${if (kind == ProjectKind.React) "React + TypeScript" else "Python"} project…") }
+                }
                 turnOutputTokens = 0
                 turnDecodeSeconds = 0.0
                 val generationStartedAtMs = System.currentTimeMillis()
@@ -1083,6 +1091,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                             isBusy = false,
                             status = "Wrote ${actions.size} file action(s) and refreshed preview.",
                             previewVersion = it.previewVersion + 1,
+                            workPanelCollapsed = false,
                             tab = 0,
                             selectedCodePath = preferredPath,
                             lastWrittenPaths = actions.map { a -> a.path },
@@ -1093,6 +1102,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                             generationMetrics = metrics
                         )
                     }
+                    checkPreviewAfterWrite(context)
                 } else {
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     val finalMessages = uiState.value.messages + ChatMessage("assistant", "I generated a complete file, but the app could not save it.", statsInline = metrics)
@@ -1776,6 +1786,58 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 }
             }
             _uiState.update { it.copy(status = if (result.isSuccess) "Saved project ZIP." else "ZIP save failed: ${result.exceptionOrNull()?.message ?: "unknown error"}") }
+        }
+    }
+
+    // ---- Code: preview errors and automatic fixes ----
+
+    private var autoFixRounds = 0
+    private var autoFixInFlight = false
+
+    /** After files are written, waits for the preview to run and sends any errors back to the model (twice at most). */
+    private fun checkPreviewAfterWrite(context: Context) {
+        viewModelScope.launch {
+            val kind = withContext(Dispatchers.IO) { projectKind(activeProjectRoot(context)) }
+            // Python has to start up before it runs main.py.
+            kotlinx.coroutines.delay(if (kind == ProjectKind.Python) 12_000 else 4_000)
+            val errors = PreviewConsole.errors()
+            if (errors.isEmpty() || autoFixRounds >= 2 || uiState.value.isBusy || uiState.value.activeKind != CHAT_KIND_STUDIO) return@launch
+            autoFixRounds++
+            sendPreviewFix(context, errors, automatic = true)
+        }
+    }
+
+    /** The Console tab's "Fix errors" button. */
+    fun fixPreviewErrors(context: Context) {
+        val errors = PreviewConsole.errors()
+        if (errors.isEmpty() || uiState.value.isBusy) return
+        sendPreviewFix(context, errors, automatic = false)
+    }
+
+    private fun sendPreviewFix(context: Context, errors: List<ConsoleEntry>, automatic: Boolean) {
+        val details = errors.distinctBy { it.message }.take(4).joinToString("\n") { it.message.take(600) }
+        val prompt = (if (automatic) "The preview reported an error after your change:" else "The preview shows these errors:") +
+            "\n$details\nFix the code so it runs without errors."
+        _uiState.update { it.copy(prompt = prompt) }
+        autoFixInFlight = automatic
+        generate(context)
+    }
+
+    fun exportCapacitorProjectZip(context: Context, destination: Uri) {
+        viewModelScope.launch {
+            val title = conversations.firstOrNull { it.id == uiState.value.activeConversationId }?.title
+                ?.takeUnless { it == "New chat" } ?: "Mochu App"
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(destination).use { output ->
+                        requireNotNull(output) { "Could not open destination ZIP." }
+                        writeCapacitorZip(activeProjectRoot(context), title.take(40), output)
+                    }
+                }
+            }
+            _uiState.update {
+                it.copy(status = if (result.isSuccess) "Saved Capacitor project ZIP. See README-MOCHU.md inside for the Android steps." else "Capacitor ZIP failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+            }
         }
     }
 

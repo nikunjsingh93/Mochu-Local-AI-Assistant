@@ -379,6 +379,12 @@ fun FilesPane(
                         enabled = state.files.isNotEmpty(),
                         onClick = { toolsMenuOpen = false; onSavePwaZip() }
                     )
+                    val codeActions = LocalCodeActions.current
+                    DropdownMenuItem(
+                        text = { Text("Save as Android project (Capacitor)") },
+                        enabled = state.files.isNotEmpty(),
+                        onClick = { toolsMenuOpen = false; codeActions.saveCapacitorZip() }
+                    )
                 }
             }
         }

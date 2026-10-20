@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Python</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0f1115; color: #d7dae0; font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 10px; background: #171a21; border-bottom: 1px solid #262b36; }
+  header b { flex: 1; font: 600 13px system-ui, sans-serif; color: #aab4ff; }
+  button { font: 600 13px system-ui, sans-serif; border: 0; border-radius: 999px; padding: 7px 14px; background: #aab4ff; color: #10131a; }
+  button.secondary { background: #262b36; color: #d7dae0; }
+  #out { flex: 1; overflow: auto; margin: 0; padding: 10px; white-space: pre-wrap; word-break: break-word; }
+  .err { color: #ff8a8a; } .info { color: #7f8899; } .in { color: #aab4ff; }
+  form { display: flex; border-top: 1px solid #262b36; background: #171a21; }
+  form span { padding: 10px 0 10px 10px; color: #aab4ff; }
+  input { flex: 1; background: transparent; border: 0; color: inherit; font: inherit; padding: 10px; outline: none; }
+</style>
+</head>
+<body>
+<header><b id="title">Python</b><button class="secondary" id="clear">Clear</button><button id="run" disabled>Run</button></header>
+<pre id="out"></pre>
+<form id="repl"><span>&gt;&gt;&gt;</span><input id="line" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type Python and press Enter" disabled></form>
+<script src="pyodide.js"></script>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var project = params.get('project') || '';
+  var projectUrl = new URL('/projects/' + project.split('/').map(encodeURIComponent).join('/') + '/', location.origin);
+  var out = document.getElementById('out');
+  var runButton = document.getElementById('run');
+  var line = document.getElementById('line');
+  var py = null;
+
+  function write(text, cls) {
+    var span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    out.appendChild(span);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  async function loadFiles() {
+    var list = await (await fetch(new URL('.mochu-files.json', projectUrl), { cache: 'no-store' })).json();
+    for (var i = 0; i < list.length; i++) {
+      var path = list[i];
+      var res = await fetch(new URL(path.split('/').map(encodeURIComponent).join('/'), projectUrl), { cache: 'no-store' });
+      var bytes = new Uint8Array(await res.arrayBuffer());
+      var parts = path.split('/');
+      var dir = '/home/pyodide';
+      for (var j = 0; j < parts.length - 1; j++) {
+        dir += '/' + parts[j];
+        try { py.FS.mkdir(dir); } catch (e) { /* exists */ }
+      }
+      py.FS.writeFile('/home/pyodide/' + path, bytes);
+    }
+  }
+
+  async function runMain() {
+    runButton.disabled = true;
+    write('$ python main.py\n', 'info');
+    try {
+      await loadFiles();
+      var code = py.FS.readFile('/home/pyodide/main.py', { encoding: 'utf8' });
+      // Fresh module state each run, with the project folder importable.
+      await py.runPythonAsync('import sys, os\nos.chdir("/home/pyodide")\nif "/home/pyodide" not in sys.path: sys.path.insert(0, "/home/pyodide")\n' +
+        'for _m in [m for m, v in list(sys.modules.items()) if getattr(v, "__file__", "") and str(getattr(v, "__file__", "")).startswith("/home/pyodide/")]: del sys.modules[_m]');
+      await py.runPythonAsync(code, { filename: 'main.py' });
+      write('\n[finished]\n', 'info');
+    } catch (e) {
+      write(String(e.message || e) + '\n', 'err');
+      console.error('Python error in main.py:\n' + String(e.message || e));
+    } finally {
+      runButton.disabled = false;
+    }
+  }
+
+  document.getElementById('clear').onclick = function () { out.textContent = ''; };
+  runButton.onclick = runMain;
+  document.getElementById('repl').onsubmit = async function (event) {
+    event.preventDefault();
+    var source = line.value;
+    if (!source.trim() || !py) return;
+    line.value = '';
+    write('>>> ' + source + '\n', 'in');
+    try {
+      var result = await py.runPythonAsync(source);
+      if (result !== undefined && result !== null) write(String(result) + '\n');
+    } catch (e) {
+      write(String(e.message || e) + '\n', 'err');
+    }
+  };
+
+  (async function () {
+    write('Starting Python…\n', 'info');
+    try {
+      py = await loadPyodide({ indexURL: new URL('./', location.href).href });
+      py.setStdout({ batched: function (s) { write(s + '\n'); console.log(s); } });
+      py.setStderr({ batched: function (s) { write(s + '\n', 'err'); console.error(s); } });
+      py.setStdin({ stdin: function () { var v = window.prompt('input()'); return v === null ? '' : v; } });
+      document.getElementById('title').textContent = 'Python ' + py.version;
+      line.disabled = false;
+      await runMain();
+    } catch (e) {
+      write('Python could not start: ' + (e.message || e) + '\n', 'err');
+      console.error('Python could not start: ' + (e.message || e));
+    }
+  })();
+})();
+</script>
+</body>
+</html>

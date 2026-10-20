@@ -316,7 +316,7 @@ suspend fun buildProjectContextForModel(
 }
 
 private fun isTextExtension(ext: String): Boolean = ext in setOf(
-    "txt", "md", "json", "js", "mjs", "ts", "tsx", "jsx", "css", "scss", "sass",
+    "txt", "md", "json", "js", "mjs", "ts", "tsx", "jsx", "css", "scss", "sass", "py",
     "html", "htm", "xml", "csv", "tsv", "yaml", "yml", "toml", "ini", "log"
 )
 

@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -122,6 +123,12 @@ fun OnDeviceApp(
     }
     val pwaZipSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) vm.exportPwaReadyProjectZip(app, uri)
+    }
+    val capacitorZipSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) vm.exportCapacitorProjectZip(app, uri)
+    }
+    val codeActions = remember(vm) {
+        CodeActions(saveCapacitorZip = { capacitorZipSaver.launch("MochuCapacitor.zip") }, fixErrors = { vm.fixPreviewErrors(app) })
     }
 
     // Browser and Models are standalone tabs; otherwise the tab follows the active chat's space.
@@ -277,7 +284,7 @@ fun OnDeviceApp(
                             vm.askAboutPage(app, page)
                         }
                     )
-                    AppTab.Studio -> StudioScreen(
+                    AppTab.Studio -> CompositionLocalProvider(LocalCodeActions provides codeActions) { StudioScreen(
                         state = state,
                         compact = true,
                         onOpenDrawer = openDrawer,
@@ -299,7 +306,7 @@ fun OnDeviceApp(
                         onSaveZip = { zipSaver.launch("MochuProject.zip") },
                         onSavePwaZip = { pwaZipSaver.launch("MochuPWA.zip") },
                         onStop = vm::stopGeneration
-                    )
+                    ) }
                     AppTab.Models -> ModelDownloadsScreen(
                         state = state,
                         onDownload = { vm.downloadModel(app, it) },

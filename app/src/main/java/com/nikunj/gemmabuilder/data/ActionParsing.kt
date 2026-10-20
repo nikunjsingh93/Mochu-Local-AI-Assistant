@@ -437,6 +437,11 @@ private fun consolidateSingleFileDefault(actions: List<WriteFileAction>): List<W
 
 fun isCompleteEnoughForWriting(action: WriteFileAction): Boolean {
     val path = action.path.lowercase(Locale.US)
+    if (Regex("""\.(tsx|ts|jsx)$""").containsMatchIn(path)) {
+        // A file cut off part-way leaves braces open.
+        val text = action.content
+        return text.isNotBlank() && text.count { it == '{' } <= text.count { it == '}' } && !text.trimEnd().endsWith("(")
+    }
     if (!path.endsWith(".html")) return true
     val html = action.content.trim()
     val lower = html.lowercase(Locale.US)

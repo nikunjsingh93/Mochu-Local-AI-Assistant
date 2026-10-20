@@ -182,7 +182,7 @@ import kotlin.coroutines.resume
 const val BUILD_SYSTEM_PROMPT = """
 You are an offline Android coding agent.
 
-You build small web apps using HTML, CSS, and JavaScript.
+You build small apps: web apps (HTML, CSS, JavaScript), React + TypeScript apps, and Python programs.
 
 You MUST respond only with XML actions.
 
@@ -226,7 +226,11 @@ Rules:
 - Use reply action when the user is asking a normal question and no file changes are required; do not modify files then.
 - For edits, update only the needed files and keep paths relative to the project root.
 - If the user asks for a different app, replace the current app completely. Do not keep the previous UI unless the user asks.
-- By default, generate a single self-contained index.html that includes CSS in <style> and JavaScript in <script>.
+Project types (the snapshot shows which files exist):
+- React + TypeScript project (it has src/main.tsx): a Vite project. Put the UI in src/App.tsx and more components in src/*.tsx, styles in .css files imported from TSX. Use function components, hooks and typed props. Imports allowed: 'react', 'react-dom/client' and relative project files only; no other npm packages. Leave index.html, src/main.tsx and package.json as they are unless asked.
+- Python project (it has main.py): Python 3 in main.py, plus other .py modules if useful. It runs in a terminal panel: print() shows output and input() asks the user. Standard library only: no pip packages, no network, no GUI windows.
+- Web project (otherwise): the rules below.
+- For web projects, by default generate a single self-contained index.html that includes CSS in <style> and JavaScript in <script>.
 - Only split into separate files (for example styles.css/app.js) when the user explicitly asks for separate files.
 - If index.html references local files (for example styles.css or app.js), write each referenced file in the same response.
 - Never place JavaScript in styles.css.

@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.material3.TextButton
 import android.app.Activity
 import android.content.ContentResolver
 import android.content.Context
@@ -372,7 +373,8 @@ fun WorkPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                val tabs = listOf("Preview", "Code", "Files")
+                val consoleErrors = PreviewConsole.entries.collectAsState().value.count { it.level == "error" }
+                val tabs = listOf("Preview", "Code", "Files", if (consoleErrors > 0) "Console ($consoleErrors)" else "Console")
                 SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
                     tabs.forEachIndexed { index, title ->
                         SegmentedButton(
@@ -407,6 +409,7 @@ fun WorkPanel(
                 when (state.tab) {
                     0 -> PreviewPane(state)
                     1 -> CodePane(state)
+                    3 -> ConsolePane()
                     else -> FilesPane(
                         state,
                         onImportFiles = onImportFiles,
@@ -441,7 +444,9 @@ fun PreviewPane(state: BuilderUiState) {
                         "/projects/",
                         WebViewAssetLoader.InternalStoragePathHandler(context, projectsDir)
                     )
+                    .addPathHandler("/runtime/", RuntimeAssetsHandler(context))
                     .build()
+                val projectsPrefix = "https://appassets.androidplatform.net/projects/"
 
                 WebView(context).apply {
                     layoutParams = ViewGroup.LayoutParams(
@@ -501,16 +506,48 @@ fun PreviewPane(state: BuilderUiState) {
                             view: WebView?,
                             request: WebResourceRequest?
                         ): WebResourceResponse? {
-                            return request?.url?.let { assetLoader.shouldInterceptRequest(it) }
+                            val url = request?.url ?: return null
+                            val asText = url.toString().substringBefore('?')
+                            if (asText.startsWith(projectsPrefix)) {
+                                val relative = Uri.decode(asText.removePrefix(projectsPrefix))
+                                val file = File(projectsDir, relative)
+                                val projectDir = File(projectsDir, relative.substringBefore('/'))
+                                // React projects: index.html runs through the bundled React runner.
+                                if (file.name.equals("index.html", ignoreCase = true) && file.parentFile == projectDir &&
+                                    projectKind(projectDir) == ProjectKind.React
+                                ) {
+                                    val html = reactPreviewHtml(file.readText())
+                                    return WebResourceResponse("text/html", "utf-8", html.byteInputStream())
+                                }
+                                // Python projects: the list of files to copy into Python.
+                                if (file.name == ".mochu-files.json") {
+                                    return WebResourceResponse("application/json", "utf-8", pythonProjectFileList(projectDir).byteInputStream())
+                                }
+                            }
+                            return assetLoader.shouldInterceptRequest(url)
                         }
 
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                             val url = request?.url?.toString().orEmpty()
-                            return !(url.startsWith("https://appassets.androidplatform.net/projects/") || url.startsWith("about:blank"))
+                            return !(url.startsWith("https://appassets.androidplatform.net/projects/") ||
+                                url.startsWith("https://appassets.androidplatform.net/runtime/") || url.startsWith("about:blank"))
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
+                        }
+                    }
+                    // Console output and uncaught errors feed the Console tab and automatic fixes.
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                            val level = when (message.messageLevel()) {
+                                android.webkit.ConsoleMessage.MessageLevel.ERROR -> "error"
+                                android.webkit.ConsoleMessage.MessageLevel.WARNING -> "warn"
+                                else -> "log"
+                            }
+                            val source = message.sourceId().orEmpty().substringAfterLast('/').substringBefore('?')
+                            PreviewConsole.add(ConsoleEntry(level, message.message(), if (source.isBlank()) "" else "$source:${message.lineNumber()}"))
+                            return true
                         }
                     }
                 }
@@ -533,10 +570,18 @@ fun PreviewPane(state: BuilderUiState) {
                         .split('/')
                         .filter { it.isNotBlank() }
                         .joinToString("/") { segment -> Uri.encode(segment) }
-                    val targetKey = "${file.absolutePath}:${file.lastModified()}:${file.length()}:${state.previewVersion}:direct"
+                    val projectDir = file.parentFile
+                    val python = projectDir != null && projectKind(projectDir) == ProjectKind.Python
+                    val targetKey = "${file.absolutePath}:${file.lastModified()}:${file.length()}:${state.previewVersion}:$python"
                     if (webView.tag != targetKey) {
                         webView.tag = targetKey
-                        val targetUrl = "https://appassets.androidplatform.net/projects/$encodedRelative?v=${file.lastModified()}_${file.length()}_${state.previewVersion}"
+                        PreviewConsole.clear()
+                        val stamp = "${file.lastModified()}_${file.length()}_${state.previewVersion}"
+                        val targetUrl = if (python) {
+                            "https://appassets.androidplatform.net/runtime/pyodide/terminal.html?project=${Uri.encode(projectDir!!.name)}&v=$stamp"
+                        } else {
+                            "https://appassets.androidplatform.net/projects/$encodedRelative?v=$stamp"
+                        }
                         webView.stopLoading()
                         webView.clearCache(true)
                         webView.loadUrl(targetUrl)
@@ -588,3 +633,40 @@ fun CodePane(state: BuilderUiState) {
 }
 
 
+
+/** The preview's console: logs, warnings and errors, with a button to have the model fix the errors. */
+@Composable
+fun ConsolePane() {
+    val entries by PreviewConsole.entries.collectAsState()
+    val actions = LocalCodeActions.current
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Console", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { PreviewConsole.clear() }, enabled = entries.isNotEmpty()) { Text("Clear") }
+            Button(onClick = actions.fixErrors, enabled = entries.any { it.level == "error" }) { Text("Fix errors") }
+        }
+        if (entries.isEmpty()) {
+            Text(
+                "Messages from the running app (console.log, warnings, errors) show up here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        val scroll = rememberScrollState()
+        LaunchedEffect(entries.size) { scroll.animateScrollTo(scroll.maxValue) }
+        Column(Modifier.fillMaxSize().verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            entries.forEach { entry ->
+                Text(
+                    (if (entry.source.isNotBlank()) "[${entry.source}] " else "") + entry.message,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (entry.level) {
+                        "error" -> MaterialTheme.colorScheme.error
+                        "warn" -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                )
+            }
+        }
+    }
+}
