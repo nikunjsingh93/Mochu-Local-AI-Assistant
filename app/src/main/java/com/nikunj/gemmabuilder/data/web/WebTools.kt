@@ -202,7 +202,34 @@ fun searchQueryFrom(request: String): String {
             }
         }
     }
-    return query.trimEnd('?', '.', '!').removeSuffix(" please").take(150).ifBlank { request.take(150) }
+    query = query.trimEnd('?', '.', '!').removeSuffix(" please").take(150).ifBlank { request.take(150) }
+    // "Local AI" means models that run on your own device, not local news.
+    if (Regex("""(?i)\blocal\s+(ai|llms?|models?)\b""").containsMatchIn(query)) query += " on-device open-weight models"
+    return query
+}
+
+/** "Then search the web and tell me", "look it up": asks for a search without saying what to search for. */
+fun isBareSearchRequest(message: String): Boolean {
+    val lower = message.lowercase().replace(Regex("[^a-z ]"), " ")
+    if (!Regex("""\b(search|look\s+\w*\s*up|google|find\s+out|check\s+online|browse)\b""").containsMatchIn(lower)) return false
+    val filler = setOf(
+        "then", "so", "ok", "okay", "please", "pls", "can", "could", "would", "you", "just", "search", "searching", "the", "web",
+        "internet", "online", "and", "tell", "me", "it", "that", "this", "those", "them", "look", "up", "for", "google", "find",
+        "out", "check", "browse", "again", "now", "do", "a", "an", "try", "go", "ahead", "use", "on", "about", "what", "instead", "i", "mean"
+    )
+    return lower.split(Regex("\\s+")).none { it.isNotBlank() && it !in filler }
+}
+
+/** The question a web search should answer: a bare "search it" means the user's previous question. */
+fun resolveWebRequest(message: String, earlierUserMessages: List<String>): String =
+    if (isBareSearchRequest(message)) earlierUserMessages.lastOrNull { !isBareSearchRequest(it) } ?: message else message
+
+/** After a web answer, a follow-up question ("which ones…", "what about…") searches again. */
+fun isWebFollowUp(message: String): Boolean {
+    val lower = message.trim().lowercase()
+    if (Regex("""^(?:please\s+)?(?:write|draft|compose|rewrite|translate|summari[sz]e (?:this|that|it)|explain)\b""").containsMatchIn(lower)) return false
+    return lower.endsWith("?") ||
+        Regex("""^(?:and\s+|so\s+|ok\s+|then\s+)?(?:which|what|who|when|where|how|is|are|was|were|did|does|do|any|list|show me|tell me|give me|more)\b""").containsMatchIn(lower)
 }
 
 /** True for messages that clearly ask for a web search, so it works without the toggle. */
@@ -244,7 +271,9 @@ fun webResearchPrompt(request: String, pages: List<PageText>, unread: List<Searc
             append("Use a short bulleted list for the key points. ")
         }
         append("Copy names, dates and numbers exactly as written in the sources; never invent or round them. Cite sources like [1]. ")
-        append("If the sources don't contain the answer, say what's missing instead of guessing.")
+        append("If the sources don't contain the answer, say what's missing instead of guessing. ")
+        // Small models otherwise claim they "can't browse the internet" right after a search.
+        append("These sources come from a web search the app just ran for this request, so never say you can't search the web.")
     }
 }
 
@@ -262,5 +291,8 @@ fun chatNeedsWeb(message: String): Boolean {
     val writing = Regex("""^\s*(?:please\s+|can you\s+|could you\s+)?(?:write|draft|compose|rewrite|reword|edit|proofread|translate|make|create|generate|brainstorm|plan|explain|help me write)\b""")
     val writingThing = Regex("""\b(note|email|letter|poem|story|essay|message|caption|speech|toast|joke)\b""")
     if (writing.containsMatchIn(lower) || writingThing.containsMatchIn(lower)) return false
-    return Regex("""\b(news|headlines?|weather|forecast|prices?|deals?|on sale|latest|newest|scores?|stocks?|who won|release date|open now|near me)\b""").containsMatchIn(lower)
+    if (Regex("""\b(news|headlines?|weather|forecast|prices?|deals?|on sale|latest|newest|scores?|stocks?|who won|release date|open now|near me)\b""").containsMatchIn(lower)) return true
+    // What came out recently: "which models were launched this month", "what was announced last week".
+    return Regex("""\b(launch(?:ed|es)?|release[ds]?|announce[ds]?|came out|unveil(?:ed|s)?|ship(?:ped|s)?)\b""").containsMatchIn(lower) &&
+        Regex("""\b(this|last|past)\s+(week|month|year)|\btoday\b|\byesterday\b|\brecently\b|\bnew\b|\b20\d\d\b""").containsMatchIn(lower)
 }

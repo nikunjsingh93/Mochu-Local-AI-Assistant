@@ -1233,12 +1233,16 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 var firstTokenAtMs: Long? = null
 
                 val sessionKey = uiState.value.activeConversationId.orEmpty()
+                // A follow-up question right after a web answer searches again rather than reusing old pages.
+                val lastTurnUsedWeb = pendingMessages.dropLast(1).lastOrNull { it.role == "assistant" }?.activity?.any { it.kind == ACTIVITY_SEARCH } == true
                 val useWeb = presetResearch == null && webConsentGiven(context) &&
-                    (if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) else looksLikeSearchRequest(prompt))
+                    (if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) || (lastTurnUsedWeb && isWebFollowUp(prompt)) else looksLikeSearchRequest(prompt))
                 // A web turn starts a fresh session anyway; closing the old one first frees its memory
                 // while pages load in the background reader.
                 if (useWeb) engine.resetSession()
-                val research = presetResearch ?: if (useWeb) runWebResearch(context, prompt) else null
+                // "Then search the web and tell me" searches for the question before it.
+                val webRequest = resolveWebRequest(prompt, pendingMessages.dropLast(1).filter { it.role == "user" }.map { it.text })
+                val research = presetResearch ?: if (useWeb) runWebResearch(context, webRequest) else null
                 if (research?.searchBlocked == true) {
                     val done = pendingMessages + ChatMessage("assistant", "_${SEARCH_BLOCKED_NOTE}_", activity = research.steps)
                     persistActiveConversation(context, done)

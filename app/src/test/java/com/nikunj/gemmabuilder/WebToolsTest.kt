@@ -133,4 +133,37 @@ class WebToolsTest {
         assertTrue(looksBlocked(PageText("Just a moment...", "https://x.com", "Checking your browser")))
         assertFalse(looksBlocked(PageText("Laptop deals", "https://x.com", "MacBook Air $799")))
     }
+
+    @Test
+    fun bareSearchRequestsUseThePreviousQuestion() {
+        assertTrue(isBareSearchRequest("then search the web and tell me?"))
+        assertTrue(isBareSearchRequest("Look it up"))
+        assertTrue(isBareSearchRequest("can you google it please"))
+        assertFalse(isBareSearchRequest("search for gemma 4 release notes"))
+        assertEquals(
+            "tell me which Local AI or open weight models were launched this month",
+            resolveWebRequest("then search the web and tell me?", listOf("give me local ai news", "tell me which Local AI or open weight models were launched this month"))
+        )
+        assertEquals("search for pizza near me", resolveWebRequest("search for pizza near me", listOf("hi")))
+    }
+
+    @Test
+    fun recentReleasesNeedTheWeb() {
+        assertTrue(chatNeedsWeb("tell me which Local AI or open weight models were launched this month"))
+        assertTrue(chatNeedsWeb("what did Apple announce last week"))
+        assertFalse(chatNeedsWeb("explain how a model is released to the public"))
+    }
+
+    @Test
+    fun followUpsAfterAWebAnswer() {
+        assertTrue(isWebFollowUp("which of those run on a phone?"))
+        assertTrue(isWebFollowUp("what about Qwen"))
+        assertFalse(isWebFollowUp("write a summary for my team"))
+    }
+
+    @Test
+    fun localAiMeansOnDeviceModels() {
+        assertTrue(searchQueryFrom("give me latest local ai news of the past 1 week").contains("on-device open-weight models"))
+        assertFalse(searchQueryFrom("local news in Boston").contains("on-device"))
+    }
 }
