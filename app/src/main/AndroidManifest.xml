@@ -6,6 +6,7 @@
     <!-- Model downloads run in a foreground service with a progress notification. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Timers, reminders and scheduled tasks: on-time alarms, and re-arming them after a reboot. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -46,6 +47,16 @@
             android:name=".TaskRunnerService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Local API server: other devices on the same network use the loaded model (OpenAI-compatible). -->
+        <service
+            android:name=".ApiServerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local network server that answers chat requests from the user's own devices with the on-device model, while the user has it turned on." />
+        </service>
 
         <receiver
             android:name=".TaskAlarmReceiver"

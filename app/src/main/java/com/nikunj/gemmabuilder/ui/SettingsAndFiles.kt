@@ -1,5 +1,9 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -284,6 +288,8 @@ fun SettingsScreen(
                         Switch(checked = speakVoiceReplies, onCheckedChange = onSpeakVoiceRepliesChange)
                     }
                     HorizontalDivider()
+                    ApiServerSetting()
+                    HorizontalDivider()
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -557,4 +563,46 @@ private fun fileTreeRows(files: List<String>, collapsed: Set<String>): List<File
     }
     emit(root, "", 0)
     return rows
+}
+
+/** Turns the local API server on or off and shows the address and key other devices use. */
+@Composable
+private fun ApiServerSetting() {
+    val context = LocalContext.current
+    val server by ApiServerStatus.state.collectAsState()
+    val clipboard = LocalClipboardManager.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Local API server")
+                Text(
+                    "Lets your other devices on the same Wi-Fi use this phone's model, through an OpenAI-compatible API (for apps like Open WebUI, scripts, or code editors).",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = server.running, onCheckedChange = { on -> if (on) ApiServerService.start(context) else ApiServerService.stop(context) })
+        }
+        if (server.running) {
+            val base = server.address ?: "http://<phone's IP>:$API_SERVER_PORT/v1"
+            val key = remember { apiServerKey(context) }
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Base URL: $base", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text("API key: $key", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text("Model: ${savedModelName(context).substringBeforeLast('.')}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { clipboard.setText(AnnotatedString(base)) }) { Text("Copy URL") }
+                OutlinedButton(onClick = { clipboard.setText(AnnotatedString(key)) }) { Text("Copy key") }
+            }
+            Text(
+                "Requests served: ${server.requests}. One request runs at a time, and Chat waits while one does. Turn it off when you're done: it keeps the model in memory.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        server.lastError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+    }
 }

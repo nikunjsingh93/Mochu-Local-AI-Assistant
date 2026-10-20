@@ -506,7 +506,7 @@ fun needsWeb(request: String): Boolean =
         Regex("""\b(check|search|look\s+up|news|headlines|weather|prices?|deals?|latest|today's|score|stocks?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(request)
 
 /** Loads the selected model for a task when the app hasn't loaded one; the caller closes it. */
-private suspend fun loadModelForTask(context: Context): BuilderEngine? {
+internal suspend fun loadModelForTask(context: Context): BuilderEngine? {
     val file = modelFile(context)
     if (!file.exists()) return null
     val window = safeTokenWindow(context, file, savedModelContextTokens(context, savedModelName(context)))
