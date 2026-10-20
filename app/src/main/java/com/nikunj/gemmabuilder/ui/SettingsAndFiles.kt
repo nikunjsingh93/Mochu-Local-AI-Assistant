@@ -1,5 +1,9 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -394,15 +398,37 @@ fun FilesPane(
             }
         }
         Spacer(Modifier.height(10.dp))
+        var collapsed by remember { mutableStateOf(setOf<String>()) }
+        val rows = remember(state.files, collapsed) { fileTreeRows(state.files, collapsed) }
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            state.files.forEach { file ->
+            rows.forEach { row ->
+                if (row.isFolder) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { collapsed = if (row.path in collapsed) collapsed - row.path else collapsed + row.path }
+                            .padding(start = (row.depth * 16).dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            if (row.path in collapsed) Icons.Rounded.ChevronRight else Icons.Rounded.ExpandMore,
+                            contentDescription = if (row.path in collapsed) "Open folder" else "Close folder",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(row.name, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                    return@forEach
+                }
+                val file = row.path
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = (row.depth * 16 + 24).dp, top = 2.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        file,
+                        row.name,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier
                             .weight(1f)
@@ -425,7 +451,6 @@ fun FilesPane(
                         Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete file")
                     }
                 }
-                HorizontalDivider()
             }
         }
     }
@@ -506,4 +531,30 @@ private fun MemoryPage(
             }
         }
     }
+}
+
+/** One line of the Files tree: a folder (by its path) or a file, indented by [depth]. */
+private data class FileTreeRow(val path: String, val name: String, val depth: Int, val isFolder: Boolean)
+
+/** Project files as a tree, folders first and then files, each sorted by name; [collapsed] folders hide their contents. */
+private fun fileTreeRows(files: List<String>, collapsed: Set<String>): List<FileTreeRow> {
+    class Node { val folders = java.util.TreeMap<String, Node>(String.CASE_INSENSITIVE_ORDER); val files = java.util.TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER) }
+    val root = Node()
+    files.forEach { path ->
+        val parts = path.split('/')
+        var node = root
+        parts.dropLast(1).forEach { part -> node = node.folders.getOrPut(part) { Node() } }
+        node.files[parts.last()] = path
+    }
+    val rows = mutableListOf<FileTreeRow>()
+    fun emit(node: Node, prefix: String, depth: Int) {
+        node.folders.forEach { (name, child) ->
+            val path = prefix + name
+            rows += FileTreeRow(path, name, depth, isFolder = true)
+            if (path !in collapsed) emit(child, "$path/", depth + 1)
+        }
+        node.files.forEach { (name, path) -> rows += FileTreeRow(path, name, depth, isFolder = false) }
+    }
+    emit(root, "", 0)
+    return rows
 }
