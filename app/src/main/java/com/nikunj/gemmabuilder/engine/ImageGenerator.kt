@@ -39,17 +39,39 @@ fun saveActiveImageModel(context: Context, id: String) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("activeImageModel", id).apply()
 }
 
-/** Image size and steps chosen for a model on the Models page (defaults: 512 and the model's own steps). */
-fun savedImageSettings(context: Context, model: CatalogModel): Pair<Int, Int> {
+/** Aspect ratios offered (width:height). */
+val IMAGE_ASPECTS = listOf("1:1", "4:3", "3:4", "16:9", "9:16")
+
+/** An image model's size, steps and aspect ratio as chosen on the Models page. */
+data class ImageOptions(val size: Int, val steps: Int, val aspect: String) {
+    /**
+     * Width and height for the aspect ratio with about the same number of pixels as a [size]×[size]
+     * square (so the time stays about the same), rounded to multiples of 64 as the models need.
+     */
+    val dimensions: Pair<Int, Int>
+        get() {
+            val (w, h) = aspect.split(":").map { it.toDouble() }
+            val ratio = w / h
+            fun round64(value: Double) = (Math.round(value / 64.0) * 64).toInt().coerceAtLeast(128)
+            return round64(size * Math.sqrt(ratio)) to round64(size / Math.sqrt(ratio))
+        }
+}
+
+/** Defaults: 512, the model's own steps, square. */
+fun savedImageSettings(context: Context, model: CatalogModel): ImageOptions {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val size = prefs.getInt("imageSize_${model.fileName}", 512).takeIf { it in IMAGE_SIZE_OPTIONS } ?: 512
     val steps = prefs.getInt("imageSteps_${model.fileName}", model.imageSteps).coerceIn(1, model.imageMaxSteps)
-    return size to steps
+    val aspect = prefs.getString("imageAspect_${model.fileName}", null)?.takeIf { it in IMAGE_ASPECTS } ?: "1:1"
+    return ImageOptions(size, steps, aspect)
 }
 
-fun saveImageSettings(context: Context, model: CatalogModel, size: Int, steps: Int) {
+fun saveImageSettings(context: Context, model: CatalogModel, options: ImageOptions) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
-        .putInt("imageSize_${model.fileName}", size).putInt("imageSteps_${model.fileName}", steps.coerceIn(1, model.imageMaxSteps)).apply()
+        .putInt("imageSize_${model.fileName}", options.size)
+        .putInt("imageSteps_${model.fileName}", options.steps.coerceIn(1, model.imageMaxSteps))
+        .putString("imageAspect_${model.fileName}", options.aspect)
+        .apply()
 }
 
 /**
@@ -60,7 +82,8 @@ class ImageGenerator(private val context: Context) {
     @Volatile private var handle = 0L
 
     /** Returns the saved PNG, or null if the model failed or [cancel] was called. */
-    suspend fun generate(model: CatalogModel, prompt: String, size: Int, steps: Int): File? = withContext(Dispatchers.Default) {
+    suspend fun generate(model: CatalogModel, prompt: String, options: ImageOptions): File? = withContext(Dispatchers.Default) {
+        val (width, height) = options.dimensions
         val file = downloadedModelFile(context, model).takeIf { it.exists() } ?: return@withContext null
         val threads = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 6)
         val h = StableDiffusionNative.nativeLoad(file.absolutePath, threads)
@@ -68,9 +91,9 @@ class ImageGenerator(private val context: Context) {
         handle = h
         try {
             val rgb = StableDiffusionNative.nativeGenerate(
-                h, prompt, "blurry, low quality, deformed, watermark, text", size, size, steps, System.nanoTime() and 0x7fffffff, model.imageSampler
+                h, prompt, "blurry, low quality, deformed, watermark, text", width, height, options.steps, System.nanoTime() and 0x7fffffff, model.imageSampler
             ) ?: return@withContext null
-            savePng(rgb, size, size)
+            savePng(rgb, width, height)
         } finally {
             handle = 0L
             StableDiffusionNative.nativeFree(h)

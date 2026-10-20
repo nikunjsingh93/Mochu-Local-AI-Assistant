@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.horizontalScroll
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -54,7 +55,7 @@ fun ModelDownloadsScreen(
     onImportFile: () -> Unit,
     onContextChange: (String, Int) -> Unit,
     onKvCacheTypeChange: (KvCacheType) -> Unit,
-    onImageSettingsChange: (String, Int, Int) -> Unit,
+    onImageSettingsChange: (String, ImageOptions) -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
 ) {
@@ -200,7 +201,7 @@ private fun ModelSection(
     onUse: (String) -> Unit,
     onDelete: (CatalogModel) -> Unit,
     onContextChange: (String, Int) -> Unit,
-    onImageSettingsChange: (String, Int, Int) -> Unit = { _, _, _ -> }
+    onImageSettingsChange: (String, ImageOptions) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -217,7 +218,7 @@ private fun ModelSection(
             visionStatus = model.visionId?.let { id -> state.modelDownloads[id] ?: ModelDownloadState() },
             ramEstimate = { tokens -> estimatedRamBytes(context, model, tokens, state.kvCacheType) },
             imageSettings = if (model.isImage) state.imageSettings[model.fileName] else null,
-            onImageSettingsChange = { size, steps -> onImageSettingsChange(model.fileName, size, steps) },
+            onImageSettingsChange = { onImageSettingsChange(model.fileName, it) },
             // Phones report less than the RAM they are sold with: a 12 GB phone shows about 10.9 GB.
             lowRam = ramGb + 1.5 < model.minRamGb,
             onDownload = { onDownload(model.id) },
@@ -239,8 +240,8 @@ private fun ModelCard(
     onContextChange: (Int) -> Unit,
     visionStatus: ModelDownloadState?,
     ramEstimate: (Int) -> Long?,
-    imageSettings: Pair<Int, Int>?,
-    onImageSettingsChange: (Int, Int) -> Unit,
+    imageSettings: ImageOptions?,
+    onImageSettingsChange: (ImageOptions) -> Unit,
     lowRam: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -299,7 +300,7 @@ private fun ModelCard(
                 }
             }
             if (download.phase == DownloadPhase.Downloaded && imageSettings != null) {
-                ImageSettings(model, imageSettings.first, imageSettings.second, onImageSettingsChange)
+                ImageSettings(model, imageSettings, onImageSettingsChange)
             }
             if (download.phase == DownloadPhase.Downloaded && contextTokens != null) {
                 ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp), model.maxContext, ramEstimate)
@@ -388,25 +389,32 @@ private fun KvCacheChoice(current: KvCacheType, onChange: (KvCacheType) -> Unit)
     }
 }
 
-/** Size and steps for an image model. More steps add detail; a bigger size takes much longer. */
+/** Size, aspect ratio and steps for an image model. More steps add detail; bigger takes much longer. */
 @Composable
-private fun ImageSettings(model: CatalogModel, size: Int, steps: Int, onChange: (Int, Int) -> Unit) {
+private fun ImageSettings(model: CatalogModel, options: ImageOptions, onChange: (ImageOptions) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-        Text("Image size", style = MaterialTheme.typography.labelLarge)
+        val (width, height) = options.dimensions
+        Text("Image size · $width×$height", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             IMAGE_SIZE_OPTIONS.forEach { option ->
-                FilterChip(selected = option == size, onClick = { onChange(option, steps) }, label = { Text("$option") })
+                FilterChip(selected = option == options.size, onClick = { onChange(options.copy(size = option)) }, label = { Text("$option") })
             }
         }
-        Text("Steps: $steps", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+        Text("Aspect ratio", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            IMAGE_ASPECTS.forEach { aspect ->
+                FilterChip(selected = aspect == options.aspect, onClick = { onChange(options.copy(aspect = aspect)) }, label = { Text(aspect) })
+            }
+        }
+        Text("Steps: ${options.steps}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
         Text(
             "More steps add detail but take longer. ${model.name} works best around ${model.imageSteps}.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Slider(
-            value = steps.toFloat(),
-            onValueChange = { onChange(size, kotlin.math.round(it).toInt()) },
+            value = options.steps.toFloat(),
+            onValueChange = { onChange(options.copy(steps = kotlin.math.round(it).toInt())) },
             valueRange = 1f..model.imageMaxSteps.toFloat(),
             steps = (model.imageMaxSteps - 2).coerceAtLeast(0)
         )

@@ -883,7 +883,12 @@ private fun ThinkingButton(state: BuilderUiState, onLevel: (Int) -> Unit) {
 private fun CreatedImage(path: String) {
     val context = LocalContext.current
     Column(Modifier.padding(bottom = 6.dp)) {
-        PhotoThumbnail(path, Modifier.fillMaxWidth().aspectRatio(1f))
+        val ratio = remember(path) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth.toFloat() / bounds.outHeight else 1f
+        }
+        PhotoThumbnail(path, Modifier.fillMaxWidth().aspectRatio(ratio))
         TextButton(onClick = {
             val saved = saveImageToGallery(context, path)
             Toast.makeText(context, if (saved) "Saved to Pictures/Mochu" else "Couldn't save the image", Toast.LENGTH_SHORT).show()

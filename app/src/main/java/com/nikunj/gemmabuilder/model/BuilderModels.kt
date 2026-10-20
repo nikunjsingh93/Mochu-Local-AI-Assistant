@@ -164,7 +164,7 @@ data class BuilderUiState(
     val imageGenerating: Boolean = false,
     /** Image model Chat uses, and each image model's size and steps (file name → size to steps). */
     val activeImageModelId: String? = null,
-    val imageSettings: Map<String, Pair<Int, Int>> = emptyMap(),
+    val imageSettings: Map<String, ImageOptions> = emptyMap(),
     /** Number type GGUF models keep their KV cache in. */
     val kvCacheType: KvCacheType = KvCacheType.F16,
     /** Steps of the web research running right now, shown live above the streaming reply. */

@@ -1386,9 +1386,9 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
     @Volatile private var imageGenerator: ImageGenerator? = null
 
     /** The Models page's size and steps for an image model. */
-    fun setImageSettings(context: Context, modelFileName: String, size: Int, steps: Int) {
+    fun setImageSettings(context: Context, modelFileName: String, options: ImageOptions) {
         val model = MODEL_CATALOG.firstOrNull { it.fileName == modelFileName && it.isImage } ?: return
-        saveImageSettings(context, model, size, steps)
+        saveImageSettings(context, model, options)
         _uiState.update { it.copy(imageSettings = it.imageSettings + (modelFileName to savedImageSettings(context, model))) }
     }
 
@@ -1398,7 +1398,9 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             val suggested = MODEL_CATALOG.first { it.id == IMAGE_MODEL_ID }
             return ChatMessage("assistant", "_To create images, download an image model such as **${suggested.name}** (${formatBytes(suggested.sizeBytes)}) under **Image generation** on the Models page, then ask again._")
         }
-        val (size, imageSteps) = savedImageSettings(context, model)
+        val options = savedImageSettings(context, model)
+        val imageSteps = options.steps
+        val (width, height) = options.dimensions
         // The image model and a chat model rarely fit in memory together.
         engine.close()
         engine = DemoBuilderEngine()
@@ -1419,7 +1421,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             }
         }
         val file = try {
-            generator.generate(model, prompt, size, imageSteps)
+            generator.generate(model, prompt, options)
         } finally {
             ticker.cancel()
             imageGenerator = null
@@ -1433,7 +1435,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             "assistant",
             "Here's your image: *$prompt*",
             attachments = listOf(file.absolutePath),
-            statsInline = String.format(java.util.Locale.US, "${model.name} · ${size}×${size} · $imageSteps steps · %.0fs", seconds)
+            statsInline = String.format(java.util.Locale.US, "${model.name} · ${width}×${height} · $imageSteps step${if (imageSteps == 1) "" else "s"} · %.0fs", seconds)
         )
     }
 
