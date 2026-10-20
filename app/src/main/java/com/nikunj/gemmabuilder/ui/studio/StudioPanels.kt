@@ -546,6 +546,30 @@ fun PreviewPane(state: BuilderUiState) {
                     }
                     // Console output and uncaught errors feed the Console tab and automatic fixes.
                     webChromeClient = object : android.webkit.WebChromeClient() {
+                        // Python's input() and the page's prompt(): a dialog that shows what to enter.
+                        override fun onJsPrompt(view: WebView, url: String?, message: String?, defaultValue: String?, result: android.webkit.JsPromptResult): Boolean {
+                            val field = android.widget.EditText(view.context).apply {
+                                setText(defaultValue.orEmpty())
+                                isSingleLine = true
+                                hint = "Type your answer"
+                            }
+                            val box = android.widget.FrameLayout(view.context).apply {
+                                val pad = (20 * view.resources.displayMetrics.density).toInt()
+                                setPadding(pad, pad / 2, pad, 0)
+                                addView(field)
+                            }
+                            val night = (view.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                            android.app.AlertDialog.Builder(view.context, if (night) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                                .setTitle(message?.trim().takeUnless { it.isNullOrBlank() } ?: "Input")
+                                .setView(box)
+                                .setPositiveButton("OK") { _, _ -> result.confirm(field.text.toString()) }
+                                .setNegativeButton("Cancel") { _, _ -> result.cancel() }
+                                .setOnCancelListener { result.cancel() }
+                                .show()
+                            field.requestFocus()
+                            return true
+                        }
+
                         override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
                             val level = when (message.messageLevel()) {
                                 android.webkit.ConsoleMessage.MessageLevel.ERROR -> "error"

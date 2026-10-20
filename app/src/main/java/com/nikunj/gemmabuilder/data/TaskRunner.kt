@@ -94,9 +94,19 @@ object TaskAlarms {
     }
 
     fun cancel(context: Context, id: String) {
+        val task = TaskRepository.tasks.value.firstOrNull { it.id == id }
         disarm(context, id)
         TaskRepository.remove(context, id)
         TaskNotifications.cancel(context, id)
+        if (task != null) clearTaskMark(context, task)
+    }
+
+    /** The chats a task wrote are titled "⏰ <task>"; once the task is gone they lose the ⏰. */
+    private fun clearTaskMark(context: Context, task: ScheduledTask) {
+        val marked = "⏰ ${task.text.take(50)}"
+        val changed = loadConversations(context).filter { it.title == marked }
+        changed.forEach { saveConversationFile(context, it.copy(title = task.text.take(50))) }
+        changed.firstOrNull()?.let { AppEvents.chatAdded.tryEmit(it.id) }
     }
 
     /** Re-arms every pending task (after a reboot or app update, which clear alarms). Missed ones run now. */

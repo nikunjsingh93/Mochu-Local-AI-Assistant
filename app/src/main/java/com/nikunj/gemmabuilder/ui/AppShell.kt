@@ -205,6 +205,7 @@ fun OnDeviceApp(
                 },
                 onDeleteProject = { projectKey -> vm.deleteProject(app, projectKey) },
                 onRenameProject = { projectKey, name -> vm.renameProject(app, projectKey, name) },
+                onRenameChat = { id, title -> vm.renameConversation(app, id, title) },
                 onSelect = { id ->
                     pinnedTab = null
                     vm.selectConversation(app, id)
@@ -406,6 +407,7 @@ private fun HistoryDrawer(
     onNewInProject: (String) -> Unit,
     onDeleteProject: (String) -> Unit,
     onRenameProject: (String, String) -> Unit,
+    onRenameChat: (String, String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenTasks: () -> Unit
 ) {
@@ -413,6 +415,7 @@ private fun HistoryDrawer(
     var pendingDelete by remember { mutableStateOf<ConversationInfo?>(null) }
     var pendingDeleteProject by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingRenameProject by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingRenameChat by remember { mutableStateOf<ConversationInfo?>(null) }
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
             Spacer(Modifier.height(20.dp))
@@ -471,13 +474,18 @@ private fun HistoryDrawer(
                                 },
                                 selected = chat.id == state.activeConversationId,
                                 onClick = { onSelect(chat.id) },
-                                badge = if (chats.size > 1) {
-                                    {
-                                        IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
-                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete chat", modifier = Modifier.size(18.dp))
+                                badge = {
+                                    Row {
+                                        IconButton(onClick = { pendingRenameChat = chat }) {
+                                            Icon(Icons.Outlined.Edit, contentDescription = "Rename chat", modifier = Modifier.size(18.dp))
+                                        }
+                                        if (chats.size > 1) {
+                                            IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
+                                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete chat", modifier = Modifier.size(18.dp))
+                                            }
                                         }
                                     }
-                                } else null,
+                                },
                                 modifier = Modifier.padding(start = 16.dp)
                             )
                         }
@@ -501,8 +509,13 @@ private fun HistoryDrawer(
                         selected = chat.id == state.activeConversationId,
                         onClick = { onSelect(chat.id) },
                         badge = {
-                            IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete", modifier = Modifier.size(20.dp))
+                            Row {
+                                IconButton(onClick = { pendingRenameChat = chat }) {
+                                    Icon(Icons.Outlined.Edit, contentDescription = "Rename chat", modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete", modifier = Modifier.size(20.dp))
+                                }
                             }
                         }
                     )
@@ -524,6 +537,30 @@ private fun HistoryDrawer(
                 modifier = Modifier.padding(vertical = 8.dp)
             )
         }
+    }
+    pendingRenameChat?.let { chat ->
+        val current = chat.title.takeUnless { it == "New chat" }.orEmpty()
+        var text by remember(chat.id) { mutableStateOf(TextFieldValue(current, TextRange(0, current.length))) }
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(chat.id) { focus.requestFocus() }
+        val save = { onRenameChat(chat.id, text.text); pendingRenameChat = null }
+        AlertDialog(
+            onDismissRequest = { pendingRenameChat = null },
+            title = { Text("Rename chat") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    placeholder = { Text("Chat name") },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (text.text.isNotBlank()) save() }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus)
+                )
+            },
+            confirmButton = { TextButton(onClick = save, enabled = text.text.isNotBlank()) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { pendingRenameChat = null }) { Text("Cancel") } }
+        )
     }
     pendingRenameProject?.let { (projectKey, current) ->
         var text by remember(projectKey) { mutableStateOf(TextFieldValue(current, TextRange(0, current.length))) }

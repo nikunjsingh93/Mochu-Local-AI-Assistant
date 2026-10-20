@@ -920,7 +920,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
                     _uiState.update {
                         it.copy(
-                            status = if (attempt == 1) "Thinking..." else "Retrying $attempt/$maxAttempts...",
+                            status = if (attempt == 1) "Thinking..." else "Trying again...",
                             streamingCode = if (attempt == 1) "" else it.streamingCode
                         )
                     }
@@ -938,7 +938,10 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                                 val split = splitThinking(streamed)
                                 _uiState.update {
                                     it.copy(
-                                        status = (if (split.stillThinking) "Thinking..." else "Writing...") + " attempt $attempt/$maxAttempts • ${output.length} chars",
+                                        // Name the file being written, e.g. "Writing src/App.tsx...".
+                                        status = if (split.stillThinking) "Thinking..." else
+                                            Regex("<path>\\s*([^<]+?)\\s*</path>").findAll(split.answer).lastOrNull()?.groupValues?.get(1)
+                                                ?.let { path -> "Writing $path..." } ?: "Writing code...",
                                         lastRawResponse = streamed,
                                         streamingCode = extractStreamingCode(split.answer),
                                         streamingThinking = split.thinking.takeIf { text -> split.stillThinking || text.isNotEmpty() },
@@ -985,7 +988,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         actions = emptyList()
                         assistantReply = null
                         if (attempt < maxAttempts) {
-                            _uiState.update { it.copy(status = "Edit didn't match the file. Retrying ${attempt + 1}/$maxAttempts...") }
+                            _uiState.update { it.copy(status = "Edit didn't match the file. Trying again...") }
                         }
                         continue
                     }
@@ -1013,7 +1016,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         break
                     }
                     if (attempt < maxAttempts) {
-                        _uiState.update { it.copy(status = "Generated file looked incomplete. Retrying ${attempt + 1}/$maxAttempts...") }
+                        _uiState.update { it.copy(status = "The file looked incomplete. Trying again...") }
                     }
                 }
 
@@ -1912,6 +1915,15 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         conversations.firstOrNull { it.id == conversationId }?.projectKey ?: conversationId
 
     /** Renames a Code project; a blank name goes back to its first chat's title. */
+    /** Renames a chat (drawer pencil button). */
+    fun renameConversation(context: Context, id: String, title: String) {
+        val name = title.trim().take(80).ifBlank { return }
+        val updated = conversations.firstOrNull { it.id == id }?.copy(title = name) ?: return
+        conversations = conversations.map { if (it.id == id) updated else it }.toMutableList()
+        saveConversationFile(context, updated)
+        _uiState.update { it.copy(conversations = conversationInfos()) }
+    }
+
     fun renameProject(context: Context, projectKey: String, name: String) {
         saveProjectName(context, projectKey, name)
         _uiState.update { it.copy(projectNames = savedProjectNames(context)) }
@@ -2076,6 +2088,7 @@ ${buildTurnPrompt(userRequest)}
 User request:
 $userRequest
 
+To change a file that already exists, use edit_file with <find>/<replace> for only the lines that change; don't rewrite the whole file. Use write_file only for new files or a complete rewrite.
 Return the XML action(s) now.
     """.trimIndent()
 
@@ -2138,7 +2151,7 @@ Continue exactly where that reply stopped. Return one reply action containing on
                         val streamed = "$combinedResponse\n${output}"
                         _uiState.update {
                             it.copy(
-                                status = "Continuing answer... ${continuation}/$maxContinuations • +${output.length} chars",
+                                status = "Continuing...",
                                 lastRawResponse = streamed,
                                 streamingCode = ""
                             )
@@ -2192,7 +2205,7 @@ Continue exactly where that reply stopped. Return one reply action containing on
         while (looksCutOff(response) && continuation <= maxContinuations) {
             _uiState.update {
                 it.copy(
-                    status = "Continuing output... ${continuation}/$maxContinuations",
+                    status = "Continuing...",
                     lastRawResponse = response,
                     streamingCode = extractStreamingCode(response)
                 )
@@ -2224,7 +2237,7 @@ Rules:
                         val preview = appendRawContinuation(response, output.toString())
                         _uiState.update {
                             it.copy(
-                                status = "Continuing output... ${continuation}/$maxContinuations • ${preview.length} chars",
+                                status = "Continuing...",
                                 lastRawResponse = preview,
                                 streamingCode = extractStreamingCode(preview)
                             )

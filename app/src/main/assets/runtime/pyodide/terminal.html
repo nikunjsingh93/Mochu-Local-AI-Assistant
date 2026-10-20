@@ -112,7 +112,15 @@
       py = await loadPyodide({ indexURL: new URL('./', location.href).href });
       py.setStdout({ batched: function (s) { write(s + '\n'); console.log(s); } });
       py.setStderr({ batched: function (s) { write(s + '\n', 'err'); console.error(s); } });
-      py.setStdin({ stdin: function () { var v = window.prompt('input()'); return v === null ? '' : v; } });
+      // input("Bill amount: ") shows its question in the terminal and in the input dialog, then echoes the answer.
+      window.mochuInput = function (question) {
+        if (question) write(question);
+        var value = window.prompt(question || 'Your input');
+        value = value === null ? '' : value;
+        write(value + '\n', 'in');
+        return value;
+      };
+      py.runPython('import builtins, js\ndef _mochu_input(prompt=""):\n    import sys\n    sys.stdout.flush()\n    return js.mochuInput(str(prompt))\nbuiltins.input = _mochu_input');
       document.getElementById('title').textContent = 'Python ' + py.version;
       line.disabled = false;
       await runMain();
