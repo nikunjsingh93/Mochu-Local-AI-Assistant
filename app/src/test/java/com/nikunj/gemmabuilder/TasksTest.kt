@@ -110,4 +110,21 @@ class TasksTest {
         assertTrue(c?.request.orEmpty().startsWith("Tech news"))
         assertEquals(at(19, 19, 30), (taskCommandFrom("remind me at 7.30pm to call mom", now) as? TaskCommand.Reminder)?.at)
     }
+
+    @Test
+    fun politeOpeningsAndWrittenReminders() {
+        assertEquals(TaskCommand.Reminder("call mom", at(19, 17), false), taskCommandFrom("Could you please remind me at 5pm to call mom?", now))
+        val c = taskCommandFrom("could you please remind me at 9.20 today to laugh and add a mindful note along with it", now) as? TaskCommand.Assistant
+        assertEquals(at(19, 21, 20), c?.at)
+        assertEquals("Remind me to laugh and add a mindful note along with it", c?.request)
+    }
+
+    @Test
+    fun reschedulesTheLastTask() {
+        assertEquals(TaskCommand.Reschedule(at(20, 9), false), taskCommandFrom("actually run this only today at 9am", now))
+        assertEquals(TaskCommand.Reschedule(at(19, 18), null), taskCommandFrom("Actually, make it 6pm", now))
+        assertEquals(TaskCommand.Reschedule(at(20, 8), true), taskCommandFrom("change it to every day at 8am", now))
+        assertTrue(taskCommandFrom("actually remind me at 5pm to call mom", now) is TaskCommand.Reminder)
+        assertNull(taskCommandFrom("Actually, what is the capital of France?", now))
+    }
 }

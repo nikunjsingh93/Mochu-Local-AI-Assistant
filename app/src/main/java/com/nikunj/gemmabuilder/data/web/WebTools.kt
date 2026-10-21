@@ -348,3 +348,21 @@ fun chatNeedsWeb(message: String): Boolean {
     return Regex("""\b(launch(?:ed|es)?|release[ds]?|announce[ds]?|came out|unveil(?:ed|s)?|ship(?:ped|s)?)\b""").containsMatchIn(lower) &&
         Regex("""\b(this|last|past)\s+(week|month|year)|\btoday\b|\byesterday\b|\brecently\b|\bnew\b|\b20\d\d\b""").containsMatchIn(lower)
 }
+
+/**
+ * Links written in a message ("Https://amazon.com/…", "bestbuy.com/product/…"), as https URLs.
+ * The scheme is matched in any case, so a capitalized "Https://" isn't prefixed a second time.
+ */
+fun linksIn(text: String, limit: Int = 2): List<String> =
+    Regex("""(?:https?://)?(?:[\w-]+\.)+[a-z]{2,}(?:/\S*)?""", RegexOption.IGNORE_CASE)
+        .findAll(text)
+        .map { it.value.trimEnd('.', ',', ')', '!', '?') }
+        .map { url ->
+            Regex("""^(https?)://""", RegexOption.IGNORE_CASE).find(url)
+                ?.let { m -> m.groupValues[1].lowercase() + "://" + url.substring(m.range.last + 1) }
+                ?: "https://$url"
+        }
+        .filter { WebPolicy.isAllowed(it) }
+        .distinct()
+        .take(limit)
+        .toList()

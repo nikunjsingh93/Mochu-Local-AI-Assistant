@@ -351,6 +351,11 @@ fun OnDeviceApp(
 
     if (tasksOpen) {
         TasksScreen(
+            memories = state.memories,
+            memoryEnabled = state.memoryEnabled,
+            onMemoryEnabledChange = { vm.setMemoryEnabled(app, it) },
+            onAddMemory = { vm.addMemory(app, it) },
+            onDeleteMemory = { vm.deleteMemory(app, it) },
             onOpenChat = { id ->
                 tasksOpen = false
                 pinnedTab = null

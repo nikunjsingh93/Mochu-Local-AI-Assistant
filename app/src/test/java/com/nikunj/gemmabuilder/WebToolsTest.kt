@@ -189,4 +189,10 @@ class WebToolsTest {
         assertTrue(results.size >= 3)
         assertTrue(results.all { it.url.startsWith("http") && !it.url.contains("bing.com") && it.title.isNotBlank() })
     }
+
+    @Test
+    fun linksKeepOneScheme() {
+        assertEquals(listOf("https://www.amazon.com/dp/B0GVTPKJVT"), linksIn("Https://www.amazon.com/dp/B0GVTPKJVT show its current price"))
+        assertEquals(listOf("https://bestbuy.com/product/x"), linksIn("check bestbuy.com/product/x."))
+    }
 }

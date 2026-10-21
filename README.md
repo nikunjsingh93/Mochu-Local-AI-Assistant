@@ -9,6 +9,10 @@
   create images, search the web, schedule tasks, talk with your voice, and build web, React and Python apps, all with on-device models.
 </p>
 
+<p align="center">
+  <b>Runs fully on your phone. No sign-up, no cloud, works offline.</b>
+</p>
+
 ## App Features
 
 - **Chat** with on-device models: Gemma 4 E2B/E4B on the GPU, and GGUF models (Qwen3.5, Gemma 3 1B, LFM2.5, Bonsai) on the CPU, with visible thinking and a Quick / Balanced / Deep thinking button

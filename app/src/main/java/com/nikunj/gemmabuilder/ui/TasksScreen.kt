@@ -73,10 +73,18 @@ import kotlinx.coroutines.delay
 import java.time.LocalTime
 import java.time.ZonedDateTime
 
-/** Timers, the stopwatch, reminders and scheduled assistant tasks. */
+/** Scheduled assistant tasks, memory and reminders. Timers and the stopwatch live in the chat that started them. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
+fun TasksScreen(
+    memories: List<String>,
+    memoryEnabled: Boolean,
+    onMemoryEnabledChange: (Boolean) -> Unit,
+    onAddMemory: (String) -> Unit,
+    onDeleteMemory: (String) -> Unit,
+    onOpenChat: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
     val app = context.applicationContext
     // The Chat box underneath keeps focus otherwise, and its keyboard covers this screen.
@@ -88,7 +96,6 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
         TaskRepository.load(app)
     }
     val tasks by TaskRepository.tasks.collectAsState()
-    val stopwatch by TaskRepository.stopwatch.collectAsState()
     BackHandler(onBack = onDismiss)
 
     // One clock for every countdown on the screen.
@@ -98,7 +105,7 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 now = System.currentTimeMillis()
-                delay(if (stopwatch.running) 100 else 500)
+                delay(1000)
             }
         }
     }
@@ -142,92 +149,24 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
             ) {
                 if (!notificationsAllowed) {
                     Notice(
-                        "Notifications are off, so timers and reminders can't alert you.",
+                        "Notifications are off, so reminders and tasks can't alert you.",
                         "Allow"
                     ) { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
                 }
                 if (!exactAllowed) {
                     Notice(
-                        "Timers and reminders may go off a few minutes late until you allow alarms for this app.",
+                        "Reminders and tasks may go off a few minutes late until you allow alarms for this app.",
                         "Allow alarms"
                     ) {
                         context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
                     }
                 }
                 Text(
-                    "Tip: you can also just ask in Chat, like \"set a timer for 10 minutes\", \"remind me at 5pm to call mom\" " +
-                        "or \"every day at 8am give me the latest tech news\".",
+                    "Tip: just ask in Chat, like \"every day at 8am give me the latest tech news\", \"remind me at 5pm to call mom\" " +
+                        "or \"set a timer for 10 minutes\" (timers and the stopwatch show in that chat).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                // ---- Timers ----
-                SectionTitle("Timers")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(1, 5, 10, 15, 30, 60).forEach { minutes ->
-                        AssistChip(
-                            onClick = {
-                                val ms = minutes * 60_000L
-                                schedule(ScheduledTask(kind = TASK_TIMER, text = "", triggerAt = System.currentTimeMillis() + ms, durationMs = ms))
-                            },
-                            label = { Text(if (minutes == 60) "1 hr" else "$minutes min") }
-                        )
-                    }
-                    AssistChip(onClick = { newTaskKind = TASK_TIMER }, label = { Text("Custom…") })
-                }
-                tasks.filter { it.kind == TASK_TIMER }.sortedBy { it.triggerAt }.forEach { timer ->
-                    val left = (timer.triggerAt - now).coerceAtLeast(0)
-                    TaskRow(
-                        title = formatStopwatch(left).substringBeforeLast('.'),
-                        subtitle = listOf(timer.text.ifBlank { "Timer" }, formatDuration(timer.durationMs)).joinToString(" · "),
-                        progress = if (timer.durationMs > 0) 1f - left.toFloat() / timer.durationMs else null,
-                        mono = true,
-                        onDelete = { TaskAlarms.cancel(app, timer.id) }
-                    )
-                }
-
-                // ---- Stopwatch ----
-                SectionTitle("Stopwatch")
-                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            formatStopwatch(stopwatch.elapsedMs(now)),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 30.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (!stopwatch.running && stopwatch.accumulatedMs > 0) {
-                            TextButton(onClick = {
-                                TaskRepository.setStopwatch(app, StopwatchState())
-                                TaskNotifications.stopwatch(app, StopwatchState())
-                            }) { Text("Reset") }
-                        }
-                        Button(onClick = {
-                            val next = if (stopwatch.running) {
-                                StopwatchState(running = false, accumulatedMs = stopwatch.elapsedMs())
-                            } else {
-                                stopwatch.copy(running = true, startedAt = System.currentTimeMillis())
-                            }
-                            TaskRepository.setStopwatch(app, next)
-                            TaskNotifications.stopwatch(app, next)
-                        }) { Text(if (stopwatch.running) "Pause" else if (stopwatch.accumulatedMs > 0) "Resume" else "Start") }
-                    }
-                }
-
-                // ---- Reminders ----
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionTitle("Reminders", Modifier.weight(1f))
-                    TextButton(onClick = { newTaskKind = TASK_REMINDER }) { Text("Add") }
-                }
-                val reminders = tasks.filter { it.kind == TASK_REMINDER }.sortedBy { it.triggerAt }
-                if (reminders.isEmpty()) Empty("No reminders.")
-                reminders.forEach { reminder ->
-                    TaskRow(
-                        title = reminder.text,
-                        subtitle = scheduleLabel(reminder),
-                        onDelete = { pendingDelete = reminder }
-                    )
-                }
 
                 // ---- Scheduled assistant tasks ----
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -274,6 +213,25 @@ fun TasksScreen(onOpenChat: (String) -> Unit, onDismiss: () -> Unit) {
                         }
                     }
                 }
+                // ---- Memory ----
+                SectionTitle("Memory")
+                MemoryPage(memories, memoryEnabled, onMemoryEnabledChange, onAddMemory, onDeleteMemory, scrollable = false)
+
+                // ---- Reminders ----
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("Reminders", Modifier.weight(1f))
+                    TextButton(onClick = { newTaskKind = TASK_REMINDER }) { Text("Add") }
+                }
+                val reminders = tasks.filter { it.kind == TASK_REMINDER }.sortedBy { it.triggerAt }
+                if (reminders.isEmpty()) Empty("No reminders.")
+                reminders.forEach { reminder ->
+                    TaskRow(
+                        title = reminder.text,
+                        subtitle = scheduleLabel(reminder),
+                        onDelete = { pendingDelete = reminder }
+                    )
+                }
+
                 Spacer(Modifier.size(24.dp))
             }
         }

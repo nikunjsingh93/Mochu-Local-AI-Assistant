@@ -226,6 +226,7 @@ fun AssistantChatScreen(
                     if (state.readingDocument) DocumentChip("Reading…", onRemove = null)
                 }
             }
+            ChatClocks(state.activeConversationId, Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
             if (state.messages.isNotEmpty()) ContextMeter(state, Modifier.padding(horizontal = 8.dp))
             Composer(
                 text = state.prompt,

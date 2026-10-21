@@ -1726,11 +1726,14 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         }
 
         val query = searchQueryFrom(request)
-        show(ActivityStep(ACTIVITY_SEARCH, "Searching DuckDuckGo for \"$query\""))
-        val search = withContext(Dispatchers.IO) { runCatching { searchDuckDuckGo(query, limit = 8) } }
+        // A link in the message is read directly instead of searching for it.
+        val linked = linksIn(request)
+        show(ActivityStep(ACTIVITY_SEARCH, if (linked.isEmpty()) "Searching DuckDuckGo for \"$query\"" else "Opening the link"))
+        val search = if (linked.isNotEmpty()) Result.success(linked.map { SearchResult(hostOf(it), it, "") })
+            else withContext(Dispatchers.IO) { runCatching { searchDuckDuckGo(query, limit = 8) } }
         val blocked = search.exceptionOrNull() is SearchBlockedException
         val results = search.getOrDefault(emptyList()).filter { WebPolicy.isAllowed(it.url) }
-        show(
+        if (linked.isNotEmpty()) show(ActivityStep(ACTIVITY_NOTE, "Reading the page you linked"), replaceLast = true) else show(
             if (blocked) ActivityStep(ACTIVITY_NOTE, "DuckDuckGo asked for a bot check")
             else if (results.isEmpty()) ActivityStep(ACTIVITY_NOTE, "No search results (offline, or DuckDuckGo didn't answer)")
             else ActivityStep(ACTIVITY_SEARCH, "Searched \"$query\" · ${results.size} results"),
@@ -1887,18 +1890,35 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
     private fun applyTaskCommand(context: Context, command: TaskCommand): String {
         val seeTasks = "\n\nYou'll get a notification. Manage it under **Tasks** (the clock at the top of Chat)."
+        val chatId = uiState.value.activeConversationId.orEmpty()
         return when (command) {
+            is TaskCommand.Reschedule -> {
+                TaskRepository.load(context)
+                val pending = TaskRepository.tasks.value.filter { !it.done && it.kind != TASK_TIMER }
+                val task = pending.filter { it.chatId == chatId }.maxByOrNull { it.createdAt }
+                    ?: pending.filter { System.currentTimeMillis() - it.createdAt < 30 * 60_000L }.maxByOrNull { it.createdAt }
+                if (task == null) {
+                    "I couldn't find a task or reminder from this chat to change. Open **Tasks** (the clock at the top of Chat) to edit one."
+                } else {
+                    val daily = command.daily ?: task.repeatDaily
+                    TaskAlarms.schedule(context, task.copy(triggerAt = command.at, repeatDaily = daily))
+                    val whenText = if (daily) "every day at " + formatTaskTime(command.at).substringAfter(" at ") else formatTaskTime(command.at)
+                    "🗓️ Changed **${task.text}** to $whenText." + seeTasks
+                }
+            }
             is TaskCommand.Timer -> {
-                val task = ScheduledTask(kind = TASK_TIMER, text = command.label, triggerAt = System.currentTimeMillis() + command.durationMs, durationMs = command.durationMs)
+                val task = ScheduledTask(kind = TASK_TIMER, text = command.label, triggerAt = System.currentTimeMillis() + command.durationMs, durationMs = command.durationMs, chatId = chatId)
                 TaskAlarms.schedule(context, task)
-                "⏱️ ${if (command.label.isBlank()) "Timer" else "**${command.label}** timer"} set for **${formatDuration(command.durationMs)}**, until ${formatTaskTime(task.triggerAt).substringAfter(" at ")}." + seeTasks
+                TaskNotifications.timerRunning(context, task)
+                "⏱️ ${if (command.label.isBlank()) "Timer" else "**${command.label}** timer"} set for **${formatDuration(command.durationMs)}**, until ${formatTaskTime(task.triggerAt).substringAfter(" at ")}. " +
+                    "It counts down below and in your notifications."
             }
             is TaskCommand.Reminder -> {
-                TaskAlarms.schedule(context, ScheduledTask(kind = TASK_REMINDER, text = command.text, triggerAt = command.at, repeatDaily = command.daily))
+                TaskAlarms.schedule(context, ScheduledTask(kind = TASK_REMINDER, text = command.text, triggerAt = command.at, repeatDaily = command.daily, chatId = chatId))
                 "🔔 I'll remind you to **${command.text}** ${if (command.daily) "every day at " + formatTaskTime(command.at).substringAfter(" at ") else formatTaskTime(command.at)}." + seeTasks
             }
             is TaskCommand.Assistant -> {
-                TaskAlarms.schedule(context, ScheduledTask(kind = TASK_AI, text = command.request, triggerAt = command.at, repeatDaily = command.daily))
+                TaskAlarms.schedule(context, ScheduledTask(kind = TASK_AI, text = command.request, triggerAt = command.at, repeatDaily = command.daily, chatId = chatId))
                 "🗓️ Scheduled: **${command.request}**, ${if (command.daily) "every day at " + formatTaskTime(command.at).substringAfter(" at ") else formatTaskTime(command.at)}. " +
                     "I'll run it on this phone and send the answer as a notification; it also appears as a new chat." +
                     "\n\nManage it under **Tasks** (the clock at the top of Chat)."
@@ -1906,16 +1926,16 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             TaskCommand.StartStopwatch -> {
                 val state = TaskRepository.stopwatch.value
                 if (state.running) "The stopwatch is already running." else {
-                    val started = state.copy(running = true, startedAt = System.currentTimeMillis())
+                    val started = state.copy(running = true, startedAt = System.currentTimeMillis(), chatId = chatId)
                     TaskRepository.setStopwatch(context, started)
                     TaskNotifications.stopwatch(context, started)
-                    "⏱️ Stopwatch started. It keeps running in your notifications; open **Tasks** to pause or reset it."
+                    "⏱️ Stopwatch started. Pause or reset it below; it also keeps running in your notifications."
                 }
             }
             TaskCommand.StopStopwatch -> {
                 val state = TaskRepository.stopwatch.value
                 if (!state.running) "The stopwatch isn't running." else {
-                    val stopped = StopwatchState(running = false, accumulatedMs = state.elapsedMs())
+                    val stopped = StopwatchState(running = false, accumulatedMs = state.elapsedMs(), chatId = state.chatId)
                     TaskRepository.setStopwatch(context, stopped)
                     TaskNotifications.stopwatch(context, stopped)
                     "⏱️ Stopwatch paused at **${formatStopwatch(stopped.accumulatedMs)}**."

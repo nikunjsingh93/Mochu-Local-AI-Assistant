@@ -193,6 +193,29 @@ object TaskNotifications {
         context.getSystemService(NotificationManager::class.java).cancel(taskId.hashCode())
     }
 
+    /** Opens the chat [chatId] when there is one, else the Tasks screen. */
+    private fun openChatOrTasks(context: Context, request: Int, chatId: String): PendingIntent =
+        openApp(context, request) { if (chatId.isNotBlank()) putExtra(EXTRA_OPEN_CHAT, chatId) else putExtra(EXTRA_OPEN_TASKS, true) }
+
+    /** A running timer's countdown in the notification shade; tapping it opens its chat. */
+    fun timerRunning(context: Context, task: ScheduledTask) {
+        ensureChannels(context)
+        post(
+            context, task.id.hashCode(),
+            NotificationCompat.Builder(context, CHANNEL_STOPWATCH)
+                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                .setContentTitle(if (task.text.isBlank()) "Timer" else "${task.text} timer")
+                .setUsesChronometer(true)
+                .setChronometerCountDown(true)
+                .setWhen(task.triggerAt)
+                .setShowWhen(true)
+                .setOngoing(true)
+                .setSilent(true)
+                .setContentIntent(openChatOrTasks(context, task.id.hashCode(), task.chatId))
+                .build()
+        )
+    }
+
     fun timerDone(context: Context, task: ScheduledTask) {
         ensureChannels(context)
         val dismiss = PendingIntent.getBroadcast(
@@ -206,7 +229,7 @@ object TaskNotifications {
             .setContentText("${formatDuration(task.durationMs)} is up")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setContentIntent(openApp(context, task.id.hashCode()) { putExtra(EXTRA_OPEN_TASKS, true) })
+            .setContentIntent(openChatOrTasks(context, task.id.hashCode(), task.chatId))
             .addAction(0, "Dismiss", dismiss)
             .setAutoCancel(true)
             .build()
@@ -226,7 +249,7 @@ object TaskNotifications {
                 .setStyle(NotificationCompat.BigTextStyle().bigText(task.text))
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setContentIntent(openApp(context, task.id.hashCode()) { putExtra(EXTRA_OPEN_TASKS, true) })
+                .setContentIntent(openChatOrTasks(context, task.id.hashCode(), task.chatId))
                 .setAutoCancel(true)
                 .build()
         )
@@ -290,7 +313,7 @@ object TaskNotifications {
                 .setShowWhen(true)
                 .setOngoing(true)
                 .setSilent(true)
-                .setContentIntent(openApp(context, STOPWATCH_ID) { putExtra(EXTRA_OPEN_TASKS, true) })
+                .setContentIntent(openChatOrTasks(context, STOPWATCH_ID, state.chatId))
                 .build()
         )
     }
@@ -409,9 +432,7 @@ class TaskRunnerService : Service() {
             var unread = emptyList<SearchResult>()
             var searchBlocked = false
             if (needsWeb(task.text)) {
-                val urls = Regex("""(?:https?://)?(?:[\w-]+\.)+[a-z]{2,}(?:/\S*)?""", RegexOption.IGNORE_CASE)
-                    .findAll(task.text).map { it.value.trimEnd('.', ',') }.map { if (it.startsWith("http")) it else "https://$it" }
-                    .filter { WebPolicy.isAllowed(it) }.take(2).toList()
+                val urls = linksIn(task.text)
                 val targets = if (urls.isNotEmpty()) {
                     urls.map { SearchResult(hostOf(it), it, "") }
                 } else {

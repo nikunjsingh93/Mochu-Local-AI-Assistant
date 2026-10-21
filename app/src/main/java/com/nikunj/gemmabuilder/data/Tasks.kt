@@ -37,10 +37,12 @@ data class ScheduledTask(
     /** The chat holding the last result of an assistant task. */
     val lastChatId: String = "",
     /** A one-off task that has run; kept so its result stays reachable. */
-    val done: Boolean = false
+    val done: Boolean = false,
+    /** The chat the task was set from. */
+    val chatId: String = ""
 )
 
-data class StopwatchState(val running: Boolean = false, val startedAt: Long = 0, val accumulatedMs: Long = 0) {
+data class StopwatchState(val running: Boolean = false, val startedAt: Long = 0, val accumulatedMs: Long = 0, val chatId: String = "") {
     fun elapsedMs(now: Long = System.currentTimeMillis()): Long = accumulatedMs + if (running) now - startedAt else 0
 }
 
@@ -61,7 +63,8 @@ object TaskRepository {
         _stopwatch.value = StopwatchState(
             running = prefs.getBoolean("stopwatchRunning", false),
             startedAt = prefs.getLong("stopwatchStartedAt", 0),
-            accumulatedMs = prefs.getLong("stopwatchAccumulated", 0)
+            accumulatedMs = prefs.getLong("stopwatchAccumulated", 0),
+            chatId = prefs.getString("stopwatchChatId", "").orEmpty()
         )
     }
 
@@ -90,6 +93,7 @@ object TaskRepository {
             .putBoolean("stopwatchRunning", state.running)
             .putLong("stopwatchStartedAt", state.startedAt)
             .putLong("stopwatchAccumulated", state.accumulatedMs)
+            .putString("stopwatchChatId", state.chatId)
             .apply()
     }
 
@@ -106,7 +110,7 @@ fun encodeTasks(tasks: List<ScheduledTask>): String = JSONArray().apply {
             JSONObject()
                 .put("id", t.id).put("kind", t.kind).put("text", t.text).put("triggerAt", t.triggerAt)
                 .put("repeatDaily", t.repeatDaily).put("durationMs", t.durationMs).put("createdAt", t.createdAt)
-                .put("lastRunAt", t.lastRunAt).put("lastChatId", t.lastChatId).put("done", t.done)
+                .put("lastRunAt", t.lastRunAt).put("lastChatId", t.lastChatId).put("done", t.done).put("chatId", t.chatId)
         )
     }
 }.toString()
@@ -125,7 +129,8 @@ fun parseTasks(json: String): List<ScheduledTask> {
             createdAt = o.optLong("createdAt"),
             lastRunAt = o.optLong("lastRunAt"),
             lastChatId = o.optString("lastChatId"),
-            done = o.optBoolean("done")
+            done = o.optBoolean("done"),
+            chatId = o.optString("chatId")
         )
     }
 }
@@ -152,6 +157,8 @@ sealed class TaskCommand {
     data object StartStopwatch : TaskCommand()
     data object StopStopwatch : TaskCommand()
     data object ResetStopwatch : TaskCommand()
+    /** "Actually, run it only today at 9am": changes the last task set in this chat. [daily] null keeps it as it was. */
+    data class Reschedule(val at: Long, val daily: Boolean?) : TaskCommand()
 }
 
 /** When a message says to do something: the time, whether it repeats, and the message without it. */
@@ -260,17 +267,51 @@ private val timerRegex = Regex(
     """^(?:please\s+)?(?:(?:set|start)\s+(?:a\s+|an\s+|the\s+)?(?:(.+?)\s+)?timer\s+(?:for\s+)?(.+)|(?:set\s+(?:a\s+|an\s+)?)?(.+?)\s+timer(?:\s+for\s+(.+))?|timer\s+(?:for\s+)?(.+))$""",
     RegexOption.IGNORE_CASE
 )
-private val reminderRegex = Regex("""^(?:please\s+)?(?:remind\s+me|set\s+(?:a\s+)?reminder)\b\s*(.*)$""", RegexOption.IGNORE_CASE)
+private val reminderRegex = Regex("""^(?:(?:actually|instead|no|wait|oh|sorry|oops)\b[,!]?\s*)?(?:please\s+)?(?:remind\s+me|set\s+(?:a\s+)?reminder)\b\s*(.*)$""", RegexOption.IGNORE_CASE)
 private val assistantVerbs = Regex(
     """\b(check|summari[sz]e|search|look\s+up|find|get\s+me|tell\s+me|give\s+me|send\s+me|show\s+me|fetch|read|news|headlines|weather|prices?|deals?|briefing|write|compose|make|create|generate|draft|share|suggest|recommend|plan|list|explain|teach|translate|quiz|motivate|inspire|jokes?|quotes?|poems?|story|facts?|tips?|riddles?|recipes?|affirmations?)\b""",
     RegexOption.IGNORE_CASE
 )
 private val scheduleHint = Regex("""^(?:please\s+)?(?:schedule|every\s*day|everyday|daily|each\s+day|every\s+(?:morning|evening)|tomorrow|tonight|at\s+\d|in\s+\d)""", RegexOption.IGNORE_CASE)
 
+// "Could you please …", "hey Mochu, …": polite openings aren't part of the command.
+private val politeOpening = Regex(
+    """^(?:(?:hey|hi|hello|ok(?:ay)?)\s+(?:mochu\s*)?,?\s*)?(?:(?:could|can|would|will)\s+you\s+)?(?:please\s+|pls\s+|kindly\s+)?""",
+    RegexOption.IGNORE_CASE
+)
+private val rescheduleRegex = Regex(
+    """^(?:(?:actually|instead|no|wait|oh|sorry|oops)\b[,!]?\s*|(?:change|move|reschedule|push|shift)\s+(?:it|this|that|the\s+(?:task|reminder|timer))\b|make\s+(?:it|this|that)\b|(?:run|do|set|schedule)\s+(?:it|this|that)\b)""",
+    RegexOption.IGNORE_CASE
+)
+private val onlyOnceRegex = Regex("""\b(?:only|just)\s+(?:for\s+)?(?:today|tonight|tomorrow|once)\b|\b(?:today|tonight)\s+only\b|\bone\s+time\b|\bnot\s+every\s*day\b""", RegexOption.IGNORE_CASE)
+// A reminder that asks for something written along with it is run by the assistant.
+private val reminderWantsWriting = Regex(
+    """\b(?:add|include|give|write|send|with|plus|along)\b.*\b(?:notes?|quotes?|messages?|tips?|thoughts?|affirmations?|jokes?|facts?|poems?|summary|motivation)\b""",
+    RegexOption.IGNORE_CASE
+)
+
 /** A message that sets a timer, reminder, stopwatch or scheduled task, or null for an ordinary message. */
 fun taskCommandFrom(message: String, now: ZonedDateTime = ZonedDateTime.now()): TaskCommand? {
-    val text = message.trim().trimEnd('.', '!')
+    val text = message.trim().trimEnd('.', '!', '?').replace(politeOpening, "")
+        .replace(Regex("""[,\s]+please$""", RegexOption.IGNORE_CASE), "").trim()
     val lower = text.lowercase()
+    if (rescheduleRegex.containsMatchIn(text) && !Regex("""^(?:actually|instead|no|wait|oh|sorry|oops)\b[,!]?\s*remind\s+me\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+        val parsed = parseWhen(text, now)
+        if (parsed != null) {
+            // What's left should be only the change itself ("actually run this only today"), not a new request.
+            val leftover = parsed.rest.replace(rescheduleRegex, " ").replace(onlyOnceRegex, " ")
+                .replace(Regex("""\b(?:it|this|that|to|for|instead|the|task|reminder|on|at|only|just|please|and|once|then|so|now|change|move|make|run|do|set|schedule|reschedule|today|tonight|tomorrow)\b""", RegexOption.IGNORE_CASE), " ")
+                .replace(Regex("""[^a-z]+""", RegexOption.IGNORE_CASE), "")
+            if (leftover.length <= 3) {
+                val daily = when {
+                    onlyOnceRegex.containsMatchIn(text) -> false
+                    parsed.daily -> true
+                    else -> null
+                }
+                return TaskCommand.Reschedule(parsed.at, daily)
+            }
+        }
+    }
     when {
         Regex("""^(?:please\s+)?(?:start|begin)\s+(?:a\s+|the\s+)?stopwatch$""").matches(lower) -> return TaskCommand.StartStopwatch
         Regex("""^(?:please\s+)?(?:stop|pause|end)\s+(?:the\s+)?stopwatch$""").matches(lower) -> return TaskCommand.StopStopwatch
@@ -279,6 +320,7 @@ fun taskCommandFrom(message: String, now: ZonedDateTime = ZonedDateTime.now()): 
     reminderRegex.find(text)?.let { m ->
         val parsed = parseWhen(m.groupValues[1], now) ?: return null
         val what = tidy(parsed.rest).ifBlank { "Reminder" }
+        if (reminderWantsWriting.containsMatchIn(what)) return TaskCommand.Assistant("Remind me to $what", parsed.at, parsed.daily)
         return TaskCommand.Reminder(what, parsed.at, parsed.daily)
     }
     if (Regex("""\btimer\b""", RegexOption.IGNORE_CASE).containsMatchIn(text) && text.length <= 80) {

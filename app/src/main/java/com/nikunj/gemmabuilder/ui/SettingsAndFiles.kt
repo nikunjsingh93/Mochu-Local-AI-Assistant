@@ -288,21 +288,6 @@ fun SettingsScreen(
                         Switch(checked = speakVoiceReplies, onCheckedChange = onSpeakVoiceRepliesChange)
                     }
                     HorizontalDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Memory")
-                            Text(
-                                if (!memoryEnabled) "Off" else if (memories.isEmpty()) "Nothing saved yet" else "${memories.size} saved",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        OutlinedButton(onClick = { settingsSubPage = "memory" }) { Text("Manage") }
-                    }
-                    HorizontalDivider()
                     OutlinedButton(onClick = { settingsSubPage = "privacy" }) {
                         Text("Open Privacy Policy")
                     }
@@ -479,19 +464,21 @@ fun RawPane(state: BuilderUiState) {
 
 /** What Chat remembers about the user: on/off, the saved facts, and a way to add or delete them. */
 @Composable
-private fun MemoryPage(
+internal fun MemoryPage(
     memories: List<String>,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onAdd: (String) -> Unit,
     onDelete: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** False inside a page that already scrolls. */
+    scrollable: Boolean = true
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
+            .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
