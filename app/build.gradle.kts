@@ -45,8 +45,8 @@ android {
         minSdk = 31
         // Google Play requires API 36 for new apps and updates from August 31, 2026.
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.9.3"
+        versionCode = 24
+        versionName = "1.9.4"
 
         ndk {
             // On-device models only run on 64-bit Arm phones; this also drops the x86/armv7 copies
