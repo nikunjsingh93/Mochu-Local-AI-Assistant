@@ -106,6 +106,7 @@ class BuilderViewModel : ViewModel() {
                 contextTokens = savedModelContextTokens(context, savedModelName(context)),
                 backendPreference = savedBackendPreference(context),
                 speculativeDecodingEnabled = savedSpeculativeDecodingEnabled(context),
+                autoUnloadSeconds = savedAutoUnloadSeconds(context),
                 thinkingEnabled = savedThinkingEnabled(context),
                 thinkingLevel = savedThinkingLevel(context),
                 kvCacheType = savedKvCacheType(context),
@@ -398,6 +399,43 @@ class BuilderViewModel : ViewModel() {
             if (reload) it.copy(kvCacheType = type, gemmaLoaded = false, engineLabel = "Not loaded", contextWindowTokens = null, contextUsedTokens = null,
                 status = "KV cache updated. Send a message to reload the model.")
             else it.copy(kvCacheType = type)
+        }
+    }
+
+    fun setAutoUnloadSeconds(context: Context, seconds: Int) {
+        saveAutoUnloadSeconds(context, seconds)
+        _uiState.update { it.copy(autoUnloadSeconds = seconds) }
+        scheduleIdleUnload()
+    }
+
+    private var idleUnloadJob: Job? = null
+
+    /** Starts the idle clock: the chat model leaves memory after the chosen time without use. */
+    private fun scheduleIdleUnload() {
+        idleUnloadJob?.cancel()
+        val seconds = uiState.value.autoUnloadSeconds
+        if (seconds <= 0) return
+        idleUnloadJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(seconds * 1000L)
+            if (!generationInProgress && !uiState.value.isBusy && !EngineHolder.backgroundRunning) unloadModel(automatic = true)
+        }
+    }
+
+    /** Frees the chat model's memory. It loads again with the next message. */
+    fun unloadModel(automatic: Boolean = false) {
+        if (generationInProgress || uiState.value.isBusy || engine is DemoBuilderEngine) return
+        idleUnloadJob?.cancel()
+        engine.close()
+        engine = DemoBuilderEngine()
+        multimodalEngine?.close()
+        multimodalEngine = null
+        sessionFingerprint = null
+        refreshContextUsage()
+        _uiState.update {
+            it.copy(
+                gemmaLoaded = false, engineLabel = "Not loaded",
+                status = if (automatic) "Model unloaded after ${it.autoUnloadSeconds} s without use. It loads again with your next message." else "Model unloaded from memory. It loads again with your next message."
+            )
         }
     }
 
@@ -932,6 +970,7 @@ class BuilderViewModel : ViewModel() {
         val chatWithDocs = uiState.value.activeKind == CHAT_KIND_ASSISTANT && uiState.value.chatDocs.isNotEmpty()
         val prompt = typed.ifBlank { if (chatWithDocs) "Summarize ${if (uiState.value.chatDocs.size == 1) "this document" else "these documents"}." else if (chatWithPhoto) "What's in this photo?" else "" }
         if (prompt.isBlank() || uiState.value.isBusy || generationInProgress) return
+        idleUnloadJob?.cancel()
         generationInProgress = true
         if (uiState.value.activeKind == CHAT_KIND_ASSISTANT) {
             // First web question: ask before anything goes online, then send.
@@ -1283,6 +1322,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             } finally {
                 generationInProgress = false
                 generationJob = null
+                scheduleIdleUnload()
                 _uiState.update { it.copy(isBusy = false, streamingThinking = null) }
                 refreshContextUsage()
             }
@@ -1551,6 +1591,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             } finally {
                 generationInProgress = false
                 generationJob = null
+                scheduleIdleUnload()
                 _uiState.update { it.copy(isBusy = false, streamingReply = null, streamingThinking = null, liveActivity = emptyList()) }
                 refreshContextUsage()
             }

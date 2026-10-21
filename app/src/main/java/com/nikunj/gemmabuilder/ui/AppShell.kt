@@ -341,6 +341,7 @@ fun OnDeviceApp(
                         onUseImported = { vm.useImportedModel(app, it) },
                         onDeleteImported = { vm.deleteImportedModel(app, it) },
                         onStopRemote = { vm.stopUsingRemoteModel(app) },
+                        onUnload = { vm.unloadModel() },
                         onDismiss = null
                     )
                 }
@@ -366,6 +367,8 @@ fun OnDeviceApp(
             dynamicColor = dynamicColor,
             backendPreference = state.backendPreference,
             speculativeDecodingEnabled = state.speculativeDecodingEnabled,
+            autoUnloadSeconds = state.autoUnloadSeconds,
+            onAutoUnloadSecondsChange = { vm.setAutoUnloadSeconds(app, it) },
             thinkingEnabled = state.thinkingEnabled,
             memories = state.memories,
             memoryEnabled = state.memoryEnabled,

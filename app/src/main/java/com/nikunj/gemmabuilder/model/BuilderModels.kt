@@ -120,6 +120,8 @@ data class BuilderUiState(
     val contextTokens: Int = 16384,
     val backendPreference: String = "gpu",
     val speculativeDecodingEnabled: Boolean = false,
+    /** Seconds without use before the chat model is unloaded; 0 = never. */
+    val autoUnloadSeconds: Int = 60,
     val estimatedFileContextChars: Int = 0,
     val pendingAttachments: List<String> = emptyList(),
     val generationMetrics: String? = null,

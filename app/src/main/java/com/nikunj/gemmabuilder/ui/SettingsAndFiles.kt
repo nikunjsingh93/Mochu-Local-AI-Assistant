@@ -1,5 +1,7 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.AnnotatedString
@@ -74,6 +76,8 @@ fun SettingsScreen(
     dynamicColor: Boolean,
     backendPreference: String,
     speculativeDecodingEnabled: Boolean,
+    autoUnloadSeconds: Int,
+    onAutoUnloadSecondsChange: (Int) -> Unit,
     thinkingEnabled: Boolean,
     memories: List<String>,
     memoryEnabled: Boolean,
@@ -258,6 +262,17 @@ fun SettingsScreen(
                             onCheckedChange = onSpeculativeDecodingChange
                         )
                     }
+                    Text("Unload model when not used for")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        listOf(30 to "30 s", 60 to "1 min", 300 to "5 min", 900 to "15 min", 0 to "Never").forEach { (seconds, label) ->
+                            FilterChip(selected = autoUnloadSeconds == seconds, onClick = { onAutoUnloadSecondsChange(seconds) }, label = { Text(label) })
+                        }
+                    }
+                    Text(
+                        "Frees the phone's memory when you stop chatting. The model loads again with your next message.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically

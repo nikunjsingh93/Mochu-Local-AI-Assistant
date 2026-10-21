@@ -1,5 +1,8 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
@@ -75,6 +78,7 @@ fun ModelDownloadsScreen(
     onUseImported: (String) -> Unit,
     onDeleteImported: (String) -> Unit,
     onStopRemote: () -> Unit,
+    onUnload: () -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
 ) {
@@ -101,6 +105,14 @@ fun ModelDownloadsScreen(
 
     if (onDismiss != null) BackHandler(onBack = onDismiss)
 
+    // Picking a model scrolls back up to the Loaded model section.
+    val scroll = rememberScrollState()
+    val scrollScope = rememberCoroutineScope()
+    var loadedY by remember { mutableIntStateOf(0) }
+    val showLoaded = { scrollScope.launch { kotlinx.coroutines.delay(150); scroll.animateScrollTo(loadedY) }; Unit }
+    val useAndShow: (String) -> Unit = { onUse(it); showLoaded() }
+    val useImportedAndShow: (String) -> Unit = { onUseImported(it); showLoaded() }
+
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
@@ -121,7 +133,7 @@ fun ModelDownloadsScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(scroll),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
@@ -158,8 +170,10 @@ fun ModelDownloadsScreen(
                 // The model in use gets its own section at the top; the other sections keep a fixed order.
                 LoadedModelSection(
                     state = state, ramGb = ramGb, recommended = recommendedId,
-                    onDownload = startDownload, onCancel = onCancel, onUse = onUse, onDelete = { pendingDelete = it },
-                    onContextChange = onContextChange, onUseImported = onUseImported, onDeleteImported = onDeleteImported
+                    onDownload = startDownload, onCancel = onCancel, onUse = useAndShow, onDelete = { pendingDelete = it },
+                    onContextChange = onContextChange, onUseImported = useImportedAndShow, onDeleteImported = onDeleteImported,
+                    onUnload = onUnload,
+                    modifier = Modifier.onGloballyPositioned { loadedY = it.positionInParent().y.toInt() }
                 )
                 val liteRtSection: @Composable () -> Unit = {
                     ModelSection(
@@ -171,10 +185,10 @@ fun ModelDownloadsScreen(
                         recommended = recommendedId,
                         onDownload = startDownload,
                         onCancel = onCancel,
-                        onUse = onUse,
+                        onUse = useAndShow,
                         onDelete = { pendingDelete = it },
                         onContextChange = onContextChange,
-                        onUseImported = onUseImported,
+                        onUseImported = useImportedAndShow,
                         onDeleteImported = onDeleteImported
                     )
                 }
@@ -190,10 +204,10 @@ fun ModelDownloadsScreen(
                         recommended = recommendedId,
                         onDownload = startDownload,
                         onCancel = onCancel,
-                        onUse = onUse,
+                        onUse = useAndShow,
                         onDelete = { pendingDelete = it },
                         onContextChange = onContextChange,
-                        onUseImported = onUseImported,
+                        onUseImported = useImportedAndShow,
                         onDeleteImported = onDeleteImported
                     )
                 }
@@ -248,7 +262,8 @@ private fun ModelSection(
     onUseImported: (String) -> Unit = {},
     onDeleteImported: (String) -> Unit = {},
     /** True for the Loaded model section, which shows the active model instead of skipping it. */
-    showActive: Boolean = false
+    showActive: Boolean = false,
+    onUnload: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -262,7 +277,8 @@ private fun ModelSection(
         contextTokens = state.modelContextTokens[name] ?: 8192,
         onContextChange = { onContextChange(name, it) },
         onUse = { onUseImported(name) },
-        onDelete = { onDeleteImported(name) }
+        onDelete = { onDeleteImported(name) },
+        onUnload = onUnload.takeIf { importedActive(name) }
     )
     // The model in use is shown in the Loaded model section instead (image models stay here).
     models.filterNot { !showActive && !it.isImage && catalogActive(it) }.forEach { model ->
@@ -284,7 +300,8 @@ private fun ModelSection(
             onDownload = { onDownload(model.id) },
             onCancel = { onCancel(model.id) },
             onUse = { onUse(model.id) },
-            onDelete = { onDelete(model) }
+            onDelete = { onDelete(model) },
+            onUnload = onUnload.takeIf { isActive && !model.isImage }
         )
     }
     imported.filter { showActive || !importedActive(it) }.forEach { importedCard(it) }
@@ -302,13 +319,16 @@ private fun LoadedModelSection(
     onDelete: (CatalogModel) -> Unit,
     onContextChange: (String, Int) -> Unit,
     onUseImported: (String) -> Unit,
-    onDeleteImported: (String) -> Unit
+    onDeleteImported: (String) -> Unit,
+    onUnload: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     if (state.remoteModel != null) return
     val path = state.activeModelPath ?: return
     val catalog = MODEL_CATALOG.firstOrNull { !it.isImage && path.endsWith("/${it.fileName}") }
     val imported = state.importedModels.firstOrNull { path.endsWith("/imported/$it") }
     if (catalog == null && imported == null) return
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Text("Loaded model", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     ModelSection(
         title = "",
@@ -317,8 +337,10 @@ private fun LoadedModelSection(
         showActive = true,
         state = state, ramGb = ramGb, recommended = recommended,
         onDownload = onDownload, onCancel = onCancel, onUse = onUse, onDelete = onDelete,
-        onContextChange = onContextChange, onUseImported = onUseImported, onDeleteImported = onDeleteImported
+        onContextChange = onContextChange, onUseImported = onUseImported, onDeleteImported = onDeleteImported,
+        onUnload = onUnload.takeIf { state.gemmaLoaded }
     )
+    }
 }
 
 @Composable
@@ -338,7 +360,8 @@ private fun ModelCard(
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onUse: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onUnload: (() -> Unit)? = null
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -439,6 +462,7 @@ private fun ModelCard(
                     DownloadPhase.Verifying -> Unit
                     DownloadPhase.Downloaded -> {
                         if (!isActive) Button(onClick = onUse) { Text("Use") }
+                        onUnload?.let { OutlinedButton(onClick = it) { Text("Unload") } }
                         DangerOutlinedButton("Delete", onDelete)
                     }
                 }
@@ -649,7 +673,8 @@ private fun ImportedModelCard(
     contextTokens: Int,
     onContextChange: (Int) -> Unit,
     onUse: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onUnload: (() -> Unit)? = null
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     if (confirmDelete) {
@@ -678,6 +703,7 @@ private fun ImportedModelCard(
             ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp), maxTokens = 32768)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!active) Button(onClick = onUse) { Text("Use") }
+                onUnload?.let { OutlinedButton(onClick = it) { Text("Unload") } }
                 DangerOutlinedButton("Delete") { confirmDelete = true }
             }
         }

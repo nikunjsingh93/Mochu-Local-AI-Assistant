@@ -375,3 +375,11 @@ fun importedModelNames(context: Context): List<String> {
         .sortedBy { it.lastModified() }
         .map { it.name }
 }
+
+/** Seconds without use before the chat model is unloaded from memory; 0 keeps it loaded. */
+fun savedAutoUnloadSeconds(context: Context): Int =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getInt("autoUnloadSeconds", 60)
+
+fun saveAutoUnloadSeconds(context: Context, seconds: Int) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putInt("autoUnloadSeconds", seconds).apply()
+}
