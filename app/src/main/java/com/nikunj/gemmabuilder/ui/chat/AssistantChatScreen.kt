@@ -237,8 +237,8 @@ fun AssistantChatScreen(
                     listening -> "Listening…"
                     state.chatDocs.isNotEmpty() -> "Ask about the ${if (state.chatDocs.size == 1) "document" else "documents"}"
                     state.chatImages.isNotEmpty() -> "Ask about the photo"
-                    state.webSearchEnabled -> "Search the web"
-                    else -> "Message"
+                    // Web search shows on the globe button; the box always reads as a chat box.
+                    else -> "Message Mochu…"
                 },
                 onTextChange = onPromptChange,
                 onSend = onSend,

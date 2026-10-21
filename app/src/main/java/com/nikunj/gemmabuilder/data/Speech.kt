@@ -139,6 +139,8 @@ class VoiceInput(context: Context) {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var finishing = false
     private var pendingDeliver: Runnable? = null
+    /** Set when the on-device recognizer lacks this language; the standard one is used from then on. */
+    private var useStandardRecognizer = false
 
     /**
      * Listens until the user stops talking for [PAUSE_BEFORE_SEND_MS]: a pause mid-sentence ends one
@@ -148,7 +150,8 @@ class VoiceInput(context: Context) {
         stop()
         finishing = false
         val said = StringBuilder()
-        val created = if (SpeechRecognizer.isOnDeviceRecognitionAvailable(app)) {
+        val onDevice = !useStandardRecognizer && SpeechRecognizer.isOnDeviceRecognitionAvailable(app)
+        val created = if (onDevice) {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(app)
         } else {
             SpeechRecognizer.createSpeechRecognizer(app)
@@ -185,8 +188,20 @@ class VoiceInput(context: Context) {
                     deliver()
                     return
                 }
+                // Errors 12/13: the offline speech pack for this language isn't installed. Ask Android to
+                // download it, and use the standard recognizer meanwhile.
+                val languageMissing = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                if (languageMissing && onDevice && said.isBlank() && SpeechRecognizer.isRecognitionAvailable(app)) {
+                    if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { created.triggerModelDownload(intent) }
+                    useStandardRecognizer = true
+                    stop()
+                    start(onLevel, onPartial, onFinal, onError)
+                    return
+                }
                 onError(
                     when (error) {
+                        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+                            "Voice input needs the speech pack for your language. Download it in your phone settings (search \"offline speech\" or \"voice input\"), then try again."
                         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Didn't catch that. Tap the mic and try again."
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is needed for voice input."
                         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Voice input needs a speech pack for this language (Settings → Google → Speech)."
