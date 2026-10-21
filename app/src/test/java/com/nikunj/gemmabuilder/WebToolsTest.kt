@@ -181,4 +181,12 @@ class WebToolsTest {
         assertTrue(c.contains("flashback camera"))
         assertEquals("flashback camera", lastSearchQuery(listOf(ActivityStep(ACTIVITY_SEARCH, "Searched \"flashback camera\" · 8 results"))))
     }
+
+    @Test
+    fun parsesBingResults() {
+        val html = javaClass.classLoader!!.getResource("bing-sample.html")!!.readText()
+        val results = parseBingResults(html)
+        assertTrue(results.size >= 3)
+        assertTrue(results.all { it.url.startsWith("http") && !it.url.contains("bing.com") && it.title.isNotBlank() })
+    }
 }

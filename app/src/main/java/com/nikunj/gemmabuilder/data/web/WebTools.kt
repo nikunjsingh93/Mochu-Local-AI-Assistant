@@ -67,8 +67,40 @@ fun searchDuckDuckGo(query: String, limit: Int = 6): List<SearchResult> {
         if (results.isNotEmpty()) return results.take(limit)
         if (isDuckDuckGoBotCheck(html)) blocked = true
     }
+    // DuckDuckGo often asks for a bot check after a few searches from one network: try Bing instead.
+    searchBing(query, limit).takeIf { it.isNotEmpty() }?.let { return it }
     if (blocked) throw SearchBlockedException()
     return emptyList()
+}
+
+/** Keyless search through Bing's results page, used when DuckDuckGo gives nothing. */
+fun searchBing(query: String, limit: Int = 6): List<SearchResult> = runCatching {
+    val html = Jsoup.connect("https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8"))
+        .userAgent(WEB_USER_AGENT)
+        .timeout(12_000)
+        .ignoreHttpErrors(true)
+        .execute()
+        .body()
+    parseBingResults(html).take(limit)
+}.getOrDefault(emptyList())
+
+fun parseBingResults(html: String): List<SearchResult> =
+    Jsoup.parse(html).select("li.b_algo").mapNotNull { item ->
+        // The title link is either inside the h2 or wraps it.
+        val link = item.selectFirst("h2 a[href], a[href]:has(h2)") ?: return@mapNotNull null
+        val url = unwrapBingUrl(link.attr("href")) ?: return@mapNotNull null
+        val title = (item.selectFirst("h2")?.text() ?: link.text()).trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        SearchResult(title, url, item.selectFirst("p, .b_caption p, .b_lineclamp2")?.text()?.trim().orEmpty())
+    }.distinctBy { it.url }
+
+/** Bing wraps result links as bing.com/ck/a?...&u=a1<base64url of the URL>; returns the real URL. */
+fun unwrapBingUrl(href: String): String? {
+    val raw = href.replace("&amp;", "&")
+    val encoded = Regex("""[?&]u=a1([^&]+)""").find(raw)?.groupValues?.get(1)
+    val url = encoded?.let {
+        runCatching { String(java.util.Base64.getUrlDecoder().decode(it.padEnd((it.length + 3) / 4 * 4, '=')), Charsets.UTF_8) }.getOrNull()
+    } ?: raw
+    return url.takeIf { (it.startsWith("http://") || it.startsWith("https://")) && !it.contains("bing.com/") }
 }
 
 fun isDuckDuckGoBotCheck(html: String): Boolean =

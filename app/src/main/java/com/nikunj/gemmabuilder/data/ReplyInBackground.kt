@@ -32,7 +32,21 @@ class ReplyKeepAliveService : Service() {
             .setOngoing(true)
             .build()
         runCatching { startForeground(NOTIFICATION_WORKING, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) }
+        instance = this
+        // The reply may have ended while the service was starting.
+        if (stopWanted) stopNow()
         return START_NOT_STICKY
+    }
+
+    private fun stopNow() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        instance = null
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
     }
 
     companion object {
@@ -41,14 +55,30 @@ class ReplyKeepAliveService : Service() {
         private const val NOTIFICATION_WORKING = 7320
         private const val NOTIFICATION_DONE = 7321
 
-        /** Called as a reply starts (the app is in front then, so the service may start). */
+        @Volatile private var instance: ReplyKeepAliveService? = null
+        @Volatile private var stopWanted = false
+        private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        private var pendingStart: Runnable? = null
+
+        /** Called as a reply starts; the notification only appears if it takes more than a moment. */
         fun started(context: Context) {
-            runCatching { context.startForegroundService(Intent(context, ReplyKeepAliveService::class.java)) }
+            stopWanted = false
+            val app = context.applicationContext
+            val start = Runnable {
+                pendingStart = null
+                // Only while the app is on screen: Android doesn't allow starting it from the background.
+                if (AppVisibility.visible) runCatching { app.startForegroundService(Intent(app, ReplyKeepAliveService::class.java)) }
+            }
+            pendingStart = start
+            handler.postDelayed(start, 1_500)
         }
 
         /** Called when the reply ends; posts "reply ready" when the user has left the app. */
         fun finished(context: Context, chatId: String?, preview: String?) {
-            runCatching { context.stopService(Intent(context, ReplyKeepAliveService::class.java)) }
+            pendingStart?.let(handler::removeCallbacks)
+            pendingStart = null
+            stopWanted = true
+            handler.post { instance?.stopNow() }
             if (AppVisibility.visible || preview.isNullOrBlank()) return
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(CHANNEL_DONE, "Finished replies", NotificationManager.IMPORTANCE_DEFAULT))
