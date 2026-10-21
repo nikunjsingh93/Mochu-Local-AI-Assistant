@@ -338,8 +338,8 @@ fun OnDeviceApp(
                         onKvCacheTypeChange = { vm.setKvCacheType(app, it) },
                         onImageSettingsChange = { file, options -> vm.setImageSettings(app, file, options) },
                         onUseRemote = { vm.useRemoteModel(app, it) },
-                        onUseImported = { vm.useImportedModel(app) },
-                        onDeleteImported = { vm.deleteImportedModel(app) },
+                        onUseImported = { vm.useImportedModel(app, it) },
+                        onDeleteImported = { vm.deleteImportedModel(app, it) },
                         onStopRemote = { vm.stopUsingRemoteModel(app) },
                         onDismiss = null
                     )

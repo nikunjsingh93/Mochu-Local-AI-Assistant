@@ -294,13 +294,13 @@ class BuilderViewModel : ViewModel() {
             model.id to (live[model.id] ?: storedDownloadState(appContext, model))
         }
         val contexts = MODEL_CATALOG.associate { it.fileName to savedModelContextTokens(appContext, it.fileName) } +
-            listOfNotNull(savedImportedModelName(appContext)).associateWith { savedModelContextTokens(appContext, it) }
+            importedModelNames(appContext).associateWith { savedModelContextTokens(appContext, it) }
         val imageSettings = MODEL_CATALOG.filter { it.isImage }.associate { it.fileName to savedImageSettings(appContext, it) }
         _uiState.update {
             it.copy(
                 modelDownloads = states, activeModelPath = if (remoteModelActive(appContext)) null else savedActiveModelPath(appContext), modelContextTokens = contexts,
                 remoteModel = savedRemoteModelConfig(appContext)?.takeIf { remoteModelActive(appContext) },
-                importedModelName = savedImportedModelName(appContext),
+                importedModels = importedModelNames(appContext),
                 activeImageModelId = activeImageModel(appContext)?.id, imageSettings = imageSettings
             )
         }
@@ -594,12 +594,13 @@ class BuilderViewModel : ViewModel() {
             sessionFingerprint = null
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    copyModel(context.contentResolver, uri, modelFileFor(context, importedName))
+                    // Each import keeps its own file, next to earlier ones.
+                    importedModelNames(context)
+                    val target = importedModelFile(context, importedName)
+                    copyModel(context.contentResolver, uri, target)
                     saveModelName(context, importedName)
-                    saveImportedModelName(context, importedName)
-                    saveActiveModelPath(context, null)
+                    saveActiveModelPath(context, target.absolutePath)
                     setRemoteModelActive(context, false)
-                    deleteOtherModelFormats(context, importedName)
                 }
             }
             _uiState.update {
@@ -614,9 +615,9 @@ class BuilderViewModel : ViewModel() {
                         gemmaLoaded = false,
                         engineLabel = "Not loaded",
                         messages = it.messages + ChatMessage("assistant", "$importedName imported. Send a message to load it automatically."),
-                        activeModelPath = null,
+                        activeModelPath = importedModelFile(context, importedName).absolutePath,
                         remoteModel = null,
-                        importedModelName = importedName,
+                        importedModels = importedModelNames(context),
                         status = "$importedName imported. Type a message and tap Send to auto-load."
                     )
                 } else {
@@ -723,45 +724,48 @@ class BuilderViewModel : ViewModel() {
     }
 
     /** Deletes the imported model; if it was in use, switches to a downloaded model when there is one. */
-    fun deleteImportedModel(context: Context) {
+    fun deleteImportedModel(context: Context, name: String) {
         if (generationInProgress || uiState.value.isBusy) return
         val appContext = context.applicationContext
-        val name = savedImportedModelName(appContext) ?: return
-        val wasActive = savedModelName(appContext) == name && savedActiveModelPath(appContext) == null && !remoteModelActive(appContext)
+        val file = importedModelFile(appContext, name)
+        val wasActive = savedActiveModelPath(appContext) == file.absolutePath && !remoteModelActive(appContext)
         if (wasActive) {
             engine.close()
             engine = DemoBuilderEngine()
             sessionFingerprint = null
         }
-        modelFileFor(appContext, name).delete()
-        appContext.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().remove("importedModelName").apply()
+        file.delete()
         if (wasActive) {
             val next = MODEL_CATALOG.firstOrNull { !it.isImage && !it.hidden && downloadedModelFile(appContext, it).exists() }
+            val otherImport = importedModelNames(appContext).firstOrNull()
             if (next != null) {
                 useDownloadedModel(appContext, next.id)
+            } else if (otherImport != null) {
+                useImportedModel(appContext, otherImport)
             } else {
+                saveActiveModelPath(appContext, null)
                 _uiState.update { it.copy(modelReady = false, gemmaLoaded = false, engineLabel = "Not loaded", status = "Deleted $name. Download a model to keep chatting.") }
             }
         }
-        _uiState.update { it.copy(importedModelName = null, status = "Deleted $name.") }
+        _uiState.update { it.copy(importedModels = importedModelNames(appContext), status = "Deleted $name.") }
         refreshModelDownloads(appContext)
     }
 
     /** Switches back to the model imported from a file. */
-    fun useImportedModel(context: Context) {
+    fun useImportedModel(context: Context, name: String) {
         if (generationInProgress || uiState.value.isBusy) return
         val appContext = context.applicationContext
-        val name = savedImportedModelName(appContext) ?: return
+        val file = importedModelFile(appContext, name).takeIf { it.exists() } ?: return
         engine.close()
         engine = DemoBuilderEngine()
         sessionFingerprint = null
         refreshContextUsage()
         saveModelName(appContext, name)
-        saveActiveModelPath(appContext, null)
+        saveActiveModelPath(appContext, file.absolutePath)
         setRemoteModelActive(appContext, false)
         _uiState.update {
             it.copy(
-                modelName = name, modelReady = true, gemmaLoaded = false, engineLabel = "Not loaded", activeModelPath = null, remoteModel = null,
+                modelName = name, modelReady = true, gemmaLoaded = false, engineLabel = "Not loaded", activeModelPath = file.absolutePath, remoteModel = null,
                 modelSupportsMultimodal = isLikelyMultimodalModel(name), status = "$name selected. Send a message to load it."
             )
         }

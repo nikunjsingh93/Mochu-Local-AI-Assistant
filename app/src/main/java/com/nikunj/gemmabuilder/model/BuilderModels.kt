@@ -174,8 +174,8 @@ data class BuilderUiState(
     val imageGenerating: Boolean = false,
     /** The model on the user's own server, when Chat and Code use it instead of the phone's. */
     val remoteModel: RemoteModelConfig? = null,
-    /** The model imported from a file, if there is one. */
-    val importedModelName: String? = null,
+    /** Models imported from files (file names). */
+    val importedModels: List<String> = emptyList(),
     /** Image model Chat uses, and each image model's size and steps (file name → size to steps). */
     val activeImageModelId: String? = null,
     val imageSettings: Map<String, ImageOptions> = emptyMap(),

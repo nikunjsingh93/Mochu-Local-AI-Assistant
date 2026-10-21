@@ -72,8 +72,8 @@ fun ModelDownloadsScreen(
     onKvCacheTypeChange: (KvCacheType) -> Unit,
     onImageSettingsChange: (String, ImageOptions) -> Unit,
     onUseRemote: (RemoteModelConfig) -> Unit,
-    onUseImported: () -> Unit,
-    onDeleteImported: () -> Unit,
+    onUseImported: (String) -> Unit,
+    onDeleteImported: (String) -> Unit,
     onStopRemote: () -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
@@ -155,43 +155,45 @@ fun ModelDownloadsScreen(
                 OutlinedButton(onClick = onImportFile, modifier = Modifier.fillMaxWidth()) {
                     Text("Import a .litertlm or .gguf file")
                 }
-                state.importedModelName?.let { name ->
-                    ImportedModelCard(
-                        name,
-                        active = state.remoteModel == null && state.activeModelPath == null && state.modelName == name,
-                        contextTokens = state.modelContextTokens[name] ?: 8192,
-                        onContextChange = { onContextChange(name, it) },
-                        onUse = onUseImported,
-                        onDelete = onDeleteImported
+                // The section holding the model in use comes first.
+                val ggufActive = isGgufModel(state.modelName) && state.remoteModel == null
+                val liteRtSection: @Composable () -> Unit = {
+                    ModelSection(
+                        title = "LiteRT · fastest, runs on GPU",
+                        models = MODEL_CATALOG.filter { !it.isGguf && !it.hidden && !it.isImage },
+                        imported = state.importedModels.filterNot(::isGgufModel),
+                        state = state,
+                        ramGb = ramGb,
+                        recommended = recommendedId,
+                        onDownload = startDownload,
+                        onCancel = onCancel,
+                        onUse = onUse,
+                        onDelete = { pendingDelete = it },
+                        onContextChange = onContextChange,
+                        onUseImported = onUseImported,
+                        onDeleteImported = onDeleteImported
                     )
                 }
-
-                ModelSection(
-                    title = "LiteRT · fastest, runs on GPU",
-                    models = MODEL_CATALOG.filter { !it.isGguf && !it.hidden && !it.isImage },
-                    state = state,
-                    ramGb = ramGb,
-                    recommended = recommendedId,
-                    onDownload = startDownload,
-                    onCancel = onCancel,
-                    onUse = onUse,
-                    onDelete = { pendingDelete = it },
-                    onContextChange = onContextChange
-                )
-                Text("GGUF · llama.cpp, runs on CPU", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                KvCacheChoice(state.kvCacheType, onKvCacheTypeChange)
-                ModelSection(
-                    title = "",
-                    models = MODEL_CATALOG.filter { it.isGguf && !it.hidden && !it.isImage },
-                    state = state,
-                    ramGb = ramGb,
-                    recommended = recommendedId,
-                    onDownload = startDownload,
-                    onCancel = onCancel,
-                    onUse = onUse,
-                    onDelete = { pendingDelete = it },
-                    onContextChange = onContextChange
-                )
+                val ggufSection: @Composable () -> Unit = {
+                    Text("GGUF · llama.cpp, runs on CPU", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    KvCacheChoice(state.kvCacheType, onKvCacheTypeChange)
+                    ModelSection(
+                        title = "",
+                        models = MODEL_CATALOG.filter { it.isGguf && !it.hidden && !it.isImage },
+                        imported = state.importedModels.filter(::isGgufModel),
+                        state = state,
+                        ramGb = ramGb,
+                        recommended = recommendedId,
+                        onDownload = startDownload,
+                        onCancel = onCancel,
+                        onUse = onUse,
+                        onDelete = { pendingDelete = it },
+                        onContextChange = onContextChange,
+                        onUseImported = onUseImported,
+                        onDeleteImported = onDeleteImported
+                    )
+                }
+                if (ggufActive) { ggufSection(); liteRtSection() } else { liteRtSection(); ggufSection() }
                 ModelSection(
                     title = "Image generation · runs on CPU",
                     models = MODEL_CATALOG.filter { it.isImage },
@@ -236,12 +238,29 @@ private fun ModelSection(
     onUse: (String) -> Unit,
     onDelete: (CatalogModel) -> Unit,
     onContextChange: (String, Int) -> Unit,
-    onImageSettingsChange: (String, ImageOptions) -> Unit = { _, _ -> }
+    onImageSettingsChange: (String, ImageOptions) -> Unit = { _, _ -> },
+    imported: List<String> = emptyList(),
+    onUseImported: (String) -> Unit = {},
+    onDeleteImported: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-    models.forEach { model ->
-        val isActive = if (model.isImage) state.activeImageModelId == model.id else state.activeModelPath?.endsWith("/${model.fileName}") == true
+    fun catalogActive(model: CatalogModel) =
+        if (model.isImage) state.activeImageModelId == model.id else state.remoteModel == null && state.activeModelPath?.endsWith("/${model.fileName}") == true
+    fun importedActive(name: String) = state.remoteModel == null && state.activeModelPath?.endsWith("/imported/$name") == true
+    @Composable
+    fun importedCard(name: String) = ImportedModelCard(
+        name,
+        active = importedActive(name),
+        contextTokens = state.modelContextTokens[name] ?: 8192,
+        onContextChange = { onContextChange(name, it) },
+        onUse = { onUseImported(name) },
+        onDelete = { onDeleteImported(name) }
+    )
+    // The model in use comes first, then the catalog, then other imported models.
+    imported.filter(::importedActive).forEach { importedCard(it) }
+    models.sortedByDescending(::catalogActive).forEach { model ->
+        val isActive = catalogActive(model)
         ModelCard(
             model = model,
             download = state.modelDownloads[model.id] ?: ModelDownloadState(),
@@ -262,6 +281,7 @@ private fun ModelSection(
             onDelete = { onDelete(model) }
         )
     }
+    imported.filterNot(::importedActive).forEach { importedCard(it) }
 }
 
 @Composable

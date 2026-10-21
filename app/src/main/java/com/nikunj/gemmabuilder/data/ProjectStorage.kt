@@ -351,11 +351,28 @@ fun thinkingBudget(level: Int): Int = when (level) {
 /** True when there is a model to answer with: on the phone, or the user's own server. */
 fun modelAvailable(context: Context): Boolean = remoteModelActive(context) || modelFile(context).exists()
 
-/** The name of the model imported from a file (one at a time), or null. */
-fun savedImportedModelName(context: Context): String? =
-    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("importedModelName", null)
-        ?.takeIf { modelFileFor(context, it).exists() }
+fun importedModelsDir(context: Context): File = File(context.filesDir, "models/imported")
 
-fun saveImportedModelName(context: Context, name: String) {
-    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("importedModelName", name).apply()
+/** Where an imported model with this file name is kept. */
+fun importedModelFile(context: Context, name: String): File = File(importedModelsDir(context), name.replace(Regex("""[\\/:*?"<>|]"""), "_"))
+
+/**
+ * Names of every imported model. Versions before 1.9.3 kept one imported model per format in a fixed
+ * slot; that file is moved into the folder (and stays selected if it was).
+ */
+fun importedModelNames(context: Context): List<String> {
+    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    prefs.getString("importedModelName", null)?.let { legacy ->
+        val old = modelFileFor(context, legacy)
+        if (old.exists()) {
+            val target = importedModelFile(context, legacy).apply { parentFile?.mkdirs() }
+            val wasActive = savedActiveModelPath(context) == null && savedLocalModelName(context) == legacy
+            if (old.renameTo(target) && wasActive) saveActiveModelPath(context, target.absolutePath)
+        }
+        prefs.edit().remove("importedModelName").apply()
+    }
+    return importedModelsDir(context).listFiles().orEmpty()
+        .filter { it.isFile && (isGgufModel(it.name) || it.name.lowercase(Locale.US).endsWith(".litertlm")) }
+        .sortedBy { it.lastModified() }
+        .map { it.name }
 }
