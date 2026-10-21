@@ -102,4 +102,12 @@ class TasksTest {
         assertEquals("Search the web latest sales on electronics", c?.request)
         assertEquals(at(19, 19, 48), c?.at)
     }
+
+    @Test
+    fun dottedTimesAndScheduleWording() {
+        val c = taskCommandFrom("schedule a task that i want tech news today at 11.45pm today give me a summary", now) as? TaskCommand.Assistant
+        assertEquals(at(19, 23, 45), c?.at)
+        assertTrue(c?.request.orEmpty().startsWith("Tech news"))
+        assertEquals(at(19, 19, 30), (taskCommandFrom("remind me at 7.30pm to call mom", now) as? TaskCommand.Reminder)?.at)
+    }
 }

@@ -193,12 +193,13 @@ fun parseDuration(text: String): Long? {
 }
 
 private val inRegex = Regex("""\bin\s+((?:$NUM\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\s*(?:and\s+)?)+)""", RegexOption.IGNORE_CASE)
-private val atRegex = Regex("""\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?=\W|$)|\bat\s+(\d{1,2})(?::(\d{2}))?\b|\bat\s+(noon|midnight)\b""", RegexOption.IGNORE_CASE)
+// "11:45pm" or "11.45pm"; the lookbehind keeps "11.45" from being read as 45 o'clock.
+private val atRegex = Regex("""(?<![\d.:])\b(?:at\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?=\W|$)|\bat\s+(\d{1,2})(?:[:.](\d{2}))?\b|\bat\s+(noon|midnight)\b""", RegexOption.IGNORE_CASE)
 // Typos are common on phone keyboards: "eveyday", "everday", "evryday", "evey day".
 private val dailyRegex = Regex("""\b(ev[a-z]{0,4}\s*day|daily|each\s+day|ev[a-z]{0,4}\s+(?:morning|evening|night))\b""", RegexOption.IGNORE_CASE)
 /** A time or delay that ends the message, as in "summarize tech news at 8am" or "... in 2 hours". */
 private val timeAtEnd = Regex(
-    """(?:\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.?|p\.m\.?)?|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)|\bin\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)|\btomorrow(?:\s+morning)?)(?:\s+(?:today|tonight|tomorrow|this\s+(?:morning|afternoon|evening)))?\s*[.!?]*$""",
+    """(?:\bat\s+\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|a\.m\.?|p\.m\.?)?|\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|\bin\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)|\btomorrow(?:\s+morning)?)(?:\s+(?:today|tonight|tomorrow|this\s+(?:morning|afternoon|evening)))?\s*[.!?]*$""",
     RegexOption.IGNORE_CASE
 )
 private val tomorrowRegex = Regex("""\btomorrow\b""", RegexOption.IGNORE_CASE)
@@ -298,6 +299,8 @@ fun taskCommandFrom(message: String, now: ZonedDateTime = ZonedDateTime.now()): 
                 // "... and notify me", "... and let me know": the notification does that anyway.
                 .replace(Regex("""\s*(?:,|and)?\s*(?:notify|alert|ping|tell|message)\s+me(?:\s+(?:about\s+it|with\s+it))?\s*$""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""\s*(?:,|and)?\s*let\s+me\s+know\s*$""", RegexOption.IGNORE_CASE), "")
+                // "schedule a task that I want …": the scheduling words aren't part of the request.
+                .replace(Regex("""^\s*(?:a\s+|an\s+)?(?:task|job)?\s*(?:that|to|for|so)?\s*(?:i\s+(?:want|need|would\s+like)\s+(?:you\s+)?(?:to\s+)?)?""", RegexOption.IGNORE_CASE), "")
         )
         // "Every night at 9pm <anything>" is clearly a scheduled request; a one-off time needs a task-like verb.
         if (request.length >= 4 && (parsed.daily || assistantVerbs.containsMatchIn(request))) {
