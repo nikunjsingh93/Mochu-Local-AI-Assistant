@@ -304,8 +304,7 @@ fun saveProjectName(context: Context, projectKey: String, name: String?) {
 /** Number types a GGUF model can keep its context (KV cache) in, with their size relative to F16. */
 enum class KvCacheType(val label: String, val ratio: Double) {
     F16("F16", 1.0),
-    Q8_0("Q8_0", 34.0 / 64.0), // 32 values in 34 bytes; F16 takes 64
-    Q4_0("Q4_0", 18.0 / 64.0)
+    Q8_0("Q8_0", 34.0 / 64.0) // 32 values in 34 bytes; F16 takes 64
 }
 
 fun savedKvCacheType(context: Context): KvCacheType {

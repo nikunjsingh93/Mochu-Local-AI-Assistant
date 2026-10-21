@@ -474,7 +474,7 @@ private fun HistoryDrawer(
                                 IconButton(onClick = { onNewInProject(projectKey) }, enabled = !state.isBusy) {
                                     Icon(Icons.Rounded.Add, contentDescription = "New chat in this project", modifier = Modifier.size(20.dp))
                                 }
-                                IconButton(onClick = { pendingDeleteProject = projectKey to name }, enabled = !state.isBusy) {
+                                IconButton(onClick = { pendingDeleteProject = projectKey to name }, enabled = !state.isBusy || chats.none { it.id == state.activeConversationId }) {
                                     Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete project", modifier = Modifier.size(20.dp))
                                 }
                             }
@@ -495,7 +495,7 @@ private fun HistoryDrawer(
                                             Icon(Icons.Outlined.Edit, contentDescription = "Rename chat", modifier = Modifier.size(18.dp))
                                         }
                                         if (chats.size > 1) {
-                                            IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
+                                            IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy || chat.id != state.activeConversationId) {
                                                 Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete chat", modifier = Modifier.size(18.dp))
                                             }
                                         }
@@ -528,7 +528,7 @@ private fun HistoryDrawer(
                                 IconButton(onClick = { pendingRenameChat = chat }) {
                                     Icon(Icons.Outlined.Edit, contentDescription = "Rename chat", modifier = Modifier.size(18.dp))
                                 }
-                                IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy) {
+                                IconButton(onClick = { pendingDelete = chat }, enabled = !state.isBusy || chat.id != state.activeConversationId) {
                                     Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete", modifier = Modifier.size(20.dp))
                                 }
                             }

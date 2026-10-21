@@ -155,8 +155,12 @@ fun ModelDownloadsScreen(
                 OutlinedButton(onClick = onImportFile, modifier = Modifier.fillMaxWidth()) {
                     Text("Import a .litertlm or .gguf file")
                 }
-                // The section holding the model in use comes first.
-                val ggufActive = isGgufModel(state.modelName) && state.remoteModel == null
+                // The model in use gets its own section at the top; the other sections keep a fixed order.
+                LoadedModelSection(
+                    state = state, ramGb = ramGb, recommended = recommendedId,
+                    onDownload = startDownload, onCancel = onCancel, onUse = onUse, onDelete = { pendingDelete = it },
+                    onContextChange = onContextChange, onUseImported = onUseImported, onDeleteImported = onDeleteImported
+                )
                 val liteRtSection: @Composable () -> Unit = {
                     ModelSection(
                         title = "LiteRT · fastest, runs on GPU",
@@ -193,7 +197,8 @@ fun ModelDownloadsScreen(
                         onDeleteImported = onDeleteImported
                     )
                 }
-                if (ggufActive) { ggufSection(); liteRtSection() } else { liteRtSection(); ggufSection() }
+                liteRtSection()
+                ggufSection()
                 ModelSection(
                     title = "Image generation · runs on CPU",
                     models = MODEL_CATALOG.filter { it.isImage },
@@ -241,7 +246,9 @@ private fun ModelSection(
     onImageSettingsChange: (String, ImageOptions) -> Unit = { _, _ -> },
     imported: List<String> = emptyList(),
     onUseImported: (String) -> Unit = {},
-    onDeleteImported: (String) -> Unit = {}
+    onDeleteImported: (String) -> Unit = {},
+    /** True for the Loaded model section, which shows the active model instead of skipping it. */
+    showActive: Boolean = false
 ) {
     val context = LocalContext.current
     if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -257,9 +264,8 @@ private fun ModelSection(
         onUse = { onUseImported(name) },
         onDelete = { onDeleteImported(name) }
     )
-    // The model in use comes first, then the catalog, then other imported models.
-    imported.filter(::importedActive).forEach { importedCard(it) }
-    models.sortedByDescending(::catalogActive).forEach { model ->
+    // The model in use is shown in the Loaded model section instead (image models stay here).
+    models.filterNot { !showActive && !it.isImage && catalogActive(it) }.forEach { model ->
         val isActive = catalogActive(model)
         ModelCard(
             model = model,
@@ -281,7 +287,38 @@ private fun ModelSection(
             onDelete = { onDelete(model) }
         )
     }
-    imported.filterNot(::importedActive).forEach { importedCard(it) }
+    imported.filter { showActive || !importedActive(it) }.forEach { importedCard(it) }
+}
+
+/** The chat model in use, on its own at the top of the Models page. */
+@Composable
+private fun LoadedModelSection(
+    state: BuilderUiState,
+    ramGb: Double,
+    recommended: String,
+    onDownload: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onUse: (String) -> Unit,
+    onDelete: (CatalogModel) -> Unit,
+    onContextChange: (String, Int) -> Unit,
+    onUseImported: (String) -> Unit,
+    onDeleteImported: (String) -> Unit
+) {
+    if (state.remoteModel != null) return
+    val path = state.activeModelPath ?: return
+    val catalog = MODEL_CATALOG.firstOrNull { !it.isImage && path.endsWith("/${it.fileName}") }
+    val imported = state.importedModels.firstOrNull { path.endsWith("/imported/$it") }
+    if (catalog == null && imported == null) return
+    Text("Loaded model", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    ModelSection(
+        title = "",
+        models = listOfNotNull(catalog),
+        imported = listOfNotNull(imported),
+        showActive = true,
+        state = state, ramGb = ramGb, recommended = recommended,
+        onDownload = onDownload, onCancel = onCancel, onUse = onUse, onDelete = onDelete,
+        onContextChange = onContextChange, onUseImported = onUseImported, onDeleteImported = onDeleteImported
+    )
 }
 
 @Composable
@@ -438,7 +475,7 @@ private fun KvCacheChoice(current: KvCacheType, onChange: (KvCacheType) -> Unit)
             }
         }
         Text(
-            "How a GGUF model stores the chat it is reading. Q8_0 takes about half the memory of F16 with almost no change in answers; Q4_0 takes about a quarter, so very long chats fit, but answers can get a little worse.",
+            "How a GGUF model stores the chat it is reading. Q8_0 takes about half the memory of F16 with almost no change in answers, so longer chats fit.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

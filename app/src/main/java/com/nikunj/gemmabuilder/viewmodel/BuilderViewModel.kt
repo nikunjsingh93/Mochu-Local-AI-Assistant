@@ -470,7 +470,14 @@ class BuilderViewModel : ViewModel() {
 
     fun deleteConversation(context: Context, id: String) {
         if (generationInProgress || uiState.value.isBusy) {
-            _uiState.update { it.copy(status = "Wait for the model to finish before deleting a chat.") }
+            // While a reply is being written, other chats and projects can still go.
+            val active = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
+            val target = conversations.firstOrNull { it.id == id } ?: return
+            if (id == active?.id) {
+                _uiState.update { it.copy(status = "Wait for the model to finish before deleting this chat.") }
+                return
+            }
+            removeIdleConversation(context, target, keepProjectFiles = target.projectKey == active?.projectKey)
             return
         }
         val deleted = conversations.firstOrNull { it.id == id } ?: return
@@ -2116,10 +2123,28 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
     }
 
     /** Deletes a Code project: all its chats and its files. */
+    /** Removes a chat that isn't open, without touching the open chat (used while a reply is running). */
+    private fun removeIdleConversation(context: Context, chat: ChatConversation, keepProjectFiles: Boolean) {
+        conversations = conversations.filterNot { it.id == chat.id }.toMutableList()
+        File(chatsRoot(context), "${chat.id}.chat").delete()
+        if (!keepProjectFiles && conversations.none { it.projectKey == chat.projectKey }) {
+            File(projectsRoot(context), chat.projectKey).deleteRecursively()
+            saveProjectName(context, chat.projectKey, null)
+        }
+        _uiState.update { it.copy(conversations = conversationInfos(), projectNames = savedProjectNames(context)) }
+    }
+
     fun deleteProject(context: Context, projectKey: String) {
-        if (generationInProgress || uiState.value.isBusy) return
         val chats = conversations.filter { it.projectKey == projectKey }
         if (chats.isEmpty()) return
+        if (generationInProgress || uiState.value.isBusy) {
+            if (chats.any { it.id == uiState.value.activeConversationId }) {
+                _uiState.update { it.copy(status = "Wait for the model to finish before deleting this project.") }
+                return
+            }
+            chats.forEach { removeIdleConversation(context, it, keepProjectFiles = false) }
+            return
+        }
         val keepActive = uiState.value.activeConversationId.let { id -> chats.none { it.id == id } }
         chats.drop(1).forEach { chat ->
             conversations = conversations.filterNot { it.id == chat.id }.toMutableList()

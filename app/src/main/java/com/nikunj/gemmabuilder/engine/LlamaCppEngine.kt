@@ -29,7 +29,7 @@ internal object LlamaCppNative {
     }
 
     external fun nativeInitBackends(nativeLibraryDir: String): String
-    /** [kvType]: 0 F16, 1 Q8_0, 2 Q4_0. */
+    /** [kvType]: 0 F16, 1 Q8_0. */
     external fun nativeLoad(modelPath: String, nCtx: Int, nThreads: Int, kvType: Int): Long
     /** {bytes per token, fixed bytes} of the KV cache llama.cpp allocated at load. */
     external fun nativeKvBytes(handle: Long): LongArray

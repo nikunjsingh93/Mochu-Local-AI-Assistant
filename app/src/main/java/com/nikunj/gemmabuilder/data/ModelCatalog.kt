@@ -86,19 +86,6 @@ val MODEL_CATALOG = listOf(
         summary = "Tiny and very fast. Fine for simple pages and quick questions."
     ),
     CatalogModel(
-        id = "qwen2.5-coder-1.5b-gguf",
-        name = "Qwen2.5 Coder 1.5B",
-        engine = "GGUF",
-        repo = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
-        revision = "f86cb2c1fa58255f8052cc32aeede1b7482d4361",
-        fileName = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-        maxContext = 32768, kvBytesPerToken = 28_672L,
-        sizeBytes = 1_117_320_768,
-        sha256 = "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
-        minRamGb = 4,
-        summary = "Trained for code. Small enough to be quick on the CPU."
-    ),
-    CatalogModel(
         id = "lfm2.5-1.2b-gguf",
         name = "LFM2.5 1.2B",
         engine = "GGUF",
