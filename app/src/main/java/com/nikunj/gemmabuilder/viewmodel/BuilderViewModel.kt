@@ -293,7 +293,8 @@ class BuilderViewModel : ViewModel() {
         val states = MODEL_CATALOG.associate { model ->
             model.id to (live[model.id] ?: storedDownloadState(appContext, model))
         }
-        val contexts = MODEL_CATALOG.associate { it.fileName to savedModelContextTokens(appContext, it.fileName) }
+        val contexts = MODEL_CATALOG.associate { it.fileName to savedModelContextTokens(appContext, it.fileName) } +
+            listOfNotNull(savedImportedModelName(appContext)).associateWith { savedModelContextTokens(appContext, it) }
         val imageSettings = MODEL_CATALOG.filter { it.isImage }.associate { it.fileName to savedImageSettings(appContext, it) }
         _uiState.update {
             it.copy(
@@ -719,6 +720,31 @@ class BuilderViewModel : ViewModel() {
 
     fun loadGemma(context: Context) {
         viewModelScope.launch { loadGemmaInternal(context.applicationContext) }
+    }
+
+    /** Deletes the imported model; if it was in use, switches to a downloaded model when there is one. */
+    fun deleteImportedModel(context: Context) {
+        if (generationInProgress || uiState.value.isBusy) return
+        val appContext = context.applicationContext
+        val name = savedImportedModelName(appContext) ?: return
+        val wasActive = savedModelName(appContext) == name && savedActiveModelPath(appContext) == null && !remoteModelActive(appContext)
+        if (wasActive) {
+            engine.close()
+            engine = DemoBuilderEngine()
+            sessionFingerprint = null
+        }
+        modelFileFor(appContext, name).delete()
+        appContext.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().remove("importedModelName").apply()
+        if (wasActive) {
+            val next = MODEL_CATALOG.firstOrNull { !it.isImage && !it.hidden && downloadedModelFile(appContext, it).exists() }
+            if (next != null) {
+                useDownloadedModel(appContext, next.id)
+            } else {
+                _uiState.update { it.copy(modelReady = false, gemmaLoaded = false, engineLabel = "Not loaded", status = "Deleted $name. Download a model to keep chatting.") }
+            }
+        }
+        _uiState.update { it.copy(importedModelName = null, status = "Deleted $name.") }
+        refreshModelDownloads(appContext)
     }
 
     /** Switches back to the model imported from a file. */

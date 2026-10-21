@@ -339,6 +339,7 @@ fun OnDeviceApp(
                         onImageSettingsChange = { file, options -> vm.setImageSettings(app, file, options) },
                         onUseRemote = { vm.useRemoteModel(app, it) },
                         onUseImported = { vm.useImportedModel(app) },
+                        onDeleteImported = { vm.deleteImportedModel(app) },
                         onStopRemote = { vm.stopUsingRemoteModel(app) },
                         onDismiss = null
                     )

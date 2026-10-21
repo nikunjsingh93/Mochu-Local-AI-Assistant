@@ -73,6 +73,7 @@ fun ModelDownloadsScreen(
     onImageSettingsChange: (String, ImageOptions) -> Unit,
     onUseRemote: (RemoteModelConfig) -> Unit,
     onUseImported: () -> Unit,
+    onDeleteImported: () -> Unit,
     onStopRemote: () -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
@@ -155,7 +156,14 @@ fun ModelDownloadsScreen(
                     Text("Import a .litertlm or .gguf file")
                 }
                 state.importedModelName?.let { name ->
-                    ImportedModelCard(name, active = state.remoteModel == null && state.activeModelPath == null && state.modelName == name, onUse = onUseImported)
+                    ImportedModelCard(
+                        name,
+                        active = state.remoteModel == null && state.activeModelPath == null && state.modelName == name,
+                        contextTokens = state.modelContextTokens[name] ?: 8192,
+                        onContextChange = { onContextChange(name, it) },
+                        onUse = onUseImported,
+                        onDelete = onDeleteImported
+                    )
                 }
 
                 ModelSection(
@@ -578,7 +586,24 @@ fun CapabilityBadges(caps: List<ModelCapability>) {
 
 /** The model imported from a file, with what its name suggests it can do. */
 @Composable
-private fun ImportedModelCard(name: String, active: Boolean, onUse: () -> Unit) {
+private fun ImportedModelCard(
+    name: String,
+    active: Boolean,
+    contextTokens: Int,
+    onContextChange: (Int) -> Unit,
+    onUse: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete ${name.substringBeforeLast('.')}?") },
+            text = { Text("This removes the imported file from the app. You can import it again later.") },
+            confirmButton = { DangerButton("Delete") { confirmDelete = false; onDelete() } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
+        )
+    }
     Surface(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (active) {
@@ -593,7 +618,11 @@ private fun ImportedModelCard(name: String, active: Boolean, onUse: () -> Unit) 
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             CapabilityBadges(modelCapabilities(name))
-            if (!active) Button(onClick = onUse) { Text("Use") }
+            ContextSlider(contextTokens, onContextChange, Modifier.padding(top = 4.dp), maxTokens = 32768)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!active) Button(onClick = onUse) { Text("Use") }
+                DangerOutlinedButton("Delete") { confirmDelete = true }
+            }
         }
     }
 }
