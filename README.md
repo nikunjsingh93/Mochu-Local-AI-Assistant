@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/mochu.svg" alt="Mochu AI logo" width="96" />
+  <img src="docs/assets/mochu-icon.svg" alt="Mochu AI logo" width="96" />
 </p>
 
 <h1 align="center">Mochu AI</h1>
@@ -18,11 +18,11 @@
 - **Image creation**: "draw a cozy cabin at sunset" makes an image on the phone (SD-Turbo, SDXS, DreamShaper), with size, aspect ratio and steps settings
 - **Web search and an in-app Browser**: Mochu searches when a question needs current info and cites its sources; open any page and tap **Ask about this page**
 - **Memory**: "remember that…" facts used in every chat, managed in Settings
-- **Tasks**: timers, a stopwatch, reminders, and scheduled assistant tasks ("every day at 11pm give me the latest tech news") with notifications
+- **Tasks**: scheduled assistant tasks ("every day at 11pm give me the latest tech news") with notifications, plus timers, a stopwatch and reminders
 - **Voice**: talk with the mic; replies can be read aloud
 - **Code**: build web apps, React + TypeScript apps and Python programs in projects with several chats, run them right away (preview, console, Python terminal), and export as an Android APK, a Capacitor project or a ZIP
 - **Local API server**: let other devices on your Wi-Fi use the phone's model through an OpenAI-compatible API
-- **Home server models**: use a bigger model from Ollama, LM Studio, llama.cpp or vLLM on your computer
+- **Home server models**: use a bigger model from Ollama, LM Studio, llama.cpp, vLLM, Unsloth or any OpenAI-compatible API on your computer or server
 - Everything runs on the phone by default; chats, files and models stay on the device
 
 ## Screenshots
