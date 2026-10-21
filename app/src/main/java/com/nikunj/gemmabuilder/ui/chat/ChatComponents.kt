@@ -540,7 +540,7 @@ private val CODE_STARTERS = listOf(
     CodeStarter("Web app", "A tip calculator", "Build a tip calculator web app with a clean, modern design."),
     CodeStarter("React", "A todo list in React", "Make a React todo app with add, complete and delete."),
     CodeStarter("Python", "A number guessing game", "Write a Python number guessing game that asks for guesses with input()."),
-    CodeStarter("Game", "A snake game", "Build a snake game web app that works with touch controls.")
+    CodeStarter("Web app", "A pomodoro focus timer", "Build a pomodoro focus timer web app with start, pause and reset buttons.")
 )
 
 /** An empty Code project: what Code can build, with examples to start from. */

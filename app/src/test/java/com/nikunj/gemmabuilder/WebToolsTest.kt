@@ -166,4 +166,19 @@ class WebToolsTest {
         assertTrue(searchQueryFrom("give me latest local ai news of the past 1 week").contains("on-device open-weight models"))
         assertFalse(searchQueryFrom("local news in Boston").contains("on-device"))
     }
+
+    @Test
+    fun shoppingAndCorrectionsSearch() {
+        assertTrue(chatNeedsWeb("search for flashback camera and where can i pick it up in usa"))
+        assertTrue(chatNeedsWeb("tell me where can i buy it online"))
+        assertTrue(chatNeedsWeb("search the web online where can i pick it up or buy online"))
+        assertTrue(chatNeedsWeb("please go online check again search the web"))
+        assertTrue(isCorrection("are you sure price is right it should be 120$"))
+        assertFalse(chatNeedsWeb("write a thank you note to my coworker"))
+        val q = resolveWebRequest("tell me where can i buy it online", listOf("search for flashback camera"), "flashback camera")
+        assertTrue(q.startsWith("flashback camera"))
+        val c = resolveWebRequest("are you sure price is right it should be 120", listOf("x"), "flashback camera price")
+        assertTrue(c.contains("flashback camera"))
+        assertEquals("flashback camera", lastSearchQuery(listOf(ActivityStep(ACTIVITY_SEARCH, "Searched \"flashback camera\" · 8 results"))))
+    }
 }

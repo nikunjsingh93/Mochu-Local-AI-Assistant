@@ -187,6 +187,16 @@ class MainActivity : ComponentActivity() {
         setContent { OnDeviceRoot() }
     }
 
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.visible = true
+    }
+
+    override fun onStop() {
+        AppVisibility.visible = false
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleTaskIntent(intent)

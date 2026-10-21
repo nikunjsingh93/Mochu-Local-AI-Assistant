@@ -167,7 +167,9 @@ data class BuilderUiState(
     /** Lets models that support it reason before answering in Chat. */
     val thinkingEnabled: Boolean = true,
     /** How hard Chat thinks when thinking is on: 1 quick, 2 balanced, 3 deep. */
-    val thinkingLevel: Int = 3,
+    val thinkingLevel: Int = 1,
+    /** False until the app has read its saved state (models, chats), so screens don't flash defaults. */
+    val appReady: Boolean = false,
     /** True while Chat is creating an image (a placeholder shows where it will appear). */
     val imageGenerating: Boolean = false,
     /** The model on the user's own server, when Chat and Code use it instead of the phone's. */

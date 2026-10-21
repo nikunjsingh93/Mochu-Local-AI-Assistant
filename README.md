@@ -5,35 +5,49 @@
 <h1 align="center">Mochu AI</h1>
 
 <p align="center">
-  A cute, private AI assistant that runs entirely on your Android phone. Chat, search the web, ask about photos,
-  set timers and scheduled tasks, talk with your voice, and build small web apps, all with on-device models.
+  A cute, private AI assistant that runs entirely on your Android phone. Chat, ask about documents and photos,
+  create images, search the web, schedule tasks, talk with your voice, and build web, React and Python apps, all with on-device models.
 </p>
 
 ## App Features
 
-- **Chat** with on-device models (Gemma 4 E2B/E4B on the GPU, GGUF models like Qwen and Bonsai on the CPU), with visible thinking
-- **Web search and an in-app Browser**: Mochu searches DuckDuckGo when a question needs current info and cites its sources
-- **Photos**: ask about pictures and screenshots (Gemma 4 E2B/E4B)
+- **Chat** with on-device models: Gemma 4 E2B/E4B on the GPU, and GGUF models (Qwen3.5, Gemma 3 1B, LFM2.5, Bonsai) on the CPU, with visible thinking and a Quick / Balanced / Deep thinking button
+- **Small models for budget phones**: phones with 6 GB of RAM or less get a 1B-class model recommended
+- **Documents**: attach PDF, Word, text, CSV or code files and ask Mochu to summarize them or find things in them
+- **Photos**: ask about pictures and screenshots (Gemma 4 and the GGUF models with photo support)
+- **Image creation**: "draw a cozy cabin at sunset" makes an image on the phone (SD-Turbo, SDXS, DreamShaper), with size, aspect ratio and steps settings
+- **Web search and an in-app Browser**: Mochu searches when a question needs current info and cites its sources; open any page and tap **Ask about this page**
 - **Memory**: "remember that…" facts used in every chat, managed in Settings
-- **Tasks**: timers, a stopwatch, reminders, and scheduled assistant tasks ("every day at 8am summarize tech news") with notifications
+- **Tasks**: timers, a stopwatch, reminders, and scheduled assistant tasks ("every day at 11pm give me the latest tech news") with notifications
 - **Voice**: talk with the mic; replies can be read aloud
-- **Studio**: build and preview small web apps (HTML/CSS/JS) from prompts and export them as ZIP
-- Everything runs on the phone; chats, files and models stay on the device
+- **Code**: build web apps, React + TypeScript apps and Python programs in projects with several chats, run them right away (preview, console, Python terminal), and export as an Android APK, a Capacitor project or a ZIP
+- **Local API server**: let other devices on your Wi-Fi use the phone's model through an OpenAI-compatible API
+- **Home server models**: use a bigger model from Ollama, LM Studio, llama.cpp or vLLM on your computer
+- Everything runs on the phone by default; chats, files and models stay on the device
 
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/1.jpg" alt="App screenshot 1" width="300" />
-  <img src="docs/screenshots/3.jpg" alt="App screenshot 3" width="300" />
+  <img src="docs/screenshots/01-home.png" alt="Mochu's welcome screen" width="240" />
+  <img src="docs/screenshots/02-docs.png" alt="Summarizing an attached document" width="240" />
+  <img src="docs/screenshots/05-image.png" alt="An image created on the phone" width="240" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/2.jpg" alt="App screenshot 2" width="300" />
-  <img src="docs/screenshots/Screenshot_20260505_123027.jpg" alt="App screenshot 4" width="300" />
+  <img src="docs/screenshots/07-browser.png" alt="The in-app Browser with Ask about this page" width="240" />
+  <img src="docs/screenshots/08-ask.png" alt="A summary of the open web page" width="240" />
+  <img src="docs/screenshots/06-memory.png" alt="Memory used in a later answer" width="240" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/Screenshot_20260505-121538.png" alt="App screenshot 5" width="960" />
+  <img src="docs/screenshots/03-task.png" alt="Scheduling a daily task from chat" width="240" />
+  <img src="docs/screenshots/04-tasks.png" alt="Timers, stopwatch, reminders and scheduled tasks" width="240" />
+  <img src="docs/screenshots/10-code-writing.png" alt="Code writing a React app" width="240" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/09-react.png" alt="A React todo app running in Code" width="240" />
+  <img src="docs/screenshots/11-python.png" alt="A Python program in the terminal" width="240" />
 </p>
 
 ## Device Requirements
@@ -65,8 +79,8 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 ## Using the App
 
 1. Open Mochu AI and download a model from the **Models** tab (the app recommends one for your phone), or import a `.litertlm` / `.gguf` file.
-2. Chat with Mochu, or switch to **Studio** to build a web app from a prompt.
-3. Use the globe for web search, the photo button for pictures, the mic to talk, and the clock for tasks and reminders.
+2. Chat with Mochu, or switch to **Code** to build a web, React or Python app from a prompt.
+3. Use the globe for web search, **+** for photos and documents, the bulb for thinking, the mic to talk, and the clock for tasks and reminders.
 
 ## Security and Privacy Notes
 
@@ -91,7 +105,7 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 - JDK 17+
 - Android SDK matching project config
 - Android NDK 28.2 and CMake 3.31.6 (install from Android Studio's SDK Manager)
-- The llama.cpp submodule: clone with `git clone --recurse-submodules`, or run `git submodule update --init` in an existing checkout
+- The llama.cpp and stable-diffusion.cpp submodules: clone with `git clone --recurse-submodules`, or run `git submodule update --init` in an existing checkout
 
 ### Project Structure
 
@@ -104,8 +118,8 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 
 Current app version:
 
-- `versionName`: `1.2.0`
-- `applicationId`: `com.nikunj.ondevicestudio` (kept from the app's original name so updates install over earlier versions)
+- `versionName`: `1.9.1`
+- `applicationId`: `com.nikunj.mochu`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.
 

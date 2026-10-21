@@ -46,10 +46,17 @@ class BuilderViewModel : ViewModel() {
     private var sendAfterConsent = false
     private var prepared = false
     private var conversations: MutableList<ChatConversation> = mutableListOf()
+    private var appContext: Context? = null
     private var generationInProgress = false
         set(value) {
+            val was = field
             field = value
             EngineHolder.foregroundBusy = value
+            // Keep a reply going when the user leaves the app, and tell them when it's ready.
+            appContext?.let { ctx ->
+                if (value && !was) ReplyKeepAliveService.started(ctx)
+                if (!value && was) ReplyKeepAliveService.finished(ctx, uiState.value.activeConversationId, uiState.value.messages.lastOrNull()?.takeIf { it.role == "assistant" }?.text)
+            }
         }
     private var generationJob: Job? = null
     // Set by the Stop button; the streaming loop checks it between tokens.
@@ -64,6 +71,7 @@ class BuilderViewModel : ViewModel() {
 
     fun prepare(context: Context) {
         if (prepared) return
+        appContext = context.applicationContext
         prepared = true
         PDFBoxResourceLoader.init(context.applicationContext)
 
@@ -73,7 +81,9 @@ class BuilderViewModel : ViewModel() {
             conversations.add(blank)
             saveConversationFile(context, blank)
         }
-        val active = conversations.maxByOrNull { it.updatedAt } ?: conversations.first()
+        // The app always opens in Chat, on the latest chat there.
+        val active = conversations.filter { it.kind == CHAT_KIND_ASSISTANT }.maxByOrNull { it.updatedAt }
+            ?: newBlankConversation(CHAT_KIND_ASSISTANT).also { conversations.add(it); saveConversationFile(context, it) }
         ensureProjectForConversation(context, active.projectKey, migrateLegacy = true)
         refreshWorkspace(context, active.id)
         _uiState.update {
@@ -85,6 +95,7 @@ class BuilderViewModel : ViewModel() {
                 messages = active.messages,
                 chatSummarized = active.summary.isNotBlank(),
                 activeKind = active.kind,
+                appReady = true,
                 modelName = savedModelName(context),
                 modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
                 multimodalBackendReady = false,
@@ -745,11 +756,13 @@ class BuilderViewModel : ViewModel() {
             engine.close()
             engine = RemoteEngine(config)
             sessionFingerprint = null
-            activeTokenWindow = 32_768
+            val window = withContext(Dispatchers.IO) { detectRemoteContext(config) } ?: 32_768
+            activeTokenWindow = window
             _uiState.update {
                 it.copy(
                     isBusy = false, gemmaLoaded = true, modelName = config.model, engineLabel = "${config.model} · your server",
-                    contextWindowTokens = null, contextUsedTokens = null, status = "Using ${config.model} on your server..."
+                    contextWindowTokens = window, contextUsedTokens = estimatedHistoryTokens().coerceAtMost(window),
+                    status = "Using ${config.model} on your server..."
                 )
             }
             return true
@@ -1325,12 +1338,16 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         ?.attachments?.filter { File(it).exists() && isChatDocument(it) }.orEmpty()
                 }
                 val useWeb = chatDocuments.isEmpty() && presetResearch == null && webConsentGiven(context) &&
-                    (if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) || (lastTurnUsedWeb && isWebFollowUp(prompt)) else looksLikeSearchRequest(prompt))
+                    (if (uiState.value.webSearchEnabled) chatNeedsWeb(prompt) || (lastTurnUsedWeb && isWebFollowUp(prompt)) || isCorrection(prompt) else looksLikeSearchRequest(prompt))
                 // A web turn starts a fresh session anyway; closing the old one first frees its memory
                 // while pages load in the background reader.
                 if (useWeb) engine.resetSession()
                 // "Then search the web and tell me" searches for the question before it.
-                val webRequest = resolveWebRequest(prompt, pendingMessages.dropLast(1).filter { it.role == "user" }.map { it.text })
+                val webRequest = resolveWebRequest(
+                    prompt,
+                    pendingMessages.dropLast(1).filter { it.role == "user" }.map { it.text },
+                    pendingMessages.dropLast(1).lastOrNull { it.role == "assistant" && it.activity.isNotEmpty() }?.activity?.let(::lastSearchQuery)
+                )
                 val research = presetResearch ?: if (useWeb) runWebResearch(context, webRequest) else null
                 if (research?.searchBlocked == true) {
                     val done = pendingMessages + ChatMessage("assistant", "_${SEARCH_BLOCKED_NOTE}_", activity = research.steps)
@@ -2444,7 +2461,12 @@ Rules:
         val foldEnd = messages.size - RECENT_MESSAGES_KEPT
         if (foldEnd <= conversation.summarizedCount) return
 
-        _uiState.update { it.copy(status = "Summarizing earlier messages…") }
+        _uiState.update {
+            it.copy(
+                status = "Summarizing earlier messages…",
+                streamingReply = if (it.activeKind == CHAT_KIND_ASSISTANT && it.streamingReply.isNullOrBlank()) "_Summarizing earlier messages to make room…_" else it.streamingReply
+            )
+        }
         val transcript = messages.subList(conversation.summarizedCount, foldEnd)
             .joinToString("\n") { "${it.role}: ${it.text.take(1200)}" }
             .takeLast(snapshotCharBudget(activeTokenWindow) / 2)

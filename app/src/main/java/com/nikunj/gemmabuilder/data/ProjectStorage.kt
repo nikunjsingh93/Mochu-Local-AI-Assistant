@@ -117,8 +117,15 @@ fun savedContextTokens(context: Context): Int {
 /** The context window chosen for one model (by file name); the old app-wide setting is the default. */
 fun savedModelContextTokens(context: Context, modelFileName: String): Int {
     val saved = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getInt("contextTokens_$modelFileName", -1)
-    return if (saved in CONTEXT_TOKEN_OPTIONS) saved else savedContextTokens(context)
+    return if (saved in CONTEXT_TOKEN_OPTIONS) saved else defaultContextTokens(context, modelFileName)
 }
+
+/**
+ * The window a model starts with: 8K, which every model here fits in on a 6-8 GB phone. Gemma 4 E2B
+ * gets 16K on 12 GB phones (they report about 11 GB), where it has been stable.
+ */
+fun defaultContextTokens(context: Context, modelFileName: String): Int =
+    if (modelFileName == "gemma-4-E2B-it.litertlm" && deviceRamGb(context) >= 10.5) 16384 else 8192
 
 fun saveModelContextTokens(context: Context, modelFileName: String, tokens: Int) {
     val value = CONTEXT_TOKEN_OPTIONS.lastOrNull { it <= tokens } ?: CONTEXT_TOKEN_OPTIONS.first()
@@ -328,7 +335,7 @@ fun estimatedRamBytes(context: Context, model: CatalogModel, tokens: Int, kvType
 
 /** How hard Chat thinks: 1 quick, 2 balanced, 3 deep (no limit). */
 fun savedThinkingLevel(context: Context): Int =
-    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getInt("thinkingLevel", 3).coerceIn(1, 3)
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getInt("thinkingLevel", 1).coerceIn(1, 3)
 
 fun saveThinkingLevel(context: Context, level: Int) {
     context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putInt("thinkingLevel", level.coerceIn(1, 3)).apply()

@@ -221,14 +221,32 @@ fun isBareSearchRequest(message: String): Boolean {
 }
 
 /** The question a web search should answer: a bare "search it" means the user's previous question. */
-fun resolveWebRequest(message: String, earlierUserMessages: List<String>): String =
-    if (isBareSearchRequest(message)) earlierUserMessages.lastOrNull { !isBareSearchRequest(it) } ?: message else message
+fun resolveWebRequest(message: String, earlierUserMessages: List<String>, lastSearch: String? = null): String {
+    val base = if (isBareSearchRequest(message)) earlierUserMessages.lastOrNull { !isBareSearchRequest(it) } ?: message else message
+    // "Where can I buy it online?", "are you sure the price is right?": about the last search's topic.
+    val topic = lastSearch ?: earlierUserMessages.lastOrNull { it != message && !isBareSearchRequest(it) }
+    val refersBack = Regex("""\b(it|its|it's|that|this|them|those|these|the price|the same|one)\b""").containsMatchIn(base.lowercase()) || isCorrection(base)
+    if (topic.isNullOrBlank() || !refersBack || base.lowercase().contains(topic.lowercase().take(30))) return base
+    return "${searchQueryFrom(topic)} $base".take(220)
+}
+
+/** "Are you sure?", "that's wrong", "it should be $120", "check again". */
+fun isCorrection(message: String): Boolean = Regex(
+    """\b(are you sure|that'?s (?:wrong|not right|incorrect)|that is (?:wrong|not right|incorrect)|it should be|should be \$?\d|check again|double[- ]check|verify|not correct|incorrect|look again|search again)\b""",
+    RegexOption.IGNORE_CASE
+).containsMatchIn(message)
+
+/** The query of the last web search in a chat, from its activity line ("Searched \"…\" · 8 results"). */
+fun lastSearchQuery(steps: List<ActivityStep>): String? =
+    steps.lastOrNull { it.kind == ACTIVITY_SEARCH && it.text.startsWith("Searched \"") }?.text
+        ?.substringAfter("Searched \"")?.substringBeforeLast("\"")
 
 /** After a web answer, a follow-up question ("which ones…", "what about…") searches again. */
 fun isWebFollowUp(message: String): Boolean {
     val lower = message.trim().lowercase()
     if (Regex("""^(?:please\s+)?(?:write|draft|compose|rewrite|translate|summari[sz]e (?:this|that|it)|explain)\b""").containsMatchIn(lower)) return false
-    return lower.endsWith("?") ||
+    return lower.endsWith("?") || isCorrection(lower) ||
+        Regex("""\b(where|buy|price|cost|available|in stock|online|store|order|pick (?:it )?up|ship|deliver)\b""").containsMatchIn(lower) ||
         Regex("""^(?:and\s+|so\s+|ok\s+|then\s+)?(?:which|what|who|when|where|how|is|are|was|were|did|does|do|any|list|show me|tell me|give me|more)\b""").containsMatchIn(lower)
 }
 
@@ -239,7 +257,9 @@ fun looksLikeSearchRequest(message: String): Boolean {
     val contains = listOf("search the web", "search online", "on the web", "online prices", "latest news")
     // "latest tech news", "today's headlines", "current laptop prices": things only the web knows.
     val fresh = Regex("""\b(latest|today'?s|current|recent|this\s+week'?s)\b.{0,40}\b(news|headlines|prices?|deals?|weather|scores?|results)\b""")
-    return starts.any { lower.startsWith(it) } || contains.any { it in lower } || fresh.containsMatchIn(lower)
+    // Asking for the web in so many words: "search…", "google it", "go online", "check the internet".
+    val explicit = Regex("""\b(search(?:es|ing)?|google|look\s+(?:it\s+|this\s+|that\s+)?up|go\s+online|check\s+(?:online|again|the\s+(?:web|internet))|on\s+the\s+(?:web|internet)|online|internet|browse)\b""").containsMatchIn(lower)
+    return starts.any { lower.startsWith(it) } || contains.any { it in lower } || fresh.containsMatchIn(lower) || explicit
 }
 
 /** The summarizing prompt for web sources: numbered, marked as untrusted, then the request. */
@@ -291,7 +311,7 @@ fun chatNeedsWeb(message: String): Boolean {
     val writing = Regex("""^\s*(?:please\s+|can you\s+|could you\s+)?(?:write|draft|compose|rewrite|reword|edit|proofread|translate|make|create|generate|brainstorm|plan|explain|help me write)\b""")
     val writingThing = Regex("""\b(note|email|letter|poem|story|essay|message|caption|speech|toast|joke)\b""")
     if (writing.containsMatchIn(lower) || writingThing.containsMatchIn(lower)) return false
-    if (Regex("""\b(news|headlines?|weather|forecast|prices?|deals?|on sale|latest|newest|scores?|stocks?|who won|release date|open now|near me)\b""").containsMatchIn(lower)) return true
+    if (Regex("""\b(news|headlines?|weather|forecast|prices?|deals?|on sale|sales|discounts?|latest|newest|scores?|stocks?|who won|release date|open now|near me|buy|purchase|in stock|availability|available (?:at|in|near|online)|where (?:can|to|do) (?:i |you )?(?:buy|get|find|order|pick)|pick (?:it |one |them )?up|stores?|retailers?|shops?|how much|cost|cheapest|reviews?)\b""").containsMatchIn(lower)) return true
     // What came out recently: "which models were launched this month", "what was announced last week".
     return Regex("""\b(launch(?:ed|es)?|release[ds]?|announce[ds]?|came out|unveil(?:ed|s)?|ship(?:ped|s)?)\b""").containsMatchIn(lower) &&
         Regex("""\b(this|last|past)\s+(week|month|year)|\btoday\b|\byesterday\b|\brecently\b|\bnew\b|\b20\d\d\b""").containsMatchIn(lower)

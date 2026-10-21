@@ -38,6 +38,13 @@ fun saveRemoteModelConfig(context: Context, config: RemoteModelConfig) {
 /** True when Chat and Code use the remote model instead of one on the phone. */
 fun remoteModelActive(context: Context): Boolean = prefs(context).getBoolean("remoteActive", false) && savedRemoteModelConfig(context) != null
 
+/** Server addresses outside the local network the user has allowed. */
+fun allowedRemoteHosts(context: Context): Set<String> = prefs(context).getStringSet("remoteAllowedHosts", emptySet()).orEmpty()
+
+fun allowRemoteHost(context: Context, baseUrl: String) {
+    prefs(context).edit().putStringSet("remoteAllowedHosts", allowedRemoteHosts(context) + baseUrl).apply()
+}
+
 fun setRemoteModelActive(context: Context, active: Boolean) {
     prefs(context).edit().putBoolean("remoteActive", active).apply()
 }
@@ -160,4 +167,42 @@ class RemoteEngine(private val config: RemoteModelConfig) : BuilderEngine {
     }.flowOn(Dispatchers.IO)
 
     override fun takeGenerationStats(): GenerationStats? = lastStats.also { lastStats = null }
+}
+
+/**
+ * The server's context window for [config]'s model, when it says: llama.cpp (/props), LM Studio
+ * (/api/v0/models), vLLM and OpenRouter (/models fields), Ollama (/api/show). Null when unknown.
+ */
+fun detectRemoteContext(config: RemoteModelConfig): Int? {
+    val root = config.baseUrl.removeSuffix("/v1")
+    fun get(url: String, body: String? = null): JSONObject? = runCatching {
+        val c = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 3_000
+            readTimeout = 4_000
+            if (config.apiKey.isNotBlank()) setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+            if (body != null) { requestMethod = "POST"; doOutput = true; setRequestProperty("Content-Type", "application/json") }
+        }
+        try {
+            if (body != null) c.outputStream.use { it.write(body.toByteArray()) }
+            if (c.responseCode !in 200..299) null else JSONObject(c.inputStream.bufferedReader().readText())
+        } finally { c.disconnect() }
+    }.getOrNull()
+    get("${config.baseUrl}/models")?.optJSONArray("data")?.let { data ->
+        (0 until data.length()).mapNotNull { data.optJSONObject(it) }.firstOrNull { it.optString("id") == config.model }?.let { m ->
+            listOf("max_model_len", "context_length", "context_window", "loaded_context_length").forEach { key -> m.optInt(key, 0).takeIf { it > 0 }?.let { return it } }
+        }
+    }
+    get("$root/props")?.let { p ->
+        (p.optJSONObject("default_generation_settings")?.optInt("n_ctx", 0) ?: 0).takeIf { it > 0 }?.let { return it }
+        p.optInt("n_ctx", 0).takeIf { it > 0 }?.let { return it }
+    }
+    get("$root/api/v0/models/${config.model}")?.let { m ->
+        (m.optInt("loaded_context_length", 0).takeIf { it > 0 } ?: m.optInt("max_context_length", 0).takeIf { it > 0 })?.let { return it }
+    }
+    get("$root/api/show", JSONObject().put("model", config.model).toString())?.let { s ->
+        // Ollama runs with num_ctx when set, otherwise its default (4096), not the model's maximum.
+        Regex("""num_ctx\s+(\d+)""").find(s.optString("parameters"))?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        return 4096
+    }
+    return null
 }

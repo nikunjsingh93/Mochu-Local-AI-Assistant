@@ -127,27 +127,64 @@ class Speaker(context: Context) {
  * Speech-to-text for the mic button: partial text while you speak, the final text when you pause.
  * Uses the on-device recognizer when the phone has one. Call from the main thread.
  */
+/** How long a pause in speech sends the message. */
+private const val PAUSE_BEFORE_SEND_MS = 2000L
+
 class VoiceInput(context: Context) {
     private val app = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
 
     val available: Boolean get() = SpeechRecognizer.isRecognitionAvailable(app) || SpeechRecognizer.isOnDeviceRecognitionAvailable(app)
 
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var finishing = false
+    private var pendingDeliver: Runnable? = null
+
+    /**
+     * Listens until the user stops talking for [PAUSE_BEFORE_SEND_MS]: a pause mid-sentence ends one
+     * recognition round, so listening restarts and the words are joined until the pause is long.
+     */
     fun start(onLevel: (Float) -> Unit, onPartial: (String) -> Unit, onFinal: (String) -> Unit, onError: (String) -> Unit) {
         stop()
+        finishing = false
+        val said = StringBuilder()
         val created = if (SpeechRecognizer.isOnDeviceRecognitionAvailable(app)) {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(app)
         } else {
             SpeechRecognizer.createSpeechRecognizer(app)
         }
         recognizer = created
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, PAUSE_BEFORE_SEND_MS)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, PAUSE_BEFORE_SEND_MS)
+        }
+        fun deliver() {
+            pendingDeliver?.let(handler::removeCallbacks)
+            pendingDeliver = null
+            val text = said.toString().trim()
+            stop()
+            onFinal(text)
+        }
         created.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) = Unit
-            override fun onBeginningOfSpeech() = Unit
+            // Talking again: this is the same message, so don't send yet.
+            override fun onBeginningOfSpeech() {
+                pendingDeliver?.let(handler::removeCallbacks)
+                pendingDeliver = null
+            }
             override fun onRmsChanged(rmsdB: Float) = onLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
             override fun onBufferReceived(buffer: ByteArray?) = Unit
             override fun onEndOfSpeech() = Unit
             override fun onError(error: Int) {
+                // A round that heard nothing after earlier words just means the user is done.
+                if (said.isNotBlank() && (finishing || error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_CLIENT)) {
+                    deliver()
+                    return
+                }
                 onError(
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Didn't catch that. Tap the mic and try again."
@@ -159,31 +196,40 @@ class VoiceInput(context: Context) {
                 stop()
             }
             override fun onResults(results: Bundle?) {
-                onFinal(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty())
-                stop()
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().trim()
+                if (text.isNotEmpty()) { if (said.isNotEmpty()) said.append(' '); said.append(text) }
+                if (finishing || said.isBlank()) { deliver(); return }
+                // Keep listening; send only if nothing more is said for a moment.
+                onPartial(said.toString())
+                val send = Runnable { deliver() }
+                pendingDeliver = send
+                handler.postDelayed(send, PAUSE_BEFORE_SEND_MS)
+                runCatching { created.startListening(intent) }.onFailure { deliver() }
             }
             override fun onPartialResults(partialResults: Bundle?) {
                 partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    ?.takeIf { it.isNotBlank() }?.let(onPartial)
+                    ?.takeIf { it.isNotBlank() }?.let { onPartial(if (said.isEmpty()) it else "$said $it") }
             }
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
         })
-        created.startListening(
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-            }
-        )
+        created.startListening(intent)
     }
 
     /** Stops listening; any speech so far still arrives in onFinal. */
     fun finish() {
-        recognizer?.stopListening()
+        finishing = true
+        val waiting = pendingDeliver
+        if (waiting != null) {
+            handler.removeCallbacks(waiting)
+            waiting.run()
+        } else {
+            recognizer?.stopListening()
+        }
     }
 
     fun stop() {
+        pendingDeliver?.let(handler::removeCallbacks)
+        pendingDeliver = null
         recognizer?.destroy()
         recognizer = null
     }

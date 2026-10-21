@@ -49,6 +49,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Keeps a Chat or Code reply running while the app is in the background. -->
+        <service
+            android:name=".ReplyKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Local API server: other devices on the same network use the loaded model (OpenAI-compatible). -->
         <service
             android:name=".ApiServerService"

@@ -95,4 +95,11 @@ class TasksTest {
         assertNull(taskCommandFrom("what time is it", now))
         assertNull(taskCommandFrom("tell me a joke", now))
     }
+
+    @Test
+    fun timeWithTodayAndNotifyMe() {
+        val c = taskCommandFrom("search the web latest sales on electronics and notify me at 7:48pm today", now) as? TaskCommand.Assistant
+        assertEquals("Search the web latest sales on electronics", c?.request)
+        assertEquals(at(19, 19, 48), c?.at)
+    }
 }

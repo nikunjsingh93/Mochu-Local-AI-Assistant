@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.clickable
 import kotlinx.coroutines.launch
@@ -450,8 +451,30 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
     var checking by remember { mutableStateOf(false) }
     // Servers outside your network get your messages: ask once per address before connecting.
     var confirmOutside by remember { mutableStateOf<String?>(null) }
-    var allowedOutside by remember { mutableStateOf(setOf<String>()) }
+    var allowedOutside by remember { mutableStateOf(allowedRemoteHosts(context)) }
+    var connectAgain by remember { mutableStateOf(0) }
     var enabled by remember { mutableStateOf(active != null) }
+    fun connectNow() {
+            val base = normalizeBaseUrl(url)
+            checking = true
+            message = null
+            scope.launch {
+                val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { isLocalNetworkHost(base) }
+                if (!local && base !in allowedOutside) {
+                    confirmOutside = base
+                } else {
+                    runCatching { listRemoteModels(base, key) }
+                        .onSuccess { list ->
+                            models = list
+                            url = base
+                            if (chosen !in list) chosen = list.firstOrNull()
+                            message = if (list.isEmpty()) "Connected, but the server lists no models. Load one on the server first." else null
+                        }
+                        .onFailure { e -> message = "Couldn't connect: ${e.message?.trimEnd('.') ?: "no answer"}. Check the address and that the server allows connections from your network." }
+                }
+                checking = false
+            }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -485,27 +508,9 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(enabled = url.isNotBlank() && !checking, onClick = {
-                val base = normalizeBaseUrl(url)
-                checking = true
-                message = null
-                scope.launch {
-                    val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { isLocalNetworkHost(base) }
-                    if (!local && base !in allowedOutside) {
-                        confirmOutside = base
-                    } else {
-                        runCatching { listRemoteModels(base, key) }
-                            .onSuccess { list ->
-                                models = list
-                                url = base
-                                if (chosen !in list) chosen = list.firstOrNull()
-                                message = if (list.isEmpty()) "Connected, but the server lists no models. Load one on the server first." else null
-                            }
-                            .onFailure { e -> message = "Couldn't connect: ${e.message?.trimEnd('.') ?: "no answer"}. Check the address and that the server allows connections from your network." }
-                    }
-                    checking = false
-                }
-            }) { Text(if (checking) "Connecting…" else "Connect") }
+            // Allowing an outside address continues the same Connect.
+            LaunchedEffect(connectAgain) { if (connectAgain > 0) connectNow() }
+            OutlinedButton(enabled = url.isNotBlank() && !checking, onClick = { connectNow() }) { Text(if (checking) "Connecting…" else "Connect") }
             if (active != null) TextButton(onClick = onStop) { Text("Use phone model") }
         }
         if (models.isNotEmpty()) {
@@ -526,7 +531,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             onDismissRequest = { confirmOutside = null },
             title = { Text("Send chats to this server?") },
             text = { Text("$base isn't on your local network. While you use its model, your messages (and any photos or documents you attach) are sent to it over the internet, so they no longer stay on your devices.") },
-            confirmButton = { TextButton(onClick = { allowedOutside = allowedOutside + base; confirmOutside = null; message = "Allowed. Tap Connect again." }) { Text("Allow") } },
+            confirmButton = { TextButton(onClick = { allowRemoteHost(context, base); allowedOutside = allowedOutside + base; confirmOutside = null; connectAgain++ }) { Text("Allow") } },
             dismissButton = { TextButton(onClick = { confirmOutside = null }) { Text("Cancel") } }
         )
     }

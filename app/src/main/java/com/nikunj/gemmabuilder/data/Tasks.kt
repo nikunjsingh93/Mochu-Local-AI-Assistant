@@ -198,7 +198,7 @@ private val atRegex = Regex("""\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\
 private val dailyRegex = Regex("""\b(ev[a-z]{0,4}\s*day|daily|each\s+day|ev[a-z]{0,4}\s+(?:morning|evening|night))\b""", RegexOption.IGNORE_CASE)
 /** A time or delay that ends the message, as in "summarize tech news at 8am" or "... in 2 hours". */
 private val timeAtEnd = Regex(
-    """(?:\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.?|p\.m\.?)?|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)|\bin\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)|\btomorrow(?:\s+morning)?)\s*[.!?]*$""",
+    """(?:\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.?|p\.m\.?)?|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)|\bin\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)|\btomorrow(?:\s+morning)?)(?:\s+(?:today|tonight|tomorrow|this\s+(?:morning|afternoon|evening)))?\s*[.!?]*$""",
     RegexOption.IGNORE_CASE
 )
 private val tomorrowRegex = Regex("""\btomorrow\b""", RegexOption.IGNORE_CASE)
@@ -293,7 +293,12 @@ fun taskCommandFrom(message: String, now: ZonedDateTime = ZonedDateTime.now()): 
     // and the same with the time last: "summarize tech news at 8am".
     if (scheduleHint.containsMatchIn(text) || dailyRegex.containsMatchIn(text) || timeAtEnd.containsMatchIn(text)) {
         val parsed = parseWhen(text, now) ?: return null
-        val request = tidy(parsed.rest.replace(Regex("""^\s*(?:please\s+)?schedule\b""", RegexOption.IGNORE_CASE), ""))
+        val request = tidy(
+            parsed.rest.replace(Regex("""^\s*(?:please\s+)?schedule\b""", RegexOption.IGNORE_CASE), "")
+                // "... and notify me", "... and let me know": the notification does that anyway.
+                .replace(Regex("""\s*(?:,|and)?\s*(?:notify|alert|ping|tell|message)\s+me(?:\s+(?:about\s+it|with\s+it))?\s*$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\s*(?:,|and)?\s*let\s+me\s+know\s*$""", RegexOption.IGNORE_CASE), "")
+        )
         // "Every night at 9pm <anything>" is clearly a scheduled request; a one-off time needs a task-like verb.
         if (request.length >= 4 && (parsed.daily || assistantVerbs.containsMatchIn(request))) {
             return TaskCommand.Assistant(request.replaceFirstChar { it.uppercase() }, parsed.at, parsed.daily)

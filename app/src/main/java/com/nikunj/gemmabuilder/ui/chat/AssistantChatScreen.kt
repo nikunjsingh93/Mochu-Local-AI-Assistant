@@ -322,6 +322,8 @@ private fun WelcomeState(
 ) {
     val context = LocalContext.current
     val recommended = remember { recommendedModel(context) }
+    // Until saved state is read, show nothing rather than the "download a model" card.
+    if (!state.appReady) return
     Column(
         Modifier
             .fillMaxSize()
