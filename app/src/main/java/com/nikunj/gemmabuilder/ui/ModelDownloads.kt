@@ -1,5 +1,12 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.clickable
@@ -65,6 +72,7 @@ fun ModelDownloadsScreen(
     onKvCacheTypeChange: (KvCacheType) -> Unit,
     onImageSettingsChange: (String, ImageOptions) -> Unit,
     onUseRemote: (RemoteModelConfig) -> Unit,
+    onUseImported: () -> Unit,
     onStopRemote: () -> Unit,
     // Null when shown as a tab, so there is no Back button or bottom inset of its own.
     onDismiss: (() -> Unit)? = null
@@ -145,6 +153,9 @@ fun ModelDownloadsScreen(
 
                 OutlinedButton(onClick = onImportFile, modifier = Modifier.fillMaxWidth()) {
                     Text("Import a .litertlm or .gguf file")
+                }
+                state.importedModelName?.let { name ->
+                    ImportedModelCard(name, active = state.remoteModel == null && state.activeModelPath == null && state.modelName == name, onUse = onUseImported)
                 }
 
                 ModelSection(
@@ -302,6 +313,7 @@ private fun ModelCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            CapabilityBadges(modelCapabilities(model.fileName))
             Text(model.summary, style = MaterialTheme.typography.bodySmall)
             usage?.let { ModelUsage(it) }
             // Photo support downloads with its model; only its progress shows here.
@@ -534,5 +546,54 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             confirmButton = { TextButton(onClick = { allowRemoteHost(context, base); allowedOutside = allowedOutside + base; confirmOutside = null; connectAgain++ }) { Text("Allow") } },
             dismissButton = { TextButton(onClick = { confirmOutside = null }) { Text("Cancel") } }
         )
+    }
+}
+
+/** Small pills for what a model can do: photos, thinking, coding, image creation. */
+@Composable
+fun CapabilityBadges(caps: List<ModelCapability>) {
+    if (caps.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        caps.forEach { cap ->
+            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) {
+                    Icon(
+                        when (cap) {
+                            ModelCapability.Photos -> Icons.Outlined.Visibility
+                            ModelCapability.Thinking -> Icons.Outlined.Lightbulb
+                            ModelCapability.Code -> Icons.Outlined.Code
+                            ModelCapability.Images -> Icons.Outlined.Image
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(cap.label, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+/** The model imported from a file, with what its name suggests it can do. */
+@Composable
+private fun ImportedModelCard(name: String, active: Boolean, onUse: () -> Unit) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (active) {
+                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
+                    Text("In use", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
+                }
+            }
+            Text(name.substringBeforeLast('.'), fontWeight = FontWeight.Bold)
+            Text(
+                "Imported ${if (isGgufModel(name)) "GGUF · runs on CPU" else "LiteRT · runs on GPU"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            CapabilityBadges(modelCapabilities(name))
+            if (!active) Button(onClick = onUse) { Text("Use") }
+        }
     }
 }

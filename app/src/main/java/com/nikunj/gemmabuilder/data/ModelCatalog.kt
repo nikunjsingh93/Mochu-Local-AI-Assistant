@@ -340,3 +340,23 @@ val ACTIVE_DOWNLOAD_PHASES = setOf(
 fun formatBytes(bytes: Long): String =
     if (bytes >= 1_000_000_000L) String.format(java.util.Locale.US, "%.2f GB", bytes / 1_000_000_000.0)
     else "${bytes / 1_000_000} MB"
+
+/** What a model can do, for the badges next to its name. */
+enum class ModelCapability(val label: String) { Photos("Sees photos"), Thinking("Thinks"), Code("Coding"), Images("Creates images") }
+
+/**
+ * Capabilities from the model's file name: catalog models (and their photo support), and the usual
+ * names of imported ones (Qwen3, DeepSeek R1, "thinking", "coder"...).
+ */
+fun modelCapabilities(fileName: String): List<ModelCapability> {
+    val lower = fileName.lowercase(java.util.Locale.US)
+    val catalog = MODEL_CATALOG.firstOrNull { it.fileName == fileName }
+    if (catalog?.isImage == true) return listOf(ModelCapability.Images)
+    val caps = mutableListOf<ModelCapability>()
+    val liteRtVision = !isGgufModel(fileName) && (lower.contains("gemma-4") || isLikelyMultimodalModel(fileName))
+    if (liteRtVision || catalog?.visionId != null) caps += ModelCapability.Photos
+    val thinks = Regex("""qwen3(?!-4b-instruct-2507)|qwq|deepseek-r1|r1-distill|thinking|reason|gemma-4|bonsai|magistral|gpt-oss|smollm3|exaone-deep""").containsMatchIn(lower)
+    if (thinks) caps += ModelCapability.Thinking
+    if (Regex("""coder|codestral|code-?llama|starcoder|devstral|deepseek-coder""").containsMatchIn(lower)) caps += ModelCapability.Code
+    return caps
+}

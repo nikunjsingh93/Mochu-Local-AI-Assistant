@@ -299,6 +299,7 @@ class BuilderViewModel : ViewModel() {
             it.copy(
                 modelDownloads = states, activeModelPath = if (remoteModelActive(appContext)) null else savedActiveModelPath(appContext), modelContextTokens = contexts,
                 remoteModel = savedRemoteModelConfig(appContext)?.takeIf { remoteModelActive(appContext) },
+                importedModelName = savedImportedModelName(appContext),
                 activeImageModelId = activeImageModel(appContext)?.id, imageSettings = imageSettings
             )
         }
@@ -594,7 +595,9 @@ class BuilderViewModel : ViewModel() {
                 withContext(Dispatchers.IO) {
                     copyModel(context.contentResolver, uri, modelFileFor(context, importedName))
                     saveModelName(context, importedName)
+                    saveImportedModelName(context, importedName)
                     saveActiveModelPath(context, null)
+                    setRemoteModelActive(context, false)
                     deleteOtherModelFormats(context, importedName)
                 }
             }
@@ -610,6 +613,9 @@ class BuilderViewModel : ViewModel() {
                         gemmaLoaded = false,
                         engineLabel = "Not loaded",
                         messages = it.messages + ChatMessage("assistant", "$importedName imported. Send a message to load it automatically."),
+                        activeModelPath = null,
+                        remoteModel = null,
+                        importedModelName = importedName,
                         status = "$importedName imported. Type a message and tap Send to auto-load."
                     )
                 } else {
@@ -713,6 +719,27 @@ class BuilderViewModel : ViewModel() {
 
     fun loadGemma(context: Context) {
         viewModelScope.launch { loadGemmaInternal(context.applicationContext) }
+    }
+
+    /** Switches back to the model imported from a file. */
+    fun useImportedModel(context: Context) {
+        if (generationInProgress || uiState.value.isBusy) return
+        val appContext = context.applicationContext
+        val name = savedImportedModelName(appContext) ?: return
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        refreshContextUsage()
+        saveModelName(appContext, name)
+        saveActiveModelPath(appContext, null)
+        setRemoteModelActive(appContext, false)
+        _uiState.update {
+            it.copy(
+                modelName = name, modelReady = true, gemmaLoaded = false, engineLabel = "Not loaded", activeModelPath = null, remoteModel = null,
+                modelSupportsMultimodal = isLikelyMultimodalModel(name), status = "$name selected. Send a message to load it."
+            )
+        }
+        refreshModelDownloads(appContext)
     }
 
     /** Switches Chat and Code to a model on the user's own server. */

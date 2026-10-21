@@ -350,3 +350,12 @@ fun thinkingBudget(level: Int): Int = when (level) {
 
 /** True when there is a model to answer with: on the phone, or the user's own server. */
 fun modelAvailable(context: Context): Boolean = remoteModelActive(context) || modelFile(context).exists()
+
+/** The name of the model imported from a file (one at a time), or null. */
+fun savedImportedModelName(context: Context): String? =
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("importedModelName", null)
+        ?.takeIf { modelFileFor(context, it).exists() }
+
+fun saveImportedModelName(context: Context, name: String) {
+    context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("importedModelName", name).apply()
+}
