@@ -203,7 +203,7 @@ object TaskNotifications {
         post(
             context, task.id.hashCode(),
             NotificationCompat.Builder(context, CHANNEL_STOPWATCH)
-                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                .setSmallIcon(R.drawable.ic_stat_mochu)
                 .setContentTitle(if (task.text.isBlank()) "Timer" else "${task.text} timer")
                 .setUsesChronometer(true)
                 .setChronometerCountDown(true)
@@ -224,7 +224,7 @@ object TaskNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_TIMER)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setSmallIcon(R.drawable.ic_stat_mochu)
             .setContentTitle(if (task.text.isBlank()) "Timer done" else "${task.text} timer done")
             .setContentText("${formatDuration(task.durationMs)} is up")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -243,7 +243,7 @@ object TaskNotifications {
         post(
             context, task.id.hashCode(),
             NotificationCompat.Builder(context, CHANNEL_REMINDER)
-                .setSmallIcon(android.R.drawable.ic_popup_reminder)
+                .setSmallIcon(R.drawable.ic_stat_mochu)
                 .setContentTitle("Reminder")
                 .setContentText(task.text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(task.text))
@@ -258,7 +258,7 @@ object TaskNotifications {
     fun running(context: Context, task: ScheduledTask?, step: String): Notification {
         ensureChannels(context)
         return NotificationCompat.Builder(context, CHANNEL_RUNNING)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_stat_mochu)
             .setContentTitle(task?.text?.take(60) ?: "Scheduled task")
             .setContentText(step)
             .setOngoing(true)
@@ -271,7 +271,7 @@ object TaskNotifications {
         post(
             context, task.id.hashCode(),
             NotificationCompat.Builder(context, CHANNEL_RESULT)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_stat_mochu)
                 .setContentTitle(task.text.take(60))
                 .setContentText(summary.take(120))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(600)))
@@ -287,7 +287,7 @@ object TaskNotifications {
         post(
             context, task.id.hashCode(),
             NotificationCompat.Builder(context, CHANNEL_RESULT)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_stat_mochu)
                 .setContentTitle(task.text.take(60))
                 .setContentText("Tap to run this scheduled task now.")
                 .setContentIntent(openApp(context, task.id.hashCode()) { putExtra(EXTRA_RUN_TASK, task.id) })
@@ -306,7 +306,7 @@ object TaskNotifications {
         post(
             context, STOPWATCH_ID,
             NotificationCompat.Builder(context, CHANNEL_STOPWATCH)
-                .setSmallIcon(android.R.drawable.ic_menu_recent_history)
+                .setSmallIcon(R.drawable.ic_stat_mochu)
                 .setContentTitle("Stopwatch")
                 .setUsesChronometer(true)
                 .setWhen(System.currentTimeMillis() - state.elapsedMs())

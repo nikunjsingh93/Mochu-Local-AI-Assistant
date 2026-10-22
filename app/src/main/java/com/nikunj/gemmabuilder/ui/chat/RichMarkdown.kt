@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -392,9 +393,18 @@ private fun CodeBlock(language: String, code: String, body: TextStyle) {
                     modifier = Modifier.weight(1f)
                 )
                 CopyButton(code, contentDescription = "Copy code")
+                val (ext, mime) = codeFileType(language)
+                DownloadButton(codeFileName(code, language), mime, { code }, contentDescription = "Download .$ext file")
             }
+            // Colors from a palette that reads well on the block's background, light or dark.
+            val dark = MaterialTheme.colorScheme.surfaceContainerHigh.luminance() < 0.5f
+            val colors = remember(dark) {
+                if (dark) CodeColors(Color(0xFFC792EA), Color(0xFFC3E88D), Color(0xFF8A96A3), Color(0xFFF78C6C), Color(0xFFF07178), Color(0xFFFFCB6B))
+                else CodeColors(Color(0xFF7C3AED), Color(0xFF2E7D32), Color(0xFF6B7280), Color(0xFFC2410C), Color(0xFFC2185B), Color(0xFFB45309))
+            }
+            val highlighted = remember(code, language, colors) { highlightCode(code, language, colors) }
             Text(
-                code,
+                highlighted,
                 style = body.copy(fontFamily = FontFamily.Monospace, fontSize = body.fontSize * 0.86f),
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
@@ -415,6 +425,15 @@ private fun MarkdownTable(rows: List<List<String>>, body: TextStyle, codeBackgro
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth()
     ) {
+        Column {
+        // Tables can be saved as a CSV file that opens in any spreadsheet app.
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("table", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            DownloadButton(
+                "mochu-table-" + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".csv",
+                "text/csv", { tableToCsv(rows) }, contentDescription = "Download as CSV"
+            )
+        }
         Column(Modifier.horizontalScroll(rememberScrollState())) {
             rows.forEachIndexed { r, row ->
                 Row {
@@ -436,5 +455,6 @@ private fun MarkdownTable(rows: List<List<String>>, body: TextStyle, codeBackgro
                 }
             }
         }
+    }
     }
 }

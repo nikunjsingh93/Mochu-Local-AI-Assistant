@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar Mochu: the marshmallow blob with its eyes and smile cut out, plus the sparkle.
+     Notification icons are drawn in one color from the shape's alpha, so everything is white. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <group android:translateX="-22" android:translateY="-22">
+        <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
+            android:pathData="M25,72 C23,49 36,35 54,34 C72,35 85,49 83,72 C80,80 28,80 25,72 Z M42.5,56a3.6,3.6 0,1 0,7.2 0a3.6,3.6 0,1 0,-7.2 0z M58.3,56a3.6,3.6 0,1 0,7.2 0a3.6,3.6 0,1 0,-7.2 0z M48.5,63.5 Q54,69.5 59.5,63.5 Q54,66.5 48.5,63.5 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M75,24 L77.8,30.2 L84,33 L77.8,35.8 L75,42 L72.2,35.8 L66,33 L72.2,30.2 Z" />
+    </group>
+</vector>

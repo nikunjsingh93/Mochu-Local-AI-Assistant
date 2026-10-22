@@ -2695,6 +2695,11 @@ Write at most 120 words: what the user is building, requirements and preferences
     /** Before a model loads, show the window it will get so the chat's context meter is visible. */
     private fun refreshPredictedWindow(context: Context) {
         if (uiState.value.gemmaLoaded) return
+        // A server model's window comes only from the server, after it connects; no guess is shown.
+        if (remoteModelActive(context)) {
+            _uiState.update { it.copy(contextWindowTokens = null, contextUsedTokens = null) }
+            return
+        }
         val file = modelFile(context)
         val window = if (file.exists()) safeTokenWindow(context, file, savedModelContextTokens(context, savedModelName(context))) else null
         _uiState.update { it.copy(contextWindowTokens = window) }

@@ -7,7 +7,7 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.0.0 is released** at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.0. It's on `main` at commit `78eb98c`, and installed on the owner's Samsung S25.
+- **v2.0.1 is released** (versionCode 29) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.1, with the Mochu notification icon, code downloads and code colors. v2.0.0 (versionCode 28) is the Smart cards release.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
 - **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
 - **Server-model fixes** are committed in `8e75750`. The owner asked for them to go into the **existing v2.0.0 release** instead of a new one. The APK asset was replaced (same versionCode 28, signature verified) and the notes got a "Home-server models" section. The v2.0.0 git tag still points to `78eb98c`, so its source zip doesn't include these fixes.
@@ -57,6 +57,26 @@ These are the files changed in the last release, v2.0.0:
 - **`README.md`, `docs/assets/cards/`:** the Smart cards section and screenshots.
 
 ## Work in Progress
+
+**Notification icon, code downloads and code colors** (released in v2.0.1; verified on the S25):
+- `res/drawable/ic_stat_mochu.xml`: a one-color 24dp Mochu (blob with eyes, a smile and the sparkle). Every `setSmallIcon` now uses it (`ApiServer`, `ModelDownloadService`, `ReplyInBackground`, `TaskRunner`). Before, they used Android's stock icons.
+- `ui/chat/CodeTools.kt` (new):
+  - `highlightCode()`: a one-pass regex highlighter for comments, strings, numbers and keywords, plus HTML tags and attributes for markup languages.
+  - `codeFileType()` and `codeFileName()`: HTML files are named from `<title>`.
+  - `tableToCsv()`, `saveToDownloads()` (MediaStore Downloads) and `DownloadButton`.
+- `ui/chat/RichMarkdown.kt`:
+  - Code blocks are colored with a light or dark palette chosen from the block's background, and get a Download button after Copy.
+  - Tables get a header row with a Download-as-CSV button.
+- Test: `CodeToolsTest`.
+- `<!DOCTYPE` counts as a tag too.
+- `refreshPredictedWindow` shows no context size for a server model before it connects. It used to show the phone model's 8.2K after an app restart.
+- **Verified on the S25** with the server model `unsloth/Qwen3.6-35B-A3B-GGUF`:
+  - HTML colors work (tags, attributes, strings, DOCTYPE).
+  - Download saved `Hello-Mochu.html` to Downloads.
+  - The status bar shows the Mochu icon for a running timer.
+  - After a restart, the meter shows 262K.
+  - Cleaned up afterwards: the test chat, the timer and the file.
+- **adb pairing:** the S25's wireless debugging port changes. Pair with `adb pair <ip>:<pair-port> <code>` (the owner gives the code), then `adb connect <ip>:<port>`. If the phone is listed twice (IP and mDNS), use one `-t` transport id.
 
 **Server model context size** (done, committed in `8e75750`, shipped in the v2.0.0 APK):
 - The owner's Unsloth Studio server (192.168.1.213:8888) runs 131K context, but Mochu showed 32K. Unsloth's `/v1/models` has no context field and its `/props` is a stub, so Mochu fell back to 32,768.

@@ -131,7 +131,7 @@ class ApiServerService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, ApiServerService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 2, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val notification = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setSmallIcon(R.drawable.ic_stat_mochu)
             .setContentTitle("Mochu API server is on")
             .setContentText("http://${localNetworkAddress() ?: "phone"}:$API_SERVER_PORT/v1")
             .setContentIntent(open)
