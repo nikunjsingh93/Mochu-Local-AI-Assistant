@@ -64,7 +64,7 @@ Try: *"https://www.amazon.com/dp/… show its current price"*, *"what's the NVDA
     <td align="center"><img src="docs/screenshots/07-browser.png" width="200" /><br/><sub>In-app Browser</sub></td>
     <td align="center"><img src="docs/screenshots/08-ask.png" width="200" /><br/><sub>Ask about this page</sub></td>
     <td align="center"><img src="docs/screenshots/03-task.png" width="200" /><br/><sub>Schedule a task from chat</sub></td>
-    <td align="center"><img src="docs/screenshots/04-tasks.png" width="200" /><br/><sub>Tasks</sub></td>
+    <td align="center"><img src="docs/screenshots/04-tasks.jpg" width="200" /><br/><sub>Tasks</sub></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/10-code-writing.png" width="200" /><br/><sub>Code writing a React app</sub></td>
