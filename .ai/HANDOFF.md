@@ -9,7 +9,7 @@ Agent: Claude Code (Claude Opus 5.5)
 
 - **v2.0.0 is released** at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.0. It's on `main` at commit `78eb98c`, and installed on the owner's Samsung S25.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
-- **The working tree** only has the new agent-memory files: `AGENTS.md`, `CLAUDE.md`, `.ai/`. They're not committed yet.
+- **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`. The working tree is clean.
 
 ## Recently Completed
 
@@ -78,11 +78,10 @@ None in the app code.
 
 ## Next Steps
 
-1. **Commit the agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) if the owner wants them in the repo.
-2. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
-3. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
-4. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
-5. **Better news cards:** read headlines from inside news pages instead of listing search results.
+1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
+2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
+3. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
+4. **Better news cards:** read headlines from inside news pages instead of listing search results.
 
 ## Additional Context
 
