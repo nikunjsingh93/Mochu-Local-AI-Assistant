@@ -52,6 +52,26 @@ fun allowRemoteHost(context: Context, baseUrl: String) {
     prefs(context).edit().putStringSet("remoteAllowedHosts", allowedRemoteHosts(context) + baseUrl).apply()
 }
 
+/** Opt-in: when the server can't be reached, the phone's own model answers instead. Off by default. */
+fun remoteFallbackEnabled(context: Context): Boolean = prefs(context).getBoolean("remoteFallback", false)
+
+fun setRemoteFallbackEnabled(context: Context, enabled: Boolean) {
+    prefs(context).edit().putBoolean("remoteFallback", enabled).apply()
+}
+
+/**
+ * Whether the server answers within a couple of seconds. Any reply counts (even a refused key), except
+ * 502/503/504: a proxy like nginx answers those when the model server behind it is down.
+ */
+fun remoteReachable(config: RemoteModelConfig): Boolean = runCatching {
+    val c = (URL("${config.baseUrl}/models").openConnection() as HttpURLConnection).apply {
+        connectTimeout = 2_000
+        readTimeout = 3_000
+        if (config.apiKey.isNotBlank()) setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+    }
+    try { c.responseCode.let { it > 0 && it !in 502..504 } } finally { c.disconnect() }
+}.getOrDefault(false)
+
 fun setRemoteModelActive(context: Context, active: Boolean) {
     prefs(context).edit().putBoolean("remoteActive", active).apply()
 }

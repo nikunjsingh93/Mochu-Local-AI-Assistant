@@ -868,9 +868,36 @@ class BuilderViewModel : ViewModel() {
         }
     }
 
-    private suspend fun loadGemmaInternal(context: Context): Boolean {
+    /**
+     * With a server model in use and "use the phone's model if my server can't be reached" on: checks
+     * the server before a message. Unreachable: the phone's model answers this one (returns a note
+     * for the reply). Reachable again: the phone's model is freed so the server answers.
+     */
+    private suspend fun chooseEngineForTurn(context: Context): String? {
+        val config = savedRemoteModelConfig(context)?.takeIf { remoteModelActive(context) } ?: return null
+        if (!remoteFallbackEnabled(context)) return null
+        _uiState.update { it.copy(status = "Checking your server…") }
+        val reachable = withContext(Dispatchers.IO) { remoteReachable(config) }
+        val onPhone = uiState.value.gemmaLoaded && engine !is RemoteEngine && engine !is DemoBuilderEngine
+        if (reachable) {
+            if (onPhone) {
+                engine.close()
+                engine = DemoBuilderEngine()
+                sessionFingerprint = null
+                _uiState.update { it.copy(gemmaLoaded = false, engineLabel = "Not loaded") }
+            }
+            return null
+        }
+        if (!onPhone) {
+            _uiState.update { it.copy(status = "Your server can't be reached. Using the phone's model…") }
+            if (!loadGemmaInternal(context, forceLocal = true)) return null
+        }
+        return "_Your server couldn't be reached, so the phone's model (${modelDisplayName(savedLocalModelName(context))}) answered._"
+    }
+
+    private suspend fun loadGemmaInternal(context: Context, forceLocal: Boolean = false): Boolean {
         // A model on the user's own server: nothing to load into memory here.
-        savedRemoteModelConfig(context)?.takeIf { remoteModelActive(context) }?.let { config ->
+        savedRemoteModelConfig(context)?.takeIf { !forceLocal && remoteModelActive(context) }?.let { config ->
             engine.close()
             engine = RemoteEngine(config)
             sessionFingerprint = null
@@ -889,7 +916,8 @@ class BuilderViewModel : ViewModel() {
             }
             return true
         }
-        val file = modelFile(context)
+        val localName = savedLocalModelName(context)
+        val file = savedActiveModelPath(context)?.let(::File)?.takeIf { it.exists() } ?: modelFileFor(context, localName)
         if (!file.exists()) {
             _uiState.update { it.copy(isBusy = false, status = "Import a .litertlm or .gguf model from the ⋮ menu first.") }
             return false
@@ -900,14 +928,14 @@ class BuilderViewModel : ViewModel() {
         engine = DemoBuilderEngine()
         refreshContextUsage()
         sessionFingerprint = null
-        val requestedTokens = savedModelContextTokens(context, savedModelName(context))
+        val requestedTokens = savedModelContextTokens(context, localName)
         val maxNumTokens = safeTokenWindow(context, file, requestedTokens)
         activeTokenWindow = maxNumTokens
         val windowNote = ""
         // Returns (where it runs, optional status note).
         val result = runCatching {
-            if (isGgufModel(savedModelName(context))) {
-                val newEngine = LlamaCppEngine(context.applicationContext, file.absolutePath, maxNumTokens, visionFileFor(context, savedModelName(context))?.absolutePath)
+            if (isGgufModel(localName)) {
+                val newEngine = LlamaCppEngine(context.applicationContext, file.absolutePath, maxNumTokens, visionFileFor(context, localName)?.absolutePath)
                 newEngine.load()
                 engine = newEngine
                 "llama.cpp CPU" to " (${newEngine.description})"
@@ -934,12 +962,12 @@ class BuilderViewModel : ViewModel() {
                 it.copy(
                     isBusy = false,
                     gemmaLoaded = true,
-                    engineLabel = "${savedModelName(context)} · $backendLabel",
-                    modelName = savedModelName(context),
-                    modelSupportsMultimodal = isLikelyMultimodalModel(savedModelName(context)),
+                    engineLabel = "${localName} · $backendLabel",
+                    modelName = localName,
+                    modelSupportsMultimodal = isLikelyMultimodalModel(localName),
                     multimodalBackendReady = multimodalEngine?.isReady() == true,
                     activeRoutingMode = "text",
-                    status = "${savedModelName(context)} loaded on $backendLabel$note$windowNote. Sending message...",
+                    status = "${localName} loaded on $backendLabel$note$windowNote. Sending message...",
                     contextWindowTokens = maxNumTokens,
                     contextUsedTokens = estimatedHistoryTokens().coerceAtMost(maxNumTokens)
                 )
@@ -1040,6 +1068,7 @@ class BuilderViewModel : ViewModel() {
                     refreshWorkspace(context)
                     _uiState.update { it.copy(status = "Set up a ${if (kind == ProjectKind.React) "React + TypeScript" else "Python"} project…") }
                 }
+                chooseEngineForTurn(context.applicationContext)
                 // The request shows first, then "Loading model" under it, as in Chat.
                 if (!uiState.value.gemmaLoaded) {
                     val loaded = loadGemmaInternal(context.applicationContext)
@@ -1433,6 +1462,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     _uiState.update { it.copy(messages = done) }
                     return@launch
                 }
+                val fallbackNote = chooseEngineForTurn(context.applicationContext)
                 // Load after the message is on screen, so the chat can show "Loading model" under it.
                 if (!uiState.value.gemmaLoaded) {
                     if (!loadGemmaInternal(context.applicationContext)) {
@@ -1599,7 +1629,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 val finalMessages = uiState.value.messages +
                     ChatMessage(
                         "assistant",
-                        withSources,
+                        withSources + fallbackNote?.let { "\n\n$it" }.orEmpty(),
                         statsInline = metrics,
                         activity = research?.steps.orEmpty(),
                         thinking = split.thinking,

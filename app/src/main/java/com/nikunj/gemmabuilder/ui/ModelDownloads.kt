@@ -547,6 +547,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
     var url by remember { mutableStateOf(saved?.baseUrl ?: "") }
     var key by remember { mutableStateOf(saved?.apiKey ?: "") }
     var contextText by remember { mutableStateOf(saved?.contextTokens?.takeIf { it > 0 }?.toString().orEmpty()) }
+    var fallback by remember { mutableStateOf(remoteFallbackEnabled(context)) }
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
     var chosen by remember { mutableStateOf(saved?.model) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -612,6 +613,17 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("If my server can't be reached, use the phone's model")
+                Text(
+                    "Mochu checks the server before each message. When it doesn't answer (say you left home and it has a home-network address), the phone's model replies instead, and the server is used again once it's back.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = fallback, onCheckedChange = { fallback = it; setRemoteFallbackEnabled(context, it) })
+        }
         Text(
             "Ollama: port 11434 · LM Studio: 1234 · llama.cpp: 8080 · Unsloth Studio: 8888 · Mochu: 8080. A domain, or a cloud API like api.openai.com with your key, works too.",
             style = MaterialTheme.typography.labelSmall,

@@ -7,7 +7,7 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.0.1 is released** (versionCode 29) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.1, with the Mochu notification icon, code downloads and code colors. v2.0.0 (versionCode 28) is the Smart cards release.
+- **v2.0.2 is released** (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback. v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
 - **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
 - **Server-model fixes** are committed in `8e75750`. The owner asked for them to go into the **existing v2.0.0 release** instead of a new one. The APK asset was replaced (same versionCode 28, signature verified) and the notes got a "Home-server models" section. The v2.0.0 git tag still points to `78eb98c`, so its source zip doesn't include these fixes.
@@ -57,6 +57,21 @@ These are the files changed in the last release, v2.0.0:
 - **`README.md`, `docs/assets/cards/`:** the Smart cards section and screenshots.
 
 ## Work in Progress
+
+**Opt-in server fallback** (released in v2.0.2; verified on the S25 with the owner's server):
+- `engine/RemoteEngine.kt`: `remoteFallbackEnabled` / `setRemoteFallbackEnabled` (pref `remoteFallback`, off by default), and `remoteReachable()`, a GET of `/models` with a 2 s connect timeout where any HTTP reply counts.
+- `viewmodel/BuilderViewModel.kt`:
+  - `chooseEngineForTurn()` runs before loading in Chat and Code. With a server model active and the setting on, it checks the server. If unreachable, it calls `loadGemmaInternal(forceLocal = true)` for the phone model, and the Chat reply ends with a note. Once the server is reachable again, the phone engine is freed so the server is used.
+  - The local branch of `loadGemmaInternal` now uses `savedLocalModelName`. `savedModelName` returns the server model name while a server model is active.
+- `ui/ModelDownloads.kt`: a switch in the home-server settings: "If my server can't be reached, use the phone's model".
+- The owner's server uses an nginx URL that works on 5G, which is why this is based on whether the server can be reached, not on Wi-Fi.
+- **Reachability rule:** 502/503/504 count as unreachable. With Unsloth stopped, the owner's nginx URL (`https://chat.nikunjserver.duckdns.org/v1`) still answers, with 502.
+- **Verified on the S25:**
+  - Server up: the server answered, with no note.
+  - Server stopped (nginx 502): Gemma 4 E2B on the phone answered, with the note, and the meter showed 8.2K.
+  - Server back: the server answered again, and the meter showed 262K.
+  - Afterwards the switch was turned back off (default), and the test chats were deleted.
+- **Idea, not done:** the home-server API key field shows the key in plain text. It could be masked, like a password field.
 
 **Notification icon, code downloads and code colors** (released in v2.0.1; verified on the S25):
 - `res/drawable/ic_stat_mochu.xml`: a one-color 24dp Mochu (blob with eyes, a smile and the sparkle). Every `setSmallIcon` now uses it (`ApiServer`, `ModelDownloadService`, `ReplyInBackground`, `TaskRunner`). Before, they used Android's stock icons.
