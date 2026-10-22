@@ -64,6 +64,8 @@ class ReplyKeepAliveService : Service() {
         fun started(context: Context) {
             stopWanted = false
             val app = context.applicationContext
+            // Right away, so turning the screen off at once doesn't pause the reply.
+            WorkWakeLock.acquire(app, "reply")
             val start = Runnable {
                 pendingStart = null
                 // Only while the app is on screen: Android doesn't allow starting it from the background.
@@ -78,6 +80,7 @@ class ReplyKeepAliveService : Service() {
             pendingStart?.let(handler::removeCallbacks)
             pendingStart = null
             stopWanted = true
+            WorkWakeLock.release("reply")
             handler.post { instance?.stopNow() }
             if (AppVisibility.visible || preview.isNullOrBlank()) return
             val manager = context.getSystemService(NotificationManager::class.java)

@@ -422,6 +422,7 @@ class TaskRunnerService : Service() {
         // Let a reply that's being written in the app finish first.
         repeat(600) { if (!EngineHolder.foregroundBusy) return@repeat; delay(1_000) }
         EngineHolder.backgroundRunning = true
+        WorkWakeLock.acquire(applicationContext, "task")
         var ownEngine: BuilderEngine? = null
         try {
             progress(task, "Getting the model ready…")
@@ -524,6 +525,7 @@ class TaskRunnerService : Service() {
         } finally {
             ownEngine?.close()
             EngineHolder.backgroundRunning = false
+            WorkWakeLock.release("task")
         }
     }
 

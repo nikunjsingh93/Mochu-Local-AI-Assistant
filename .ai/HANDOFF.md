@@ -7,7 +7,8 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.0.2 is released** (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback and the hidden API key field (the APK was replaced once with the key-field change). v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
+- **v2.0.3 is released** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
+- **v2.0.2** was released (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback and the hidden API key field (the APK was replaced once with the key-field change). v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
 - **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
 - **Server-model fixes** are committed in `8e75750`. The owner asked for them to go into the **existing v2.0.0 release** instead of a new one. The APK asset was replaced (same versionCode 28, signature verified) and the notes got a "Home-server models" section. The v2.0.0 git tag still points to `78eb98c`, so its source zip doesn't include these fixes.
@@ -57,6 +58,16 @@ These are the files changed in the last release, v2.0.0:
 - **`README.md`, `docs/assets/cards/`:** the Smart cards section and screenshots.
 
 ## Work in Progress
+
+**Wake lock while generating** (released in v2.0.3; verified on the S25):
+- `data/WorkWakeLock.kt` (new):
+  - A `PARTIAL_WAKE_LOCK` ("Mochu:generating") held by name ("reply", "task") and released when the last holder ends.
+  - Each hold is 30 min, renewed every 10 min while work continues, with a hard 2-hour cap. Play's Android vitals flags apps that hold wake locks for long with the screen off, so a stuck generation must never hold one for hours.
+- `ReplyKeepAliveService.started()` takes it right away and `finished()` releases it. The foreground service itself only starts after 1.5 s and only while the app is visible.
+- `TaskRunnerService.run()` holds it from `backgroundRunning = true` until the `finally` block.
+- `AndroidManifest.xml`: the `WAKE_LOCK` permission (a normal permission; no Play declaration needed).
+- **Verified:** a 500-word story on the server model (Qwen3.6 35B) kept generating with the screen off (power key) for about 5 min. `dumpsys power` showed the lock throughout, then released. The "Mochu replied" notification arrived with the story.
+- **Left over:** the test chat "write a 500 word story about a robot…" is still on the S25, because the phone was locked. Delete it next time.
 
 **Opt-in server fallback** (released in v2.0.2; verified on the S25 with the owner's server):
 - `engine/RemoteEngine.kt`: `remoteFallbackEnabled` / `setRemoteFallbackEnabled` (pref `remoteFallback`, off by default), and `remoteReachable()`, a GET of `/models` with a 2 s connect timeout where any HTTP reply counts.
