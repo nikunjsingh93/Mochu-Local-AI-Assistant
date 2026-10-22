@@ -13,8 +13,30 @@
   <b>Runs fully on your phone. No sign-up, no cloud, works offline.</b>
 </p>
 
+## ✨ New in 2.0: Smart cards
+
+Answers can now come with a card: a product with its price history, a stock, the day's headlines, a game score, a side-by-side comparison, a recipe checklist, a document summary or a place with its hours. The model only turns pages and documents it has read into the card, and every number on a card has to appear in its source, so cards never show a made-up price or score.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/assets/cards/price.png" width="200" /><br/><sub>Price + history</sub></td>
+    <td align="center"><img src="docs/assets/cards/stock.jpg" width="200" /><br/><sub>Stocks and crypto</sub></td>
+    <td align="center"><img src="docs/assets/cards/compare.jpg" width="200" /><br/><sub>Product comparison</sub></td>
+    <td align="center"><img src="docs/assets/cards/news.png" width="200" /><br/><sub>Headlines</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/assets/cards/recipe.jpg" width="200" /><br/><sub>Recipe checklist</sub></td>
+    <td align="center"><img src="docs/assets/cards/document.jpg" width="200" /><br/><sub>Document summary</sub></td>
+    <td align="center"><img src="docs/assets/cards/place.jpg" width="200" /><br/><sub>Places and hours</sub></td>
+    <td></td>
+  </tr>
+</table>
+
+Try: *"https://www.amazon.com/dp/… show its current price"*, *"what's the NVDA stock price today"*, *"compare [link] and [link]"*, *"give me a recipe for banana bread"*, *"is Costco open now in Toronto?"*, *"did the Leafs win their last game?"*, or attach a PDF. Scheduled tasks get cards too, so *"every day at 9am check the price of [link]"* builds a price-history chart over time.
+
 ## App Features
 
+- **Smart cards** under answers: prices with history and the store's typical price, stocks and crypto, headlines, sports scores, product comparisons, recipes, document summaries with "ask more" buttons, and places with hours and Open in Maps
 - **Chat** with on-device models: Gemma 4 E2B/E4B on the GPU, and GGUF models (Qwen3.5, Gemma 3 1B, LFM2.5, Bonsai) on the CPU, with visible thinking and a Quick / Balanced / Deep thinking button
 - **Small models for budget phones**: phones with 6 GB of RAM or less get a 1B-class model recommended
 - **Documents**: attach PDF, Word, text, CSV or code files and ask Mochu to summarize them or find things in them
@@ -122,7 +144,7 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 
 Current app version:
 
-- `versionName`: `1.9.7`
+- `versionName`: `2.0.0`
 - `applicationId`: `com.nikunj.mochu`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.

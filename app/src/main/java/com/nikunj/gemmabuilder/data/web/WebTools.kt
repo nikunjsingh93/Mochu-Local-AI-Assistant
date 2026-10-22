@@ -344,6 +344,8 @@ fun chatNeedsWeb(message: String): Boolean {
     val writingThing = Regex("""\b(note|email|letter|poem|story|essay|message|caption|speech|toast|joke)\b""")
     if (writing.containsMatchIn(lower) || writingThing.containsMatchIn(lower)) return false
     if (Regex("""\b(news|headlines?|weather|forecast|prices?|deals?|on sale|sales|discounts?|latest|newest|scores?|stocks?|who won|release date|open now|near me|buy|purchase|in stock|availability|available (?:at|in|near|online)|where (?:can|to|do) (?:i |you )?(?:buy|get|find|order|pick)|pick (?:it |one |them )?up|stores?|retailers?|shops?|how much|cost|cheapest|reviews?)\b""").containsMatchIn(lower)) return true
+    // Results, opening hours and markets change all the time: "did the Leafs win", "is Costco open", "bitcoin price".
+    if (Regex("""\bdid\s+.{2,40}\s+(?:win|lose|beat)\b|\blast\s+(?:game|match|night's\s+game)\b|\bis\s+.{2,40}\s+open\b|\bopening\s+hours\b|\bhours\s+today\b|\b(?:bitcoin|crypto|ethereum|share\s+price)\b""").containsMatchIn(lower)) return true
     // What came out recently: "which models were launched this month", "what was announced last week".
     return Regex("""\b(launch(?:ed|es)?|release[ds]?|announce[ds]?|came out|unveil(?:ed|s)?|ship(?:ped|s)?)\b""").containsMatchIn(lower) &&
         Regex("""\b(this|last|past)\s+(week|month|year)|\btoday\b|\byesterday\b|\brecently\b|\bnew\b|\b20\d\d\b""").containsMatchIn(lower)

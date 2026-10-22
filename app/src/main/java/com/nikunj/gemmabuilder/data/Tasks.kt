@@ -201,7 +201,7 @@ fun parseDuration(text: String): Long? {
 
 private val inRegex = Regex("""\bin\s+((?:$NUM\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\s*(?:and\s+)?)+)""", RegexOption.IGNORE_CASE)
 // "11:45pm" or "11.45pm"; the lookbehind keeps "11.45" from being read as 45 o'clock.
-private val atRegex = Regex("""(?<![\d.:])\b(?:at\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?=\W|$)|\bat\s+(\d{1,2})(?:[:.](\d{2}))?\b|\bat\s+(noon|midnight)\b""", RegexOption.IGNORE_CASE)
+private val atRegex = Regex("""(?<![\d.:])\b(?:at\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.?|p\.m\.?)(?=\W|$)|\bat\s+(\d{1,2})(?:[:.](\d{2}))?\b|\bat\s+(noon|midnight)\b""", RegexOption.IGNORE_CASE)
 // Typos are common on phone keyboards: "eveyday", "everday", "evryday", "evey day".
 private val dailyRegex = Regex("""\b(ev[a-z]{0,4}\s*day|daily|each\s+day|ev[a-z]{0,4}\s+(?:morning|evening|night))\b""", RegexOption.IGNORE_CASE)
 /** A time or delay that ends the message, as in "summarize tech news at 8am" or "... in 2 hours". */
@@ -272,7 +272,7 @@ private val assistantVerbs = Regex(
     """\b(check|summari[sz]e|search|look\s+up|find|get\s+me|tell\s+me|give\s+me|send\s+me|show\s+me|fetch|read|news|headlines|weather|prices?|deals?|briefing|write|compose|make|create|generate|draft|share|suggest|recommend|plan|list|explain|teach|translate|quiz|motivate|inspire|jokes?|quotes?|poems?|story|facts?|tips?|riddles?|recipes?|affirmations?)\b""",
     RegexOption.IGNORE_CASE
 )
-private val scheduleHint = Regex("""^(?:please\s+)?(?:schedule|every\s*day|everyday|daily|each\s+day|every\s+(?:morning|evening)|tomorrow|tonight|at\s+\d|in\s+\d)""", RegexOption.IGNORE_CASE)
+private val scheduleHint = Regex("""^(?:please\s+)?(?:schedule|every\s*day|everyday|daily|each\s+day|every\s+(?:morning|evening)|tomorrow|today|tonight|this\s+(?:morning|afternoon|evening)|at\s+\d|in\s+\d)""", RegexOption.IGNORE_CASE)
 
 // "Could you please …", "hey Mochu, …": polite openings aren't part of the command.
 private val politeOpening = Regex(

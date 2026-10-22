@@ -181,7 +181,10 @@ fun AssistantChatScreen(
             if (state.messages.isEmpty() && state.streamingReply == null) {
                 WelcomeState(state, onOpenModels, onDownloadModel, onPromptChange, onSend, onBuildInStudio)
             } else {
-                MessageList(state, onToggleSpeak)
+                // "Ask more" chips on cards send their question like a typed message.
+                androidx.compose.runtime.CompositionLocalProvider(LocalAskAction provides { question -> onPromptChange(question); onSend() }) {
+                    MessageList(state, onToggleSpeak)
+                }
             }
         }
 

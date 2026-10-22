@@ -325,7 +325,11 @@ private fun MarkdownBlock(
                             }
                         }
                     }
-                    is MdBlock.Code -> CodeBlock(block.language, block.code, body)
+                    is MdBlock.Code -> when {
+                        block.language == "card" && RichCardBlock(block.code) -> Unit
+                        block.language == "chart" && RichChartBlock(block.code) -> Unit
+                        else -> CodeBlock(block.language, block.code, body)
+                    }
                     is MdBlock.Table -> MarkdownTable(block.rows, body, codeBackground, linkColor)
                     MdBlock.Rule -> HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }

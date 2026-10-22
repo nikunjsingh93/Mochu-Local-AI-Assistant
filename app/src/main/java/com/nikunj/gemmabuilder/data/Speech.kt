@@ -18,6 +18,7 @@ import java.util.Locale
 
 /** Reply text as it should be spoken: no Markdown, links, citations, sources list or warnings. */
 fun speakableText(markdown: String): String = markdown
+    .replace(Regex("""```(?:card|chart)\n[\s\S]*?\n```"""), "")
     .substringBefore("\n**Sources**")
     .lines()
     .filterNot { it.trimStart().startsWith("> ⚠️") || it.trim().startsWith("```") }

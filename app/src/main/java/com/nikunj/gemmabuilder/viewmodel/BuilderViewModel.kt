@@ -1552,15 +1552,27 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     text + "\n\n> ⚠️ These numbers weren't found in the sources and may be wrong: " +
                         unverified.take(6).joinToString(", ") + ". Check the source pages before relying on them."
                 }
+                // A card under the answer when one fits: a product and its price history, a stock,
+                // headlines, a score, a comparison, a recipe, a document summary or a place.
+                val rich = if (reply.isNotBlank() && !stopRequested && result.isSuccess) {
+                    richBlocksFor(
+                        context.applicationContext, engine, prompt,
+                        pages = research?.pages.orEmpty(), found = research?.found.orEmpty(),
+                        answer = reply, documents = attachedDocs
+                    ) {
+                        sessionFingerprint = null
+                        _uiState.update { it.copy(status = "Making a card…") }
+                    }
+                } else ""
                 // The app appends the links itself, so they're always correct even if the model garbles them.
                 val withSources = if (research != null && research.pages.isNotEmpty() && reply.isNotBlank()) {
-                    checkedText + "\n\n**Sources**\n" + research.pages.mapIndexed { i, page ->
+                    checkedText + rich + "\n\n**Sources**\n" + research.pages.mapIndexed { i, page ->
                         // Encode brackets so URLs like .../Gemini_(language_model) don't end the link early.
                         val url = page.url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
                         "${i + 1}. [${page.title.ifBlank { hostOf(page.url) }.replace("[", "(").replace("]", ")")}]($url)"
                     }.joinToString("\n")
                 } else {
-                    checkedText
+                    checkedText + rich
                 }
                 val metrics = buildGenerationMetrics(startedAtMs, firstTokenAtMs)
                 val finalMessages = uiState.value.messages +
@@ -1677,7 +1689,9 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         val pages: List<PageText>,
         val steps: List<ActivityStep>,
         /** Search was refused with a bot check and nothing was read: say so instead of asking the model. */
-        val searchBlocked: Boolean = false
+        val searchBlocked: Boolean = false,
+        /** Search results, read or not (headline cards list them). */
+        val found: List<SearchResult> = emptyList()
     )
 
     fun setWebSearchEnabled(context: Context, enabled: Boolean) {
@@ -1745,7 +1759,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         for (result in results) {
             if (pages.size >= MAX_WEB_PAGES || stopRequested) break
             val host = hostOf(result.url)
-            if (pages.any { hostOf(it.url) == host } || host in skippedHosts) continue
+            // One page per site for search results; links the user pasted are all read, even from one site.
+            if ((linked.isEmpty() && pages.any { hostOf(it.url) == host }) || host in skippedHosts) continue
             show(ActivityStep(ACTIVITY_READ, "Reading $host", result.url))
             // Direct fetch first (fast); fall back to a real browser engine for JS-heavy or picky sites.
             val direct = withContext(Dispatchers.IO) { fetchPageText(result.url) }
@@ -1765,7 +1780,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         }
 
         val unread = results.filterNot { r -> pages.any { it.url == r.url } }.take(4)
-        return WebResearch(researchPrompt(request, pages, unread), pages, steps.toList(), searchBlocked = blocked && pages.isEmpty())
+        return WebResearch(researchPrompt(request, pages, unread), pages, steps.toList(), searchBlocked = blocked && pages.isEmpty(), found = results)
     }
 
     /** The summarizing prompt: numbered sources marked as untrusted, then the request. */

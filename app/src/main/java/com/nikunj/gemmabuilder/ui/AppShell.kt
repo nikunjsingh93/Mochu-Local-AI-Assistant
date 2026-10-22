@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.compose.BackHandler
@@ -199,6 +200,7 @@ fun OnDeviceApp(
         gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             HistoryDrawer(
+                open = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open,
                 state = state,
                 kind = if (tab == AppTab.Studio) CHAT_KIND_STUDIO else CHAT_KIND_ASSISTANT,
                 onNew = { kind ->
@@ -422,6 +424,8 @@ fun OnDeviceApp(
 /** Chat history for the current space, with new-chat and settings entries. */
 @Composable
 private fun HistoryDrawer(
+    /** True while the drawer is open or opening. */
+    open: Boolean,
     state: BuilderUiState,
     kind: String,
     onNew: (String) -> Unit,
@@ -460,7 +464,28 @@ private fun HistoryDrawer(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
             )
-            LazyColumn(Modifier.weight(1f)) {
+            // The list keeps its place between openings, so a new chat could sit just out of view.
+            // Each opening scrolls to the open chat (the newest one when nothing is open).
+            val listState = rememberLazyListState()
+            LaunchedEffect(open) {
+                if (!open) return@LaunchedEffect
+                val activeId = state.activeConversationId
+                var index = 0
+                var found = -1
+                if (studio) {
+                    state.conversations.filter { it.kind == kind }.groupBy { it.projectKey }
+                        .entries.sortedByDescending { group -> group.value.maxOf { it.updatedAt } }
+                        .forEach { (_, chats) ->
+                            index++ // the project heading
+                            chats.sortedByDescending { it.updatedAt }.forEach { if (it.id == activeId && found < 0) found = index; index++ }
+                        }
+                } else {
+                    found = state.conversations.filter { it.kind == kind }.indexOfFirst { it.id == activeId }
+                }
+                // A row above the open chat stays visible, so it doesn't sit flush against the heading.
+                listState.scrollToItem((found - 1).coerceAtLeast(0))
+            }
+            LazyColumn(Modifier.weight(1f), state = listState) {
                 if (studio) {
                     // Code: chats grouped under their project, newest project first.
                     val groups = state.conversations.filter { it.kind == kind }.groupBy { it.projectKey }

@@ -127,4 +127,12 @@ class TasksTest {
         assertTrue(taskCommandFrom("actually remind me at 5pm to call mom", now) is TaskCommand.Reminder)
         assertNull(taskCommandFrom("Actually, what is the capital of France?", now))
     }
+
+    @Test
+    fun todayFirstAndDottedPm() {
+        val c = taskCommandFrom("Today at 11:05 p.m, check the latest ai news", now) as? TaskCommand.Assistant
+        assertEquals(at(19, 23, 5), c?.at)
+        assertEquals("Check the latest ai news", c?.request)
+        assertEquals(at(19, 21, 30), (taskCommandFrom("tonight at 9:30 p.m. give me tech news", now) as? TaskCommand.Assistant)?.at)
+    }
 }

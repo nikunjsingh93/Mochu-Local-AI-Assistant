@@ -430,6 +430,7 @@ class TaskRunnerService : Service() {
             val steps = liveSteps
             val pages = mutableListOf<PageText>()
             var unread = emptyList<SearchResult>()
+            var found = emptyList<SearchResult>()
             var searchBlocked = false
             if (needsWeb(task.text)) {
                 val urls = linksIn(task.text)
@@ -450,6 +451,7 @@ class TaskRunnerService : Service() {
                     steps += if (searchBlocked) ActivityStep(ACTIVITY_NOTE, "DuckDuckGo asked for a bot check")
                     else ActivityStep(ACTIVITY_SEARCH, "Searched \"$query\" · ${results.size} results")
                     unread = results.drop(2).take(3)
+                    found = results
                     results.take(2)
                 }
                 for (target in targets) {
@@ -488,7 +490,12 @@ class TaskRunnerService : Service() {
                 }
                 engine.resetSession()
                 engine.takeGenerationStats()
-                val answer = splitThinking(output.toString()).answer.trim().ifBlank { "_The model returned an empty answer._" }
+                val text = splitThinking(output.toString()).answer.trim()
+                // A card under the answer when one fits (a price with its history, a stock, headlines, a score…).
+                val rich = if (text.isBlank()) "" else richBlocksFor(applicationContext, engine, task.text, pages, found, text, emptyList()) {
+                    progress(task, "Making a card…")
+                }
+                val answer = text.ifBlank { "_The model returned an empty answer._" } + rich
                 if (pages.isEmpty()) answer else answer + "\n\n**Sources**\n" + pages.mapIndexed { i, page ->
                     val url = page.url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
                     "${i + 1}. [${page.title.ifBlank { hostOf(page.url) }.replace("[", "(").replace("]", ")")}]($url)"
