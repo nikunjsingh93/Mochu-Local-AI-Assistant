@@ -10,7 +10,7 @@ Agent: Claude Code (Claude Opus 5.5)
 - **v2.0.0 is released** at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.0. It's on `main` at commit `78eb98c`, and installed on the owner's Samsung S25.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
 - **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
-- **Uncommitted: server-model context fix** (see Work in Progress). Built, unit-tested and installed on the S25. The owner hasn't asked for it to be committed yet.
+- **Server-model fixes** are committed in `8e75750`. The owner asked for them to go into the **existing v2.0.0 release** instead of a new one. The APK asset was replaced (same versionCode 28, signature verified) and the notes got a "Home-server models" section. The v2.0.0 git tag still points to `78eb98c`, so its source zip doesn't include these fixes.
 
 ## Recently Completed
 
@@ -58,7 +58,7 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
-**Server model context size** (uncommitted):
+**Server model context size** (done, committed in `8e75750`, shipped in the v2.0.0 APK):
 - The owner's Unsloth Studio server (192.168.1.213:8888) runs 131K context, but Mochu showed 32K. Unsloth's `/v1/models` has no context field and its `/props` is a stub, so Mochu fell back to 32,768.
 - `engine/RemoteEngine.kt`:
   - `detectRemoteContext` now checks a context size the user typed first.
@@ -99,11 +99,10 @@ These are the files changed in the last release, v2.0.0:
 
 ## Next Steps
 
-1. **Commit the server-model fixes** when the owner asks.
-2. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
-3. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
-4. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
-5. **Better news cards:** read headlines from inside news pages instead of listing search results.
+1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
+2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
+3. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
+4. **Better news cards:** read headlines from inside news pages instead of listing search results.
 
 ## Additional Context
 
