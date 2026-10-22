@@ -195,4 +195,13 @@ class WebToolsTest {
         assertEquals(listOf("https://www.amazon.com/dp/B0GVTPKJVT"), linksIn("Https://www.amazon.com/dp/B0GVTPKJVT show its current price"))
         assertEquals(listOf("https://bestbuy.com/product/x"), linksIn("check bestbuy.com/product/x."))
     }
+
+    @Test
+    fun serverModelNamesMatchLoosely() {
+        assertTrue(sameRemoteModel("unsloth/Qwen3.6-35B-A3B-GGUF", "unsloth/Qwen3.6-35B-A3B-GGUF"))
+        assertTrue(sameRemoteModel("Qwen3.6-35B-A3B-GGUF", "unsloth/Qwen3.6-35B-A3B-GGUF"))
+        assertTrue(sameRemoteModel("unsloth/qwen3.6-35b-a3b-gguf", "unsloth/Qwen3.6-35B-A3B-GGUF"))
+        assertFalse(sameRemoteModel("unsloth/LFM2.5-8B-A1B-GGUF", "unsloth/Qwen3.6-35B-A3B-GGUF"))
+        assertFalse(sameRemoteModel(null, "x"))
+    }
 }

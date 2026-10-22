@@ -546,6 +546,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
     val saved = remember { savedRemoteModelConfig(context) }
     var url by remember { mutableStateOf(saved?.baseUrl ?: "") }
     var key by remember { mutableStateOf(saved?.apiKey ?: "") }
+    var contextText by remember { mutableStateOf(saved?.contextTokens?.takeIf { it > 0 }?.toString().orEmpty()) }
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
     var chosen by remember { mutableStateOf(saved?.model) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -603,8 +604,16 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             value = key, onValueChange = { key = it.trim() }, singleLine = true,
             label = { Text("API key (if the server needs one)") }, modifier = Modifier.fillMaxWidth()
         )
+        OutlinedTextField(
+            value = contextText, onValueChange = { contextText = it.filter(Char::isDigit).take(7) }, singleLine = true,
+            label = { Text("Context size in tokens (optional)") },
+            placeholder = { Text("Ask the server") },
+            supportingText = { Text("Leave empty to use what the server reports. Set it (like 131072) if the context meter shows the wrong size.") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
         Text(
-            "Ollama: port 11434 · LM Studio: 1234 · llama.cpp: 8080 · Mochu: 8080. A domain, or a cloud API like api.openai.com with your key, works too.",
+            "Ollama: port 11434 · LM Studio: 1234 · llama.cpp: 8080 · Unsloth Studio: 8888 · Mochu: 8080. A domain, or a cloud API like api.openai.com with your key, works too.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -622,7 +631,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                     Text(id, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Button(enabled = chosen != null, onClick = { chosen?.let { onUse(RemoteModelConfig(normalizeBaseUrl(url), key, it)) } }) { Text("Use this model") }
+            Button(enabled = chosen != null, onClick = { chosen?.let { onUse(RemoteModelConfig(normalizeBaseUrl(url), key, it, contextText.toIntOrNull() ?: 0)) } }) { Text("Use this model") }
         }
         message?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
         }

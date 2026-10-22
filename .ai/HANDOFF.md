@@ -9,7 +9,8 @@ Agent: Claude Code (Claude Opus 5.5)
 
 - **v2.0.0 is released** at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.0. It's on `main` at commit `78eb98c`, and installed on the owner's Samsung S25.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
-- **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`. The working tree is clean.
+- **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
+- **Uncommitted: server-model context fix** (see Work in Progress). Built, unit-tested and installed on the S25. The owner hasn't asked for it to be committed yet.
 
 ## Recently Completed
 
@@ -57,7 +58,27 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
-None in the app code.
+**Server model context size** (uncommitted):
+- The owner's Unsloth Studio server (192.168.1.213:8888) runs 131K context, but Mochu showed 32K. Unsloth's `/v1/models` has no context field and its `/props` is a stub, so Mochu fell back to 32,768.
+- `engine/RemoteEngine.kt`:
+  - `detectRemoteContext` now checks a context size the user typed first.
+  - Then Unsloth Studio's `/api/inference/status` (`context_length`, needs the Bearer API key).
+  - Then llama.cpp `/models` `meta.n_ctx` / `n_ctx_train`.
+  - Models match loosely through `sameRemoteModel` (ignores an "org/" prefix and case).
+  - `RemoteModelConfig.contextTokens` is saved as `remoteContextTokens`.
+- `viewmodel/BuilderViewModel.kt`:
+  - When the size is only a guess, the context meter is hidden. The owner asked for this: only show a size the server reported.
+  - The 32K guess is still used for trimming history.
+  - `recheckRemoteContext()` asks the server again after each reply, because Unsloth only loads a model on its first request.
+- `ui/ModelDownloads.kt`: an optional "Context size in tokens" field in the home-server settings. The port hint now lists Unsloth Studio: 8888.
+- `ui/AppShell.kt`: "Use this model" for a server model now leaves the Models tab and opens a new Chat, unless a reply is running.
+- **Summarizing:** it no longer starts after 6 messages. `compactHistoryIfNeeded` now runs only when the unsummarized history exceeds the snapshot budget. `buildAssistantSnapshot` sends all messages since the summary, trimmed by characters. Server models have no open session, so every turn rebuilds the history, and each rebuild used to fold anything older than 6 messages into a summary.
+- **Context used:** `RemoteEngine` sends `stream_options.include_usage` and keeps the server's `lastContextTokens`, which `refreshContextUsage` shows. A 400 response retries once without the option. The local estimate now counts all messages plus about 900 tokens of system prompt.
+- Test: `WebToolsTest.serverModelNamesMatchLoosely`.
+- **Verified on the S25 with the owner's Unsloth model** (`unsloth/LFM2.5-24B-A2B-GGUF`):
+  - The meter shows 131K.
+  - 5 exchanges ran with no summarizing.
+  - Context used rose with the server's counts: 436 → 570 → 574 → 666 → 921.
 
 ## Known Issues
 
@@ -78,10 +99,11 @@ None in the app code.
 
 ## Next Steps
 
-1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
-2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
-3. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
-4. **Better news cards:** read headlines from inside news pages instead of listing search results.
+1. **Commit the server-model fixes** when the owner asks.
+2. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
+3. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
+4. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
+5. **Better news cards:** read headlines from inside news pages instead of listing search results.
 
 ## Additional Context
 

@@ -339,7 +339,15 @@ fun OnDeviceApp(
                         onContextChange = { file, tokens -> vm.setModelContextTokens(app, file, tokens) },
                         onKvCacheTypeChange = { vm.setKvCacheType(app, it) },
                         onImageSettingsChange = { file, options -> vm.setImageSettings(app, file, options) },
-                        onUseRemote = { vm.useRemoteModel(app, it) },
+                        onUseRemote = {
+                            // Picking a server model goes straight to a new chat with it (not while a reply is running).
+                            val idle = !state.isBusy
+                            vm.useRemoteModel(app, it)
+                            if (idle) {
+                                pinnedTab = null
+                                vm.newConversation(app, CHAT_KIND_ASSISTANT)
+                            }
+                        },
                         onUseImported = { vm.useImportedModel(app, it) },
                         onDeleteImported = { vm.deleteImportedModel(app, it) },
                         onStopRemote = { vm.stopUsingRemoteModel(app) },

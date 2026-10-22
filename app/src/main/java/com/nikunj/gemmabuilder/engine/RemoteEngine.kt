@@ -20,7 +20,13 @@ import java.net.URL
 // A model on the user's own server (Ollama, LM Studio, llama.cpp server, vLLM, another Mochu...),
 // reached through its OpenAI-compatible API on the local network.
 
-data class RemoteModelConfig(val baseUrl: String, val apiKey: String, val model: String)
+data class RemoteModelConfig(
+    val baseUrl: String,
+    val apiKey: String,
+    val model: String,
+    /** Context window the user typed in; 0 asks the server. */
+    val contextTokens: Int = 0
+)
 
 private fun prefs(context: Context) = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -28,11 +34,12 @@ fun savedRemoteModelConfig(context: Context): RemoteModelConfig? {
     val p = prefs(context)
     val url = p.getString("remoteBaseUrl", null) ?: return null
     val model = p.getString("remoteModel", null) ?: return null
-    return RemoteModelConfig(url, p.getString("remoteApiKey", "").orEmpty(), model)
+    return RemoteModelConfig(url, p.getString("remoteApiKey", "").orEmpty(), model, p.getInt("remoteContextTokens", 0))
 }
 
 fun saveRemoteModelConfig(context: Context, config: RemoteModelConfig) {
-    prefs(context).edit().putString("remoteBaseUrl", config.baseUrl).putString("remoteApiKey", config.apiKey).putString("remoteModel", config.model).apply()
+    prefs(context).edit().putString("remoteBaseUrl", config.baseUrl).putString("remoteApiKey", config.apiKey).putString("remoteModel", config.model)
+        .putInt("remoteContextTokens", config.contextTokens).apply()
 }
 
 /** True when Chat and Code use the remote model instead of one on the phone. */
@@ -94,8 +101,15 @@ suspend fun listRemoteModels(baseUrl: String, apiKey: String): List<String> = wi
     }
 }
 
-class RemoteEngine(private val config: RemoteModelConfig) : BuilderEngine {
+class RemoteEngine(val config: RemoteModelConfig) : BuilderEngine {
     @Volatile private var lastStats: GenerationStats? = null
+
+    /** Tokens the last request used (prompt + reply), as the server counted them; null if it didn't say. */
+    @Volatile var lastContextTokens: Int? = null
+        private set
+
+    /** False once the server refused stream_options, so it isn't sent again. */
+    @Volatile private var askForUsage = true
 
     // Most servers accept OpenAI image parts; ones that don't answer with an error the user sees.
     override val supportsImages: Boolean get() = true
@@ -108,13 +122,15 @@ class RemoteEngine(private val config: RemoteModelConfig) : BuilderEngine {
             }
             put(JSONObject().put("type", "text").put("text", message))
         }
-        val body = JSONObject()
+        fun body(withUsage: Boolean) = JSONObject()
             .put("model", config.model)
             .put("stream", true)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", systemPrompt))
                 .put(JSONObject().put("role", "user").put("content", userContent)))
-        val connection = (URL("${config.baseUrl}/chat/completions").openConnection() as HttpURLConnection).apply {
+            // The final chunk then carries usage: the real size of what the server holds for this chat.
+            .apply { if (withUsage) put("stream_options", JSONObject().put("include_usage", true)) }
+        fun open() = (URL("${config.baseUrl}/chat/completions").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 8_000
@@ -127,8 +143,17 @@ class RemoteEngine(private val config: RemoteModelConfig) : BuilderEngine {
         val started = System.nanoTime()
         var pieces = 0
         var inThought = false
+        lastContextTokens = null
+        var connection = open()
         try {
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            connection.outputStream.use { it.write(body(askForUsage).toString().toByteArray()) }
+            // A strict server may reject stream_options: ask once more without it, and stop asking.
+            if (askForUsage && connection.responseCode == 400) {
+                connection.disconnect()
+                askForUsage = false
+                connection = open()
+                connection.outputStream.use { it.write(body(false).toString().toByteArray()) }
+            }
             val code = connection.responseCode
             if (code !in 200..299) {
                 val detail = runCatching { connection.errorStream?.bufferedReader()?.readText() }.getOrNull().orEmpty()
@@ -141,7 +166,13 @@ class RemoteEngine(private val config: RemoteModelConfig) : BuilderEngine {
                     if (!line.startsWith("data:")) continue
                     val payload = line.removePrefix("data:").trim()
                     if (payload == "[DONE]") break
-                    val delta = runCatching { JSONObject(payload).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") }.getOrNull() ?: continue
+                    val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                    chunk.optJSONObject("usage")?.let { usage ->
+                        val total = usage.optInt("total_tokens", 0).takeIf { it > 0 }
+                            ?: (usage.optInt("prompt_tokens", 0) + usage.optInt("completion_tokens", 0)).takeIf { it > 0 }
+                        if (total != null) lastContextTokens = total
+                    }
+                    val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
                     // Reasoning comes as reasoning_content (llama.cpp, vLLM, DeepSeek) or reasoning (Ollama, LM Studio).
                     val reasoning = delta.optString("reasoning_content").ifEmpty { delta.optString("reasoning") }.takeUnless { it == "null" }.orEmpty()
                     val content = delta.optString("content").takeUnless { it == "null" }.orEmpty()
@@ -169,11 +200,20 @@ class RemoteEngine(private val config: RemoteModelConfig) : BuilderEngine {
     override fun takeGenerationStats(): GenerationStats? = lastStats.also { lastStats = null }
 }
 
+/** Whether a server's model name is [model]: exact, or the same apart from an "org/" prefix or case. */
+fun sameRemoteModel(a: String?, model: String): Boolean {
+    if (a.isNullOrBlank()) return false
+    fun bare(s: String) = s.substringAfterLast('/').lowercase()
+    return a == model || a.equals(model, ignoreCase = true) || bare(a) == bare(model)
+}
+
 /**
- * The server's context window for [config]'s model, when it says: llama.cpp (/props), LM Studio
- * (/api/v0/models), vLLM and OpenRouter (/models fields), Ollama (/api/show). Null when unknown.
+ * The context window for [config]'s model: the size the user typed, or what the server says:
+ * Unsloth Studio (/api/inference/status), vLLM and OpenRouter (/models fields), llama.cpp (/props
+ * or /models meta), LM Studio (/api/v0/models), Ollama (/api/show). Null when unknown.
  */
 fun detectRemoteContext(config: RemoteModelConfig): Int? {
+    if (config.contextTokens > 0) return config.contextTokens
     val root = config.baseUrl.removeSuffix("/v1")
     fun get(url: String, body: String? = null): JSONObject? = runCatching {
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -187,9 +227,18 @@ fun detectRemoteContext(config: RemoteModelConfig): Int? {
             if (c.responseCode !in 200..299) null else JSONObject(c.inputStream.bufferedReader().readText())
         } finally { c.disconnect() }
     }.getOrNull()
+    // Unsloth Studio: the loaded model's runtime context (it loads a model on its first request).
+    get("$root/api/inference/status")?.let { s ->
+        val loaded = s.optJSONArray("loaded")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val isOurs = sameRemoteModel(s.optString("model_identifier"), config.model) ||
+            sameRemoteModel(s.optString("active_model"), config.model) || loaded.any { sameRemoteModel(it, config.model) }
+        if (isOurs) s.optInt("context_length", 0).takeIf { it > 0 }?.let { return it }
+    }
     get("${config.baseUrl}/models")?.optJSONArray("data")?.let { data ->
-        (0 until data.length()).mapNotNull { data.optJSONObject(it) }.firstOrNull { it.optString("id") == config.model }?.let { m ->
+        (0 until data.length()).mapNotNull { data.optJSONObject(it) }.firstOrNull { sameRemoteModel(it.optString("id"), config.model) }?.let { m ->
             listOf("max_model_len", "context_length", "context_window", "loaded_context_length").forEach { key -> m.optInt(key, 0).takeIf { it > 0 }?.let { return it } }
+            // llama.cpp server: the running window (n_ctx) when listed, else the model's own (n_ctx_train).
+            m.optJSONObject("meta")?.let { meta -> (meta.optInt("n_ctx", 0).takeIf { it > 0 } ?: meta.optInt("n_ctx_train", 0).takeIf { it > 0 })?.let { return it } }
         }
     }
     get("$root/props")?.let { p ->

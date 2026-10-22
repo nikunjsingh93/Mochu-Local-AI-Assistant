@@ -410,6 +410,22 @@ class BuilderViewModel : ViewModel() {
 
     private var idleUnloadJob: Job? = null
 
+    /** True while a server model's context window is the 32K guess rather than what the server said. */
+    private var remoteContextGuessed = false
+
+    /** After a reply from a server model whose context was guessed, asks the server again. */
+    private fun recheckRemoteContext() {
+        if (!remoteContextGuessed || engine !is RemoteEngine) return
+        val config = (engine as RemoteEngine).config
+        viewModelScope.launch {
+            val detected = withContext(Dispatchers.IO) { detectRemoteContext(config) } ?: return@launch
+            remoteContextGuessed = false
+            activeTokenWindow = detected
+            _uiState.update { it.copy(contextWindowTokens = detected) }
+            refreshContextUsage()
+        }
+    }
+
     /** Starts the idle clock: the chat model leaves memory after the chosen time without use. */
     private fun scheduleIdleUnload() {
         idleUnloadJob?.cancel()
@@ -858,12 +874,16 @@ class BuilderViewModel : ViewModel() {
             engine.close()
             engine = RemoteEngine(config)
             sessionFingerprint = null
-            val window = withContext(Dispatchers.IO) { detectRemoteContext(config) } ?: 32_768
+            val detected = withContext(Dispatchers.IO) { detectRemoteContext(config) }
+            // Some servers (Unsloth Studio) only load the model on its first request, so a guess is checked again after a reply.
+            remoteContextGuessed = detected == null
+            val window = detected ?: 32_768
             activeTokenWindow = window
             _uiState.update {
                 it.copy(
                     isBusy = false, gemmaLoaded = true, modelName = config.model, engineLabel = "${config.model} · your server",
-                    contextWindowTokens = window, contextUsedTokens = estimatedHistoryTokens().coerceAtMost(window),
+                    // The meter shows only a size the server reported; a guess is used for trimming but not shown.
+                    contextWindowTokens = detected, contextUsedTokens = detected?.let { estimatedHistoryTokens().coerceAtMost(it) },
                     status = "Using ${config.model} on your server..."
                 )
             }
@@ -1323,6 +1343,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 generationInProgress = false
                 generationJob = null
                 scheduleIdleUnload()
+                recheckRemoteContext()
                 _uiState.update { it.copy(isBusy = false, streamingThinking = null) }
                 refreshContextUsage()
             }
@@ -1604,6 +1625,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 generationInProgress = false
                 generationJob = null
                 scheduleIdleUnload()
+                recheckRemoteContext()
                 _uiState.update { it.copy(isBusy = false, streamingReply = null, streamingThinking = null, liveActivity = emptyList()) }
                 refreshContextUsage()
             }
@@ -1793,7 +1815,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         val earlier = messages.dropLast(1)
         val summarized = conversation?.summarizedCount?.coerceAtMost(earlier.size) ?: 0
         val summary = conversation?.summary.orEmpty().takeIf { summarized > 0 }.orEmpty()
-        val history = earlier.drop(summarized).takeLast(RECENT_MESSAGES_KEPT)
+        // Everything since the summary; the character budget below trims it to the window.
+        val history = earlier.drop(summarized)
             .joinToString("\n\n") { message ->
                 // Photos aren't resent to a fresh session; the history just notes them.
                 val photos = if (message.attachments.isNotEmpty()) " [sent ${message.attachments.size} photo(s)]" else ""
@@ -2618,6 +2641,9 @@ Rules:
         val conversation = conversations.firstOrNull { it.id == id } ?: return
         val foldEnd = messages.size - RECENT_MESSAGES_KEPT
         if (foldEnd <= conversation.summarizedCount) return
+        // Only when the history no longer fits the window: a big server window keeps the whole chat.
+        val historyChars = conversation.summary.length + messages.drop(conversation.summarizedCount).sumOf { it.text.take(2000).length + 12 }
+        if (historyChars <= snapshotCharBudget(activeTokenWindow) * 2 / 3) return
 
         _uiState.update {
             it.copy(
@@ -2682,7 +2708,9 @@ Write at most 120 words: what the user is building, requirements and preferences
     private fun refreshContextUsage() {
         val window = uiState.value.contextWindowTokens ?: return
         val sessionKey = uiState.value.activeConversationId.orEmpty()
-        val used = engine.remainingTokens(sessionKey)?.let { window - it } ?: estimatedHistoryTokens()
+        // A server model reports what the last request really used; local models report their session.
+        val used = (engine as? RemoteEngine)?.lastContextTokens
+            ?: engine.remainingTokens(sessionKey)?.let { window - it } ?: estimatedHistoryTokens()
         _uiState.update { it.copy(contextUsedTokens = used.coerceIn(0, window)) }
     }
 
@@ -2693,8 +2721,9 @@ Write at most 120 words: what the user is building, requirements and preferences
         val conversation = conversations.firstOrNull { it.id == uiState.value.activeConversationId }
         val summarized = conversation?.summarizedCount?.coerceAtMost(messages.size) ?: 0
         val summaryChars = if (summarized > 0) conversation?.summary.orEmpty().length else 0
-        val historyChars = messages.drop(summarized).takeLast(RECENT_MESSAGES_KEPT).sumOf { it.text.take(2000).length }
-        return (summaryChars + historyChars) / 4
+        val historyChars = messages.drop(summarized).sumOf { it.text.take(2000).length }
+        // The system prompt (instructions and memory) is sent with every request too.
+        return (summaryChars + historyChars + 3600) / 4
     }
 
     private fun conversationInfos(): List<ConversationInfo> = conversations
