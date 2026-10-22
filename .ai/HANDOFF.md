@@ -7,7 +7,7 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.0.2 is released** (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback. v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
+- **v2.0.2 is released** (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback and the hidden API key field (the APK was replaced once with the key-field change). v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
 - **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
 - **Server-model fixes** are committed in `8e75750`. The owner asked for them to go into the **existing v2.0.0 release** instead of a new one. The APK asset was replaced (same versionCode 28, signature verified) and the notes got a "Home-server models" section. The v2.0.0 git tag still points to `78eb98c`, so its source zip doesn't include these fixes.
@@ -71,7 +71,7 @@ These are the files changed in the last release, v2.0.0:
   - Server stopped (nginx 502): Gemma 4 E2B on the phone answered, with the note, and the meter showed 8.2K.
   - Server back: the server answered again, and the meter showed 262K.
   - Afterwards the switch was turned back off (default), and the test chats were deleted.
-- **Idea, not done:** the home-server API key field shows the key in plain text. It could be masked, like a password field.
+- **API key field:** the home-server API key is hidden like a password. An eye button shows it, and while it's shown it can be selected and there's a copy button. This was added to the v2.0.2 release by replacing its APK (same versionCode 30).
 
 **Notification icon, code downloads and code colors** (released in v2.0.1; verified on the S25):
 - `res/drawable/ic_stat_mochu.xml`: a one-color 24dp Mochu (blob with eyes, a smile and the sparkle). Every `setSmallIcon` now uses it (`ApiServer`, `ModelDownloadService`, `ReplyInBackground`, `TaskRunner`). Before, they used Android's stock icons.

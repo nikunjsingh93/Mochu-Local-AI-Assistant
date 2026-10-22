@@ -53,28 +53,26 @@ Try: *"https://www.amazon.com/dp/… show its current price"*, *"what's the NVDA
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/01-home.png" alt="Mochu's welcome screen" width="240" />
-  <img src="docs/screenshots/02-docs.png" alt="Summarizing an attached document" width="240" />
-  <img src="docs/screenshots/05-image.png" alt="An image created on the phone" width="240" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/07-browser.png" alt="The in-app Browser with Ask about this page" width="240" />
-  <img src="docs/screenshots/08-ask.png" alt="A summary of the open web page" width="240" />
-  <img src="docs/screenshots/06-memory.png" alt="Memory used in a later answer" width="240" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/03-task.png" alt="Scheduling a daily task from chat" width="240" />
-  <img src="docs/screenshots/04-tasks.png" alt="Timers, stopwatch, reminders and scheduled tasks" width="240" />
-  <img src="docs/screenshots/10-code-writing.png" alt="Code writing a React app" width="240" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/09-react.png" alt="A React todo app running in Code" width="240" />
-  <img src="docs/screenshots/11-python.png" alt="A Python program in the terminal" width="240" />
-</p>
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/01-home.png" width="200" /><br/><sub>Welcome screen</sub></td>
+    <td align="center"><img src="docs/screenshots/02-docs.png" width="200" /><br/><sub>Ask about documents</sub></td>
+    <td align="center"><img src="docs/screenshots/05-image.png" width="200" /><br/><sub>Images made on the phone</sub></td>
+    <td align="center"><img src="docs/screenshots/06-memory.png" width="200" /><br/><sub>Memory</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/07-browser.png" width="200" /><br/><sub>In-app Browser</sub></td>
+    <td align="center"><img src="docs/screenshots/08-ask.png" width="200" /><br/><sub>Ask about this page</sub></td>
+    <td align="center"><img src="docs/screenshots/03-task.png" width="200" /><br/><sub>Schedule a task from chat</sub></td>
+    <td align="center"><img src="docs/screenshots/04-tasks.png" width="200" /><br/><sub>Tasks</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/10-code-writing.png" width="200" /><br/><sub>Code writing a React app</sub></td>
+    <td align="center"><img src="docs/screenshots/09-react.png" width="200" /><br/><sub>React app running in Code</sub></td>
+    <td align="center"><img src="docs/screenshots/11-python.png" width="200" /><br/><sub>Python in the terminal</sub></td>
+    <td></td>
+  </tr>
+</table>
 
 ## Device Requirements
 

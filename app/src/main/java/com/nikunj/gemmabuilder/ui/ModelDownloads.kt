@@ -1,5 +1,9 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.runtime.mutableIntStateOf
@@ -601,9 +605,34 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             value = url, onValueChange = { url = it; models = emptyList(); message = null }, singleLine = true,
             label = { Text("Server address") }, placeholder = { Text("192.168.1.20:11434") }, modifier = Modifier.fillMaxWidth()
         )
+        // Hidden like a password; the eye shows it, and while shown it can be selected or copied.
+        var showKey by remember { mutableStateOf(false) }
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
         OutlinedTextField(
             value = key, onValueChange = { key = it.trim() }, singleLine = true,
-            label = { Text("API key (if the server needs one)") }, modifier = Modifier.fillMaxWidth()
+            label = { Text("API key (if the server needs one)") },
+            visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
+                else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
+            trailingIcon = {
+                Row {
+                    if (showKey && key.isNotEmpty()) {
+                        IconButton(onClick = {
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(key))
+                            android.widget.Toast.makeText(context, "API key copied", android.widget.Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(androidx.compose.material.icons.Icons.Rounded.ContentCopy, contentDescription = "Copy API key")
+                        }
+                    }
+                    IconButton(onClick = { showKey = !showKey }) {
+                        Icon(
+                            if (showKey) androidx.compose.material.icons.Icons.Rounded.VisibilityOff else androidx.compose.material.icons.Icons.Rounded.Visibility,
+                            contentDescription = if (showKey) "Hide API key" else "Show API key"
+                        )
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
             value = contextText, onValueChange = { contextText = it.filter(Char::isDigit).take(7) }, singleLine = true,
