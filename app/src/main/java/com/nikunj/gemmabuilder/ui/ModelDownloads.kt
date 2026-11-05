@@ -171,8 +171,17 @@ fun ModelDownloadsScreen(
                     Switch(checked = state.allowMobileDataDownloads, onCheckedChange = onAllowMobileDataChange)
                 }
 
-                OutlinedButton(onClick = onImportFile, modifier = Modifier.fillMaxWidth()) {
+                // Filled like Download; disabled while a file is being copied in.
+                Button(onClick = onImportFile, enabled = state.importingName == null, modifier = Modifier.fillMaxWidth()) {
                     Text("Import a .litertlm or .gguf file")
+                }
+                state.importingName?.let { name -> ImportProgress(name, state.importedBytes, state.importTotalBytes) }
+                state.importDoneName?.let { name ->
+                    Text(
+                        "✓ ${name.substringBeforeLast('.')} imported and in use. Send a message to load it.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
                 // The model in use gets its own section at the top; the other sections keep a fixed order.
                 LoadedModelSection(
@@ -760,5 +769,28 @@ private fun ImportedModelCard(
                 DangerOutlinedButton("Delete") { confirmDelete = true }
             }
         }
+    }
+}
+
+/** Copying an imported model into the app: a bar with percent and GB copied. */
+@Composable
+private fun ImportProgress(name: String, copied: Long, total: Long) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        val gb = { b: Long -> String.format(Locale.US, "%.1f", b / 1073741824.0) }
+        Text(
+            if (total > 0) "Importing ${name.substringBeforeLast('.')}… ${(copied * 100 / total).coerceIn(0, 100)}% · ${gb(copied)} / ${gb(total)} GB"
+            else "Importing ${name.substringBeforeLast('.')}… ${gb(copied)} GB",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        if (total > 0) {
+            LinearProgressIndicator(progress = { (copied.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        } else {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        Text(
+            "Copying the file into Mochu. Keep the app open until it's done.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

@@ -220,13 +220,33 @@ fun deleteOtherModelFormats(context: Context, keepModelName: String) {
         .forEach { it.delete() }
 }
 
-fun copyModel(resolver: ContentResolver, uri: Uri, outFile: File) {
+fun copyModel(resolver: ContentResolver, uri: Uri, outFile: File, onProgress: (Long) -> Unit = {}) {
     outFile.parentFile?.mkdirs()
     resolver.openInputStream(uri).use { input ->
         requireNotNull(input) { "Could not open selected file." }
-        outFile.outputStream().use { output -> input.copyTo(output) }
+        outFile.outputStream().use { output ->
+            val buffer = ByteArray(1024 * 1024)
+            var copied = 0L
+            var reported = 0L
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                output.write(buffer, 0, n)
+                copied += n
+                // Every 16 MB is plenty for a smooth bar.
+                if (copied - reported >= 16L * 1024 * 1024) { reported = copied; onProgress(copied) }
+            }
+            onProgress(copied)
+        }
     }
 }
+
+/** The picked file's size in bytes, or 0 when the provider doesn't say. */
+fun sizeForUri(resolver: ContentResolver, uri: Uri): Long = runCatching {
+    resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+        if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L
+    } ?: 0L
+}.getOrDefault(0L)
 
 data class EditOutcome(
     val writes: List<WriteFileAction>,

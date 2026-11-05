@@ -688,11 +688,13 @@ class BuilderViewModel : ViewModel() {
                 }
                 return@launch
             }
+            val totalBytes = withContext(Dispatchers.IO) { sizeForUri(context.contentResolver, uri) }
             _uiState.update {
                 it.copy(
                     isBusy = true,
                     status = "Importing model into app storage...",
-                    messages = it.messages + ChatMessage("assistant", "Importing model into app storage...")
+                    messages = it.messages + ChatMessage("assistant", "Importing model into app storage..."),
+                    importingName = importedName, importedBytes = 0, importTotalBytes = totalBytes, importDoneName = null
                 )
             }
             // The loaded engine may be memory-mapping the file we are about to overwrite or delete.
@@ -705,7 +707,7 @@ class BuilderViewModel : ViewModel() {
                     // Each import keeps its own file, next to earlier ones.
                     importedModelNames(context)
                     val target = importedModelFile(context, importedName)
-                    copyModel(context.contentResolver, uri, target)
+                    copyModel(context.contentResolver, uri, target) { copied -> _uiState.update { it.copy(importedBytes = copied) } }
                     saveModelName(context, importedName)
                     saveActiveModelPath(context, target.absolutePath)
                     setRemoteModelActive(context, false)
@@ -726,17 +728,24 @@ class BuilderViewModel : ViewModel() {
                         activeModelPath = importedModelFile(context, importedName).absolutePath,
                         remoteModel = null,
                         importedModels = importedModelNames(context),
-                        status = "$importedName imported. Type a message and tap Send to auto-load."
+                        status = "$importedName imported. Type a message and tap Send to auto-load.",
+                        importingName = null, importDoneName = importedName
                     )
                 } else {
                     it.copy(
                         isBusy = false,
+                        importingName = null,
                         messages = it.messages + ChatMessage("assistant", "Model import failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"),
                         status = "Model import failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
                     )
                 }
             }
             refreshPredictedWindow(context)
+            // The "imported" note on the Models page goes away after a while.
+            if (result.isSuccess) {
+                kotlinx.coroutines.delay(60_000)
+                _uiState.update { if (it.importDoneName == importedName) it.copy(importDoneName = null) else it }
+            }
         }
     }
 

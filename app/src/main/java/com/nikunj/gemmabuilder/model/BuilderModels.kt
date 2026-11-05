@@ -178,6 +178,12 @@ data class BuilderUiState(
     val remoteModel: RemoteModelConfig? = null,
     /** Models imported from files (file names). */
     val importedModels: List<String> = emptyList(),
+    /** A model file being imported: its name, and bytes copied / total (total 0 when unknown). */
+    val importingName: String? = null,
+    val importedBytes: Long = 0,
+    val importTotalBytes: Long = 0,
+    /** Shown on the Models page for a while after an import finishes. */
+    val importDoneName: String? = null,
     /** Image model Chat uses, and each image model's size and steps (file name → size to steps). */
     val activeImageModelId: String? = null,
     val imageSettings: Map<String, ImageOptions> = emptyMap(),

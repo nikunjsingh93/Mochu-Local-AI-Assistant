@@ -60,6 +60,12 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
+**Import progress** (uncommitted; verified on the Pixel):
+- `copyModel` copies in 1 MB chunks and reports progress every 16 MB. `sizeForUri` reads the size.
+- `BuilderUiState.importingName` / `importedBytes` / `importTotalBytes` / `importDoneName`.
+- The Models page shows a progress bar ("Importing X… 56% · 4.7 / 8.3 GB") under a filled import button, then "✓ X imported and in use" for 60 s.
+- Verified by importing LFM2.5-24B-A2B-UD-IQ3_XXS (8.3 GB, the owner's download) on the Pixel: about 25 s.
+
 **Combine devices (released in v2.1.0; verified on Pixel 8 Pro + Idea Tab Pro + onn tablet):** a GGUF model split across devices with llama.cpp RPC.
 - **Native** (`app/src/main/cpp/llama_bridge.cpp`, `-DGGML_RPC=ON` in `app/build.gradle.kts`):
   - `nativeSetCluster(endpoints, weights, localWeight)` sets the workers for the next load. `plan_cluster()` registers them through `ggml_backend_rpc_add_server` (loaded from `libggml-rpc.so`).
