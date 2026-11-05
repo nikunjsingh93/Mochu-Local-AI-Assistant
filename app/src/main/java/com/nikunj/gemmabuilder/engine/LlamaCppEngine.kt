@@ -81,6 +81,12 @@ class LlamaCppEngine(
     var sharedWith = 0
         private set
 
+    /**
+     * Text the next reply starts from, as if the model had written it (after a device dropped out
+     * mid-reply, the reply continues from where it stopped). Used once.
+     */
+    @Volatile var continueWith: String? = null
+
     /** A device holding part of the model went away; this engine can't be used again. */
     @Volatile var lostDevice = false
         private set
@@ -99,12 +105,16 @@ class LlamaCppEngine(
         val variant = LlamaCppNative.ensureInitialized(context.applicationInfo.nativeLibraryDir)
         require(variant.isNotEmpty()) { "No llama.cpp CPU backend could be loaded on this device." }
         // Paired devices that answer lend their memory; none means this device alone.
-        val devices = DeviceCluster.prepareForLoad(context)
+        val devices = DeviceCluster.prepareForLoad(context, java.io.File(modelPath).nameWithoutExtension)
         // Leave a couple of cores for the UI; big.LITTLE phones gain little past four threads.
         // With other devices every step waits for the slowest thread, so only fast cores are used.
         val threads = if (devices > 0) fastCoreCount() else (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 4)
         val kvType = savedKvCacheType(context)
-        val loaded = LlamaCppNative.nativeLoad(modelPath, maxNumTokens, threads, kvType.ordinal)
+        val loaded = try {
+            LlamaCppNative.nativeLoad(modelPath, maxNumTokens, threads, kvType.ordinal)
+        } finally {
+            DeviceCluster.loadFinished()
+        }
         require(loaded != 0L) {
             if (devices > 0) "llama.cpp could not load this model across your devices. Check they're still sharing, or turn off Combine devices."
             else "llama.cpp could not load this .gguf model (unsupported architecture or not enough memory)."
@@ -147,6 +157,10 @@ class LlamaCppEngine(
                 LlamaCppNative.SEND_CONTEXT_FULL -> error("Prompt is larger than the $contextSize-token context window.")
                 LlamaCppNative.SEND_TEMPLATE_FAILED -> error("This model's chat template could not be applied.")
                 else -> error("llama.cpp failed while reading the prompt.")
+            }
+            continueWith?.takeIf { it.isNotEmpty() }?.let { written ->
+                continueWith = null
+                if (LlamaCppNative.nativeInject(h, written)) emit(written)
             }
             val decodeStart = System.nanoTime()
             var tokens = 0
@@ -197,7 +211,7 @@ class LlamaCppEngine(
         val h = handle
         handle = 0L
         sessionKey = null
-        if (sharedWith > 0) DeviceCluster.releaseWifi()
+        if (sharedWith > 0) DeviceCluster.onUnloaded()
         // Queue the free behind any in-flight native call, and wait briefly so memory is released
         // before the next model loads.
         runCatching {

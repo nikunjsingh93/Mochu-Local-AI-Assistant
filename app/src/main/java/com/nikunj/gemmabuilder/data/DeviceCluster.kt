@@ -66,8 +66,16 @@ private fun pipe(input: InputStream, output: OutputStream, onEnd: () -> Unit) {
 }
 
 /** Joins two sockets both ways; closes both when one side ends. */
-private fun join(a: Socket, b: Socket) {
-    val close = { runCatching { a.close() }; runCatching { b.close() }; Unit }
+private fun join(a: Socket, b: Socket) = joinThen(a, b) {}
+
+/** [join], then [onEnd] once, when the pair has closed. */
+private fun joinThen(a: Socket, b: Socket, onEnd: () -> Unit) {
+    val ended = java.util.concurrent.atomic.AtomicBoolean(false)
+    val close = {
+        runCatching { a.close() }; runCatching { b.close() }
+        if (ended.compareAndSet(false, true)) onEnd()
+        Unit
+    }
     pipe(a.getInputStream(), b.getOutputStream(), close)
     pipe(b.getInputStream(), a.getOutputStream(), close)
 }
@@ -95,6 +103,13 @@ fun fastCoreCount(): Int = runCatching {
     (if (top > 0) freq.count { it.value >= top * 0.8 } else allowed.size / 2).coerceIn(2, 6)
 }.getOrDefault(4)
 
+/** The device's total RAM in MB (what Android reports, a little under the advertised size). */
+fun totalMemoryMb(context: Context): Long {
+    val info = ActivityManager.MemoryInfo()
+    context.getSystemService(ActivityManager::class.java).getMemoryInfo(info)
+    return info.totalMem / (1024 * 1024)
+}
+
 fun freeMemoryMb(context: Context): Long {
     val info = ActivityManager.MemoryInfo()
     context.getSystemService(ActivityManager::class.java).getMemoryInfo(info)
@@ -115,6 +130,9 @@ class ClusterWorkerService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     @Volatile private var peer: String? = null
+    @Volatile private var peerName: String? = null
+    /** Open connections from the main device (llama.cpp may open more than one). */
+    private val peerConnections = java.util.concurrent.atomic.AtomicInteger(0)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -165,19 +183,47 @@ class ClusterWorkerService : Service() {
                             out.write("NO\n".toByteArray()); client.close(); return@runCatching
                         }
                         if (parts.getOrNull(2) == "INFO") {
-                            out.write("OK ${freeMemoryMb(this)} ${Build.MODEL.replace(' ', '_')}\n".toByteArray()); client.close(); return@runCatching
+                            out.write("OK ${freeMemoryMb(this)} ${Build.MODEL.replace(' ', '_')} ${totalMemoryMb(this)}\n".toByteArray()); client.close(); return@runCatching
+                        }
+                        // One main device at a time: another one is turned away while this one is connected.
+                        val from = client.inetAddress.hostAddress
+                        if (peer != null && peer != from && peerConnections.get() > 0) {
+                            out.write("BUSY\n".toByteArray()); client.close(); return@runCatching
                         }
                         out.write("OK\n".toByteArray())
                         client.soTimeout = 0
                         val rpc = Socket("127.0.0.1", RPC_PORT).apply { tcpNoDelay = true }
-                        peer = client.inetAddress.hostAddress
+                        peer = from
+                        parts.getOrNull(3)?.takeIf { parts.getOrNull(2) == "CONNECT" }?.let { peerName = it.replace('_', ' ') }
+                        val model = parts.getOrNull(4)?.takeIf { parts.getOrNull(2) == "CONNECT" } ?: "Unknown model"
+                        if (peerConnections.get() == 0) watchCache(model)
+                        peerConnections.incrementAndGet()
                         writeStatus("running", code)
-                        updateNotification("Sharing with ${peer} · code $code")
-                        join(client, rpc)
+                        updateNotification("Connected to ${peerName ?: peer}")
+                        joinThen(client, rpc) {
+                            // The main device let go (model unloaded, or it left): ready for any device again.
+                            if (peerConnections.decrementAndGet() == 0) {
+                                peer = null
+                                peerName = null
+                                writeStatus("running", code)
+                                updateNotification("Ready · pairing code $code")
+                            }
+                        }
                     }.onFailure { runCatching { client.close() } }
                 }, "cluster-gate").apply { isDaemon = true }.start()
             }
         }, "cluster-accept").apply { isDaemon = true }.start()
+    }
+
+    /** While a main device is connected, labels new cache files with the model it's loading. */
+    private fun watchCache(model: String) {
+        Thread({
+            do {
+                Thread.sleep(5_000)
+                ClusterCache.label(this, model)
+            } while (peerConnections.get() > 0 && running)
+            ClusterCache.label(this, model)
+        }, "cluster-cache").apply { isDaemon = true }.start()
     }
 
     private fun advertise() {
@@ -220,8 +266,9 @@ class ClusterWorkerService : Service() {
     }
 
     private fun writeStatus(state: String, code: String, error: String? = null) {
-        val json = JSONObject().put("state", state).put("code", code).put("freeMb", freeMemoryMb(this))
+        val json = JSONObject().put("state", state).put("code", code).put("freeMb", freeMemoryMb(this)).put("totalMb", totalMemoryMb(this))
         peer?.let { json.put("peer", it) }
+        peerName?.let { json.put("peerName", it) }
         error?.let { json.put("error", it) }
         statusFile(this).writeText(json.toString())
     }
@@ -299,6 +346,24 @@ object DeviceCluster {
     private var wifiLock: WifiManager.WifiLock? = null
     /** The devices the loaded model uses. */
     @Volatile private var active: List<ClusterDevice> = emptyList()
+        set(value) { field = value; _connected.value = value.map { it.id } }
+    private val _connected = MutableStateFlow<List<String>>(emptyList())
+    private val _loadingOn = MutableStateFlow<List<String>>(emptyList())
+    /** Names of the other devices a model is loading onto right now (empty when not loading). */
+    val loadingOn: StateFlow<List<String>> = _loadingOn.asStateFlow()
+
+    fun loadFinished() { _loadingOn.value = emptyList() }
+
+    /** IDs of the devices holding part of the loaded model, for the Models page. */
+    val connected: StateFlow<List<String>> = _connected.asStateFlow()
+
+    /** The loaded model no longer uses other devices (unloaded, or switched to another model). */
+    fun onUnloaded() {
+        active = emptyList()
+        releaseWifi()
+    }
+    /** The devices the model was using when one dropped out. */
+    @Volatile private var lastLost: List<ClusterDevice> = emptyList()
 
     private fun prefs(context: Context) = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -326,14 +391,22 @@ object DeviceCluster {
      * Asks a worker for its free memory with [code]: the free MB, or null if it's unreachable,
      * or -1 if it refused the code. Runs on a background thread.
      */
-    fun ask(host: String, port: Int, code: String): Long? = runCatching {
+    fun ask(host: String, port: Int, code: String): Long? = askMemory(host, port, code)?.first
+
+    /**
+     * Free and total memory (MB) of a worker: null if it's unreachable; free is -1 if it refused
+     * the code; total is 0 for a worker too old to report it. Runs on a background thread.
+     */
+    fun askMemory(host: String, port: Int, code: String): Pair<Long, Long>? = runCatching {
         Socket().use { s ->
             s.connect(InetSocketAddress(host, port), 3_000)
             s.soTimeout = 4_000
             s.tcpNoDelay = true
             s.getOutputStream().write("$HELLO $code INFO\n".toByteArray())
             val reply = readLine(s.getInputStream())
-            if (reply.startsWith("OK")) reply.split(' ').getOrNull(1)?.toLongOrNull() ?: 0L else -1L
+            if (!reply.startsWith("OK")) return@runCatching -1L to 0L
+            val parts = reply.split(' ')
+            (parts.getOrNull(1)?.toLongOrNull() ?: 0L) to (parts.getOrNull(3)?.toLongOrNull() ?: 0L)
         }
     }.getOrNull()
 
@@ -408,7 +481,7 @@ object DeviceCluster {
                     runCatching {
                         local.tcpNoDelay = true
                         val remote = Socket().apply { tcpNoDelay = true; connect(InetSocketAddress(device.host, device.port), 5_000) }
-                        remote.getOutputStream().write("$HELLO ${device.code}\n".toByteArray())
+                        remote.getOutputStream().write("$HELLO ${device.code} CONNECT ${Build.MODEL.replace(' ', '_')} $loadingModel\n".toByteArray())
                         remote.soTimeout = 5_000
                         if (!readLine(remote.getInputStream()).startsWith("OK")) error("refused")
                         remote.soTimeout = 0
@@ -425,7 +498,11 @@ object DeviceCluster {
      * llama.cpp to use the ones that answer. Returns how many are used (0 = this device only).
      * Runs on a background thread.
      */
-    fun prepareForLoad(context: Context): Int {
+    /** File name of the model being loaded, sent to workers so they can label what they cache. */
+    @Volatile private var loadingModel = "model"
+
+    fun prepareForLoad(context: Context, modelName: String = "model"): Int {
+        loadingModel = modelName.replace(Regex("""\s+"""), "_")
         val devices = if (enabled(context)) paired(context) else emptyList()
         val ready = devices.mapNotNull { d -> ask(d.host, d.port, d.code)?.takeIf { it > 0 }?.let { d to it } }
         active = ready.map { it.first }
@@ -435,6 +512,7 @@ object DeviceCluster {
             releaseWifi()
             return 0
         }
+        _loadingOn.value = ready.map { it.first.name }
         val endpoints = ready.map { (d, _) -> "127.0.0.1:${relayFor(d)}" }.toTypedArray()
         // Shares follow free memory: a device with more room holds more layers.
         val weights = ready.map { (_, freeMb) -> freeMb.toFloat() }.toFloatArray()
@@ -453,8 +531,26 @@ object DeviceCluster {
     fun onLost() {
         relays.values.forEach { runCatching { it.close() } }
         relays.clear()
+        if (active.isNotEmpty()) lastLost = active
         active = emptyList()
         releaseWifi()
+    }
+
+    /** Names of the devices that dropped out (or that didn't answer), for messages. */
+    fun lostNames(): String = lastLost.filter { (ask(it.host, it.port, it.code) ?: -1L) < 0 }.ifEmpty { lastLost }
+        .joinToString(" and ") { it.name }.ifBlank { "A device" }
+
+    /**
+     * After a device dropped out: waits up to [timeoutMs] for every device the model was using to
+     * answer again (a Wi-Fi blip, a screen that briefly turned off). Runs on a background thread.
+     */
+    fun waitForLost(timeoutMs: Long): Boolean {
+        val until = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < until) {
+            if (lastLost.isNotEmpty() && lastLost.all { (ask(it.host, it.port, it.code) ?: -1L) >= 0 }) return true
+            Thread.sleep(1_000)
+        }
+        return false
     }
 
     private fun holdWifi(context: Context) {
@@ -467,5 +563,47 @@ object DeviceCluster {
     fun releaseWifi() {
         wifiLock?.takeIf { it.isHeld }?.release()
         wifiLock = null
+    }
+}
+
+/**
+ * What other devices' models left in this device's cache (llama.cpp names files by content hash),
+ * grouped by model so each can be deleted on its own.
+ */
+object ClusterCache {
+    data class Entry(val model: String, val bytes: Long, val files: List<File>)
+
+    fun dir(context: Context) = File(context.filesDir, "cluster_cache")
+    private fun index(context: Context) = File(context.filesDir, "cluster_cache_index.json")
+
+    private fun readIndex(context: Context): JSONObject =
+        runCatching { JSONObject(index(context).readText()) }.getOrDefault(JSONObject())
+
+    /** Gives every cache file without a model the name [model]. */
+    @Synchronized
+    fun label(context: Context, model: String) {
+        val idx = readIndex(context)
+        var changed = false
+        dir(context).walkTopDown().filter { it.isFile }.forEach { f ->
+            val key = f.relativeTo(dir(context)).path
+            if (!idx.has(key)) { idx.put(key, model); changed = true }
+        }
+        if (changed) runCatching { index(context).writeText(idx.toString()) }
+    }
+
+    /** The cached models, biggest first; files from before labeling count as "Earlier models". */
+    fun list(context: Context): List<Entry> {
+        val idx = readIndex(context)
+        return dir(context).walkTopDown().filter { it.isFile }
+            .groupBy { f -> idx.optString(f.relativeTo(dir(context)).path).ifBlank { "Earlier models" } }
+            .map { (model, files) -> Entry(model, files.sumOf { it.length() }, files) }
+            .sortedByDescending { it.bytes }
+    }
+
+    @Synchronized
+    fun delete(context: Context, entry: Entry) {
+        val idx = readIndex(context)
+        entry.files.forEach { f -> f.delete(); idx.remove(f.relativeTo(dir(context)).path) }
+        runCatching { index(context).writeText(idx.toString()) }
     }
 }

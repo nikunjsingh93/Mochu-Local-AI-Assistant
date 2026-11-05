@@ -410,6 +410,44 @@ class BuilderViewModel : ViewModel() {
 
     private var idleUnloadJob: Job? = null
 
+    /** True while a message is being answered again after a device dropped out (one retry only). */
+    private var resendingAfterLostDevice = false
+    /** Added under the retried reply when it ran on this device alone. */
+    private var lostDeviceNote: String? = null
+    /** The reply written so far when a device dropped out (raw, thinking included). */
+    private var partialReplyRaw = ""
+    /** What the next reply continues from, after a device came back or the model moved here. */
+    private var continueReplyFrom: String? = null
+
+    /**
+     * A device holding part of the model dropped out during [prompt]: waits up to 10 s for it,
+     * reloads (across the devices that answer, or here alone), and answers the message again.
+     */
+    private fun recoverAndResend(context: Context, prompt: String, history: List<ChatMessage>) {
+        dropEngineIfDeviceLost()
+        resendingAfterLostDevice = true
+        val written = partialReplyRaw
+        viewModelScope.launch {
+            val names = withContext(Dispatchers.IO) { DeviceCluster.lostNames() }
+            // The reply so far stays on screen while Mochu waits.
+            val soFar = splitThinking(written).answer.trim()
+            _uiState.update {
+                it.copy(
+                    isBusy = true,
+                    messages = history + ChatMessage("user", prompt),
+                    status = "$names stopped responding. Waiting for it to come back…",
+                    streamingReply = (if (soFar.isNotEmpty()) "$soFar\n\n" else "") +
+                        "_$names stopped responding. Waiting up to 10 seconds for it to come back…_"
+                )
+            }
+            val back = withContext(Dispatchers.IO) { DeviceCluster.waitForLost(10_000) }
+            lostDeviceNote = if (back) null else "_$names didn't come back, so this device finished the reply on its own._"
+            continueReplyFrom = written
+            _uiState.update { it.copy(isBusy = false, messages = history, streamingReply = null, status = if (back) "$names is back. Reloading the model…" else "Continuing on this device…") }
+            generateAssistantReply(context, prompt)
+        }
+    }
+
     /** After a device sharing the model went away: unload, so the next message loads it again. */
     private fun dropEngineIfDeviceLost() {
         if ((engine as? LlamaCppEngine)?.lostDevice != true) return
@@ -947,7 +985,7 @@ class BuilderViewModel : ViewModel() {
                 val newEngine = LlamaCppEngine(context.applicationContext, file.absolutePath, maxNumTokens, visionFileFor(context, localName)?.absolutePath)
                 newEngine.load()
                 engine = newEngine
-                "llama.cpp CPU" to " (${newEngine.description})"
+                (if (newEngine.sharedWith > 0) "${newEngine.sharedWith + 1} devices" else "llama.cpp CPU") to " (${newEngine.description})"
             } else {
                 val newEngine = LiteRtGemmaEngine(
                     context = context.applicationContext,
@@ -1413,6 +1451,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         val spokenTurn = voiceTurnPending
         voiceTurnPending = false
         generationJob = viewModelScope.launch {
+            // The chat before this message, so it can be answered again if a sharing device drops out.
+            var retryHistory: List<ChatMessage>? = null
             try {
                 if (!uiState.value.modelReady) {
                     _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
@@ -1420,6 +1460,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 }
                 val images = if (presetResearch == null) uiState.value.chatImages else emptyList()
                 val attachedDocs = if (presetResearch == null) uiState.value.chatDocs else emptyList()
+                if (images.isEmpty() && attachedDocs.isEmpty() && presetResearch == null) retryHistory = uiState.value.messages
                 val pendingMessages = uiState.value.messages + ChatMessage("user", prompt, attachments = images + attachedDocs)
                 _uiState.update {
                     it.copy(
@@ -1554,6 +1595,9 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 // When reasoning started and ended, for the "Thought for 12s" label.
                 var thinkingStartedAtMs = 0L
                 var thinkingEndedAtMs = 0L
+                // After a device dropped out mid-reply: carry on from the text already written.
+                (engine as? LlamaCppEngine)?.continueWith = continueReplyFrom
+                continueReplyFrom = null
                 val result = runCatching {
                     engine.generate(sessionKey, message, assistantSystemPrompt(), thinking = uiState.value.thinkingEnabled, images = images,
                         thinkingBudget = thinkingBudget(uiState.value.thinkingLevel))
@@ -1592,6 +1636,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 val stopNote = (result.exceptionOrNull() as? StopGeneration)?.reason
                     // A device sharing the model dropped out: say why the reply ended early.
                     ?: result.exceptionOrNull()?.message?.takeIf { (engine as? LlamaCppEngine)?.lostDevice == true }
+                partialReplyRaw = output.toString()
                 val split = splitThinking(output.toString())
                 val thinkingSeconds = when {
                     split.thinking.isEmpty() || thinkingStartedAtMs == 0L -> 0
@@ -1641,7 +1686,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 val finalMessages = uiState.value.messages +
                     ChatMessage(
                         "assistant",
-                        withSources + fallbackNote?.let { "\n\n$it" }.orEmpty(),
+                        withSources + fallbackNote?.let { "\n\n$it" }.orEmpty() + lostDeviceNote?.let { "\n\n$it" }.orEmpty(),
                         statsInline = metrics,
                         activity = research?.steps.orEmpty(),
                         thinking = split.thinking,
@@ -1667,9 +1712,14 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 generationInProgress = false
                 generationJob = null
                 scheduleIdleUnload()
-                dropEngineIfDeviceLost()
+                lostDeviceNote = null
+                val lost = (engine as? LlamaCppEngine)?.lostDevice == true
+                val canRetry = !resendingAfterLostDevice && !stopRequested
+                resendingAfterLostDevice = false
+                val history = retryHistory
                 recheckRemoteContext()
                 _uiState.update { it.copy(isBusy = false, streamingReply = null, streamingThinking = null, liveActivity = emptyList()) }
+                if (lost && canRetry && history != null) recoverAndResend(context, prompt, history) else dropEngineIfDeviceLost()
                 refreshContextUsage()
             }
         }

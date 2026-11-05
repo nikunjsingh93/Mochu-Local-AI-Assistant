@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.rounded.Description
@@ -587,10 +588,17 @@ internal fun LoadingModelRow(modelName: String) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
             Spacer(Modifier.size(10.dp))
-            Text("Loading $modelName…", style = MaterialTheme.typography.bodyMedium)
+            // Across devices: say how many, since sending their part over Wi-Fi takes longer.
+            val others by DeviceCluster.loadingOn.collectAsState()
+            Text(
+                if (others.isEmpty()) "Loading $modelName…" else "Loading $modelName on ${others.size + 1} devices…",
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
+        val others by DeviceCluster.loadingOn.collectAsState()
         Text(
-            "The first message after opening the app takes a few seconds while the model loads.",
+            if (others.isNotEmpty()) "Sending part of the model to ${others.joinToString(" and ")} over Wi-Fi. The first time can take a minute; after that it's cached there."
+            else "The first message after opening the app takes a few seconds while the model loads.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

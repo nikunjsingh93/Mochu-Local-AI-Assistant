@@ -96,32 +96,67 @@ fun CombineDevicesSetting() {
         if (on) {
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Pairing code", style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        sharing.optString("code").ifBlank { ClusterWorkerService.pairingCode(context) },
-                        fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 8.sp
-                    )
                     val peer = sharing.optString("peer")
-                    Text(
-                        when {
-                            state == "starting" -> "Starting…"
-                            peer.isNotBlank() -> "Sharing with $peer"
-                            else -> "Ready · ${String.format(Locale.US, "%.1f", sharing.optLong("freeMb") / 1024.0)} GB free · enter this code on the other device"
-                        },
-                        style = MaterialTheme.typography.labelSmall
-                    )
+                    if (peer.isNotBlank()) {
+                        // Connected: it shares with this one device only, so the code isn't needed.
+                        Text("✓ Connected", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            sharing.optString("peerName").ifBlank { peer },
+                            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "This device holds part of the model for it. Keep Mochu open and the screen on.",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    } else {
+                        Text("Pairing code", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            sharing.optString("code").ifBlank { ClusterWorkerService.pairingCode(context) },
+                            fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 8.sp
+                        )
+                        Text(
+                            if (state == "starting") "Starting…"
+                            else "Ready · ${memoryText(sharing.optLong("freeMb"), sharing.optLong("totalMb"))} · enter this code on the other device",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
             }
         } else if (state == "error") {
             Text("Sharing stopped: ${sharing.optString("error")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         }
+        // Model parts other devices sent here are kept so the next load is quick; each model can be removed.
+        var cached by remember { mutableStateOf<List<ClusterCache.Entry>>(emptyList()) }
+        LaunchedEffect(on) { cached = withContext(Dispatchers.IO) { ClusterCache.list(context) } }
+        if (cached.isNotEmpty()) {
+            Text("Model parts kept here", style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (on) "Kept so the next shared load is quick. Stop sharing to delete them." else "Kept so the next shared load is quick.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            cached.forEach { entry ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${entry.model} · ${String.format(Locale.US, "%.1f", entry.bytes / 1073741824.0)} GB",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(enabled = !on, onClick = {
+                        scope.launch {
+                            cached = withContext(Dispatchers.IO) { ClusterCache.delete(context, entry); ClusterCache.list(context) }
+                        }
+                    }) { Text("Delete cache") }
+                }
+            }
+        }
 
         // ---- Other devices helping this one ----
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Use other devices for GGUF models")
+                Text("Create a cluster with multiple devices")
                 Text(
-                    "Paired devices that are sharing hold part of the model. Applies the next time a GGUF model loads.",
+                    "Paired devices that are sharing each hold part of a GGUF model. Applies the next time a GGUF model loads.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -131,25 +166,45 @@ fun CombineDevicesSetting() {
         if (useOthers) {
             // Free memory here and on each paired device, checked every few seconds.
             var localFreeMb by remember { mutableStateOf(freeMemoryMb(context)) }
-            var deviceFreeMb by remember { mutableStateOf<Map<String, Long?>>(emptyMap()) }
+            val localTotalMb = remember { totalMemoryMb(context) }
+            var deviceMemory by remember { mutableStateOf<Map<String, Pair<Long, Long>?>>(emptyMap()) }
             LaunchedEffect(paired) {
                 while (true) {
                     localFreeMb = freeMemoryMb(context)
-                    deviceFreeMb = withContext(Dispatchers.IO) {
-                        paired.associate { d -> d.id to DeviceCluster.ask(d.host, d.port, d.code)?.takeIf { it >= 0 } }
+                    deviceMemory = withContext(Dispatchers.IO) {
+                        paired.associate { d -> d.id to DeviceCluster.askMemory(d.host, d.port, d.code)?.takeIf { it.first >= 0 } }
                     }
                     delay(5_000)
                 }
             }
-            CombinedMemory(localFreeMb, paired.map { it.name to deviceFreeMb[it.id] })
+            CombinedMemory(
+                listOf(DeviceMemory("This device", localFreeMb, localTotalMb)) +
+                    paired.map { d -> deviceMemory[d.id].let { m -> DeviceMemory(d.name, m?.first, m?.second ?: 0L) } }
+            )
             Text(
                 "You can pair several devices; each one sharing holds part of the model.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            val connected by DeviceCluster.connected.collectAsState()
+            if (connected.isNotEmpty()) {
+                Text(
+                    "Model running on ${connected.size + 1} devices",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             paired.forEach { device ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("✓ ${device.name} · ${device.host}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text("${device.name} · ${device.host}", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (device.id in connected) "● Connected · holding part of the model" else "Paired · used when a GGUF model loads",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (device.id in connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     TextButton(onClick = { DeviceCluster.forget(context, device.id); paired = DeviceCluster.paired(context) }) { Text("Forget") }
                 }
             }
@@ -212,22 +267,31 @@ fun CombineDevicesSetting() {
  * Free memory for a model across devices: a bar split by device and the approximate total. Android
  * keeps some memory back, so the model should stay a bit under the total.
  */
+/** One device's memory: [freeMb] null when it isn't sharing; [totalMb] 0 when unknown. */
+private data class DeviceMemory(val name: String, val freeMb: Long?, val totalMb: Long)
+
+private fun gbText(mb: Long) = String.format(Locale.US, if (mb >= 10 * 1024) "%.0f GB" else "%.1f GB", mb / 1024.0)
+
+/** "6.6 GB free / 12 GB", or just "6.6 GB free" when the total is unknown. */
+private fun memoryText(freeMb: Long, totalMb: Long) =
+    "${gbText(freeMb)} free" + if (totalMb > 0) " / ${String.format(Locale.US, "%.0f", Math.ceil(totalMb / 1024.0))} GB" else ""
+
 @Composable
-private fun CombinedMemory(localFreeMb: Long, devices: List<Pair<String, Long?>>) {
-    val parts = listOf("This device" to localFreeMb) + devices.mapNotNull { (name, mb) -> mb?.let { name to it } }
+private fun CombinedMemory(devices: List<DeviceMemory>) {
+    val parts = devices.filter { it.freeMb != null }.map { it.name to it.freeMb!! }
     val total = parts.sumOf { it.second }.coerceAtLeast(1)
+    val totalRam = devices.filter { it.freeMb != null }.sumOf { it.totalMb }
     val colors = listOf(
         MaterialTheme.colorScheme.primary,
         MaterialTheme.colorScheme.tertiary,
         MaterialTheme.colorScheme.secondary,
         MaterialTheme.colorScheme.error
     )
-    fun gb(mb: Long) = String.format(Locale.US, "%.1f GB", mb / 1024.0)
     Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Memory for models", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                Text("≈ ${gb(total)} free", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("≈ ${memoryText(total, totalRam)}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             }
             Row(
                 Modifier
@@ -244,15 +308,15 @@ private fun CombinedMemory(localFreeMb: Long, devices: List<Pair<String, Long?>>
                     )
                 }
             }
-            parts.forEachIndexed { i, (name, mb) ->
+            devices.filter { it.freeMb != null }.forEachIndexed { i, d ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.foundation.layout.Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(colors[i % colors.size]))
-                    Text("  $name", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                    Text(gb(mb), style = MaterialTheme.typography.labelMedium)
+                    Text("  ${d.name}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    Text(memoryText(d.freeMb!!, d.totalMb), style = MaterialTheme.typography.labelMedium)
                 }
             }
-            devices.filter { it.second == null }.forEach { (name, _) ->
-                Text("$name: not sharing right now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            devices.filter { it.freeMb == null }.forEach { d ->
+                Text("${d.name}: not sharing right now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(
                 "Approximate: Android keeps some memory back, so pick a model a bit smaller than this.",

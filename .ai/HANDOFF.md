@@ -7,7 +7,8 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.0.3 is released** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
+- **v2.1.0 is released** (versionCode 32) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.0, with Combine devices (experimental).
+- **v2.0.3** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
 - **v2.0.2** was released (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback and the hidden API key field (the APK was replaced once with the key-field change). v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
 - **The agent-memory files** (`AGENTS.md`, `CLAUDE.md`, `.ai/`) are committed in `c6c5c28`.
@@ -59,7 +60,7 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
-**Combine devices (Day 1, uncommitted; verified on Pixel 8 Pro + Idea Tab Pro):** a GGUF model split across devices with llama.cpp RPC.
+**Combine devices (released in v2.1.0; verified on Pixel 8 Pro + Idea Tab Pro + onn tablet):** a GGUF model split across devices with llama.cpp RPC.
 - **Native** (`app/src/main/cpp/llama_bridge.cpp`, `-DGGML_RPC=ON` in `app/build.gradle.kts`):
   - `nativeSetCluster(endpoints, weights, localWeight)` sets the workers for the next load. `plan_cluster()` registers them through `ggml_backend_rpc_add_server` (loaded from `libggml-rpc.so`).
   - This device keeps the first layers by its share, and the workers get the rest via `tensor_split` / `n_gpu_layers`.
@@ -87,6 +88,25 @@ These are the files changed in the last release, v2.0.0:
   - A drop mid-reply keeps the partial text plus the note, with no crash; "continue the story" then ran alone at 10.1 tok/s.
   - The split speed stays 9.1 tok/s.
 - **Memory view:** the Models page "Memory for models" card shows this device plus each paired device's free RAM (asked over the gate every 5 s) as a colored bar and an approximate total (9.8 GB on Pixel + Idea Tab), and marks devices that aren't sharing. Several paired devices already work: each one that's sharing gets a share of the layers by free MB.
+- **Auto-reconnect and continue** (`BuilderViewModel.recoverAndResend`):
+  - When a device drops mid-reply (or before it), the Chat shows the text so far plus "X stopped responding. Waiting up to 10 seconds…" and polls with `DeviceCluster.waitForLost(10_000)`.
+  - Then it reloads (across the devices that answer, else alone) and re-asks the same message with `LlamaCppEngine.continueWith` = the raw text written so far, which is injected with `nativeInject`, so the reply continues where it stopped.
+  - If the device didn't come back, the reply ends with "X didn't come back, so this device finished the reply on its own."
+  - One retry per message (`resendingAfterLostDevice`). Only for Chat messages without photos, documents or web research.
+  - Verified: a 3 s drop reconnected across both and continued at 9.3 tok/s; a permanent drop continued alone with the note.
+- **Worker shows who it's connected to; one main device only:** the main device's relay sends `MOCHU1 <code> CONNECT <model name>`. The gate refuses another IP (`BUSY`) while connections from the current one are open, and clears the peer when they all close. The worker card shows a big "✓ Connected · Pixel 8 Pro" and hides the code.
+- **Main device:** the chat chip shows "N devices" instead of "llama.cpp CPU" when shared. The Models page shows "Model running on N devices" and marks each paired device "● Connected" (`DeviceCluster.connected` flow, cleared by `onUnloaded()` when the engine closes).
+- **Local API server works with a combined model:** `ApiServer` uses `EngineHolder.loaded`. Verified from the PC: `/v1/chat/completions` answered in 6 s while the Idea Tab showed Connected. API calls don't get auto-reconnect: they error if a device drops.
+- **Memory shown as free / total:** the gate's INFO reply is `OK <freeMb> <model> <totalMb>`; `DeviceCluster.askMemory()` returns (free, total), with total 0 for older workers. The Models card reads "7.3 GB free / 12 GB" per device plus a total ("≈ 11 GB free / 19 GB"), and the worker card "Ready · 3.6 GB free / 8 GB". The main switch is renamed "Create a cluster with multiple devices".
+- **Loading message:** `DeviceCluster.loadingOn` (names, set in `prepareForLoad`, cleared by `loadFinished()` after `nativeLoad`) makes the chat's `LoadingModelRow` say "Loading <model> on N devices…" plus "Sending part of the model to X over Wi-Fi…". Verified on the Pixel.
+- **Context in a cluster:** the KV cache follows the layers, so a bigger context is spread across devices too. The Models page RAM estimate under the context slider still assumes this device only (idea: make it cluster-aware).
+- **Per-model cache on workers:** `DeviceCluster.prepareForLoad(context, modelName)`. The relay sends `MOCHU1 <code> CONNECT <device> <model>`. While a main device is connected, the worker's `watchCache` labels new files in `cluster_cache/` every 5 s in `cluster_cache_index.json` (`ClusterCache`). The Models page lists "Model parts kept here" with one "Delete cache" per model (disabled while sharing); unlabeled older files show as "Earlier models". Verified: LFM2-8B-A1B-Q4_K_M · 1.6 GB listed and deleted on the Idea Tab.
+- **Suggested bigger MoE models** (sizes from Hugging Face, unsloth repos):
+  - Pixel + Idea Tab (about 11 GB free): LFM2.5-24B-A2B UD-IQ3_XXS (8.3 GB) or Gemma 4 26B-A4B UD-IQ2_M (9.3 GB).
+  - Adding the onn tablet allows LFM2.5-24B UD-Q3_K_XL (10.2 GB) or Gemma 4 26B UD-IQ3_XXS (10.6 GB).
+  - Qwen3-30B-A3B UD-IQ2_M (10.1 GB) is tight.
+- **Three devices verified:** the onn tablet (onn8Core, model number 36018340, 6 GB, 192.168.1.222, already adb-paired) was added. LFM2-8B-A1B was 9.2 tok/s on Pixel + onn and 8.4 tok/s on Pixel + Idea Tab + onn, with "Loading … on 3 devices", the chip "3 devices", and both tablets "✓ Connected".
+- **Speed note:** LFM2-8B-A1B is about 10–12 tok/s on the Pixel alone and 8–9 split, so splitting only pays off for models that don't fit on one device.
 - **Remaining gaps:**
   - A worker that silently disappears from Wi-Fi (no TCP reset) could leave a reply hanging until TCP times out.
   - The chat chip doesn't show the device count.
