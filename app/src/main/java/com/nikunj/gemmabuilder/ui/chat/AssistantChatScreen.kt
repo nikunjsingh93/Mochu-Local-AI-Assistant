@@ -596,8 +596,21 @@ internal fun LoadingModelRow(modelName: String) {
             )
         }
         val others by DeviceCluster.loadingOn.collectAsState()
+        val sending by DeviceCluster.sending.collectAsState()
+        // Per device: layers and GB sent so far (cached parts go quickly, so it can jump ahead).
+        sending.forEach { p ->
+            val fraction = if (p.totalBytes > 0) (p.sentBytes.toFloat() / p.totalBytes).coerceIn(0f, 0.99f) else 0f
+            val gb = { b: Long -> String.format(java.util.Locale.US, "%.1f", b / 1073741824.0) }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Text(
+                    "${p.name} · ${if (p.layers > 0) "${(p.layers * fraction).toInt()} of ${p.layers} layers sent · " else ""}${gb(p.sentBytes.coerceAtMost(p.totalBytes))} / ${gb(p.totalBytes)} GB",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                androidx.compose.material3.LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+            }
+        }
         Text(
-            if (others.isNotEmpty()) "Sending part of the model to ${others.joinToString(" and ")} over Wi-Fi. The first time can take a minute; after that it's cached there."
+            if (others.isNotEmpty()) "Sending part of the model to ${others.joinToString(" and ")} over Wi-Fi. The first time can take several minutes; after that it's kept there and loads much faster."
             else "The first message after opening the app takes a few seconds while the model loads.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -53,6 +53,10 @@ internal object LlamaCppNative {
     /** A device holding part of the model stopped answering (the model must be reloaded). */
     external fun nativeClusterLost(): Boolean
     external fun nativeClusterClearLost()
+    /** Memory copy speed in GB/s: how fast this device streams model weights. */
+    external fun nativeMemBandwidth(threads: Int): Double
+    /** The model's layer count from its GGUF header, or -1. */
+    external fun nativeBlockCount(path: String): Int
 }
 
 /** Runs .gguf models with llama.cpp on the CPU. */
@@ -105,7 +109,7 @@ class LlamaCppEngine(
         val variant = LlamaCppNative.ensureInitialized(context.applicationInfo.nativeLibraryDir)
         require(variant.isNotEmpty()) { "No llama.cpp CPU backend could be loaded on this device." }
         // Paired devices that answer lend their memory; none means this device alone.
-        val devices = DeviceCluster.prepareForLoad(context, java.io.File(modelPath).nameWithoutExtension)
+        val devices = DeviceCluster.prepareForLoad(context, java.io.File(modelPath).nameWithoutExtension, java.io.File(modelPath).length(), modelPath)
         // Leave a couple of cores for the UI; big.LITTLE phones gain little past four threads.
         // With other devices every step waits for the slowest thread, so only fast cores are used.
         val threads = if (devices > 0) fastCoreCount() else (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 4)

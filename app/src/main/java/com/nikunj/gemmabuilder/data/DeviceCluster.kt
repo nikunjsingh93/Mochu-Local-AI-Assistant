@@ -1,5 +1,6 @@
 package com.nikunj.gemmabuilder
 
+import kotlin.math.roundToInt
 import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -50,7 +51,7 @@ data class ClusterDevice(val id: String, val name: String, val host: String, val
 data class NearbyDevice(val id: String, val name: String, val host: String, val port: Int, val freeMb: Long)
 
 /** Copies [input] to [output] until either side closes. */
-private fun pipe(input: InputStream, output: OutputStream, onEnd: () -> Unit) {
+private fun pipe(input: InputStream, output: OutputStream, counter: java.util.concurrent.atomic.AtomicLong? = null, onEnd: () -> Unit) {
     Thread({
         val buffer = ByteArray(64 * 1024)
         runCatching {
@@ -59,6 +60,7 @@ private fun pipe(input: InputStream, output: OutputStream, onEnd: () -> Unit) {
                 if (n < 0) break
                 output.write(buffer, 0, n)
                 output.flush()
+                counter?.addAndGet(n.toLong())
             }
         }
         onEnd()
@@ -68,16 +70,16 @@ private fun pipe(input: InputStream, output: OutputStream, onEnd: () -> Unit) {
 /** Joins two sockets both ways; closes both when one side ends. */
 private fun join(a: Socket, b: Socket) = joinThen(a, b) {}
 
-/** [join], then [onEnd] once, when the pair has closed. */
-private fun joinThen(a: Socket, b: Socket, onEnd: () -> Unit) {
+/** [join], then [onEnd] once, when the pair has closed. [sent] counts bytes going from [a] to [b]. */
+private fun joinThen(a: Socket, b: Socket, sent: java.util.concurrent.atomic.AtomicLong? = null, onEnd: () -> Unit) {
     val ended = java.util.concurrent.atomic.AtomicBoolean(false)
     val close = {
         runCatching { a.close() }; runCatching { b.close() }
         if (ended.compareAndSet(false, true)) onEnd()
         Unit
     }
-    pipe(a.getInputStream(), b.getOutputStream(), close)
-    pipe(b.getInputStream(), a.getOutputStream(), close)
+    pipe(a.getInputStream(), b.getOutputStream(), sent, close)
+    pipe(b.getInputStream(), a.getOutputStream(), null, close)
 }
 
 private fun readLine(input: InputStream, max: Int = 128): String {
@@ -102,6 +104,45 @@ fun fastCoreCount(): Int = runCatching {
     val top = freq.values.maxOrNull() ?: 0L
     (if (top > 0) freq.count { it.value >= top * 0.8 } else allowed.size / 2).coerceIn(2, 6)
 }.getOrDefault(4)
+
+@Volatile private var measuredBandwidth = 0.0
+
+/** This device's memory speed in GB/s, measured once (about 0.3 s) with the fast cores. */
+fun memoryBandwidth(context: Context): Double {
+    if (measuredBandwidth <= 0.0) {
+        LlamaCppNative.ensureInitialized(context.applicationInfo.nativeLibraryDir)
+        measuredBandwidth = runCatching { LlamaCppNative.nativeMemBandwidth(fastCoreCount()) }.getOrDefault(0.0)
+    }
+    return measuredBandwidth
+}
+
+/**
+ * How the model is split, given each device's [weights] (speed, memory, or equal) and [capacityMb]
+ * (what it can safely hold): shares follow the weights, except that no device is given more than
+ * it can hold; the rest goes to the others. [modelMb] 0 skips the check.
+ */
+fun fitSharesToMemory(weights: List<Double>, capacityMb: List<Double>, modelMb: Double): List<Double> {
+    if (modelMb <= 0 || weights.isEmpty()) return weights
+    val share = DoubleArray(weights.size)
+    val fixed = BooleanArray(weights.size)
+    var remaining = modelMb
+    repeat(weights.size) {
+        val open = weights.indices.filter { !fixed[it] }
+        val weightSum = open.sumOf { weights[it].coerceAtLeast(0.0) }.takeIf { it > 0 } ?: return@repeat
+        var anyCapped = false
+        for (i in open) {
+            val want = remaining * weights[i].coerceAtLeast(0.0) / weightSum
+            if (want > capacityMb[i]) { share[i] = capacityMb[i]; fixed[i] = true; anyCapped = true }
+        }
+        if (!anyCapped) {
+            open.forEach { share[it] = remaining * weights[it].coerceAtLeast(0.0) / weightSum }
+            return share.toList()
+        }
+        remaining = modelMb - share.indices.filter { fixed[it] }.sumOf { share[it] }
+    }
+    // Everyone is full: the model doesn't fit; split by room so each holds what it can.
+    return if (share.sum() > 0) share.toList() else capacityMb
+}
 
 /** The device's total RAM in MB (what Android reports, a little under the advertised size). */
 fun totalMemoryMb(context: Context): Long {
@@ -154,6 +195,7 @@ class ClusterWorkerService : Service() {
                 stopSharing()
                 return@Thread
             }
+            memoryBandwidth(this)
             startGate(code)
             advertise()
             writeStatus("running", code)
@@ -183,7 +225,7 @@ class ClusterWorkerService : Service() {
                             out.write("NO\n".toByteArray()); client.close(); return@runCatching
                         }
                         if (parts.getOrNull(2) == "INFO") {
-                            out.write("OK ${freeMemoryMb(this)} ${Build.MODEL.replace(' ', '_')} ${totalMemoryMb(this)}\n".toByteArray()); client.close(); return@runCatching
+                            out.write("OK ${freeMemoryMb(this)} ${Build.MODEL.replace(' ', '_')} ${totalMemoryMb(this)} ${String.format(java.util.Locale.US, "%.1f", memoryBandwidth(this))}\n".toByteArray()); client.close(); return@runCatching
                         }
                         // One main device at a time: another one is turned away while this one is connected.
                         val from = client.inetAddress.hostAddress
@@ -301,9 +343,19 @@ class ClusterWorkerService : Service() {
         fun statusFile(context: Context) = File(context.filesDir, "cluster_worker_status.json")
 
         /** The worker's status, written by its own process: state, code, peer, freeMb, error. */
-        fun readStatus(context: Context): JSONObject =
-            statusFile(context).takeIf { it.exists() }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
-                ?: JSONObject().put("state", "stopped")
+        fun readStatus(context: Context): JSONObject {
+            val status = statusFile(context).takeIf { it.exists() }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
+                ?: return JSONObject().put("state", "stopped")
+            // The file outlives the process (an app update or a kill ends sharing): trust it only while it runs.
+            val state = status.optString("state")
+            if ((state == "running" || state == "starting") && !workerAlive(context)) return JSONObject().put("state", "stopped")
+            return status
+        }
+
+        /** Whether the sharing process (":cluster") is running. */
+        private fun workerAlive(context: Context): Boolean =
+            context.getSystemService(ActivityManager::class.java).runningAppProcesses.orEmpty()
+                .any { it.processName == context.packageName + ":cluster" }
 
         fun start(context: Context) {
             statusFile(context).delete()
@@ -351,6 +403,27 @@ object DeviceCluster {
     private val _loadingOn = MutableStateFlow<List<String>>(emptyList())
     /** Names of the other devices a model is loading onto right now (empty when not loading). */
     val loadingOn: StateFlow<List<String>> = _loadingOn.asStateFlow()
+
+    /** How far each other device has got receiving its part of a model being loaded. */
+    data class SendProgress(val name: String, val sentBytes: Long, val totalBytes: Long, val layers: Int)
+
+    private val sentBytes = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+    private val _sending = MutableStateFlow<List<SendProgress>>(emptyList())
+    /** Updated every half second while a model loads across devices. */
+    val sending: StateFlow<List<SendProgress>> = _sending.asStateFlow()
+    @Volatile private var progressThread: Thread? = null
+
+    /** Watches the relays' byte counts against each device's share until the load finishes. */
+    private fun watchSending(plan: List<Triple<ClusterDevice, Long, Int>>) {
+        plan.forEach { (d, _, _) -> sentBytes.getOrPut(d.id) { java.util.concurrent.atomic.AtomicLong() }.set(0) }
+        progressThread = Thread({
+            while (_loadingOn.value.isNotEmpty()) {
+                _sending.value = plan.map { (d, total, layers) -> SendProgress(d.name, sentBytes[d.id]?.get() ?: 0L, total, layers) }
+                runCatching { Thread.sleep(500) }
+            }
+            _sending.value = emptyList()
+        }, "cluster-progress").apply { isDaemon = true; start() }
+    }
 
     fun loadFinished() { _loadingOn.value = emptyList() }
 
@@ -409,6 +482,55 @@ object DeviceCluster {
             (parts.getOrNull(1)?.toLongOrNull() ?: 0L) to (parts.getOrNull(3)?.toLongOrNull() ?: 0L)
         }
     }.getOrNull()
+
+/** What a worker reports: free and total memory (MB) and memory speed (GB/s, 0 when unknown). */
+    data class WorkerInfo(val freeMb: Long, val totalMb: Long, val bandwidth: Double)
+
+    /** A worker's [WorkerInfo]; null if unreachable or it refused the code. Background thread. */
+    fun askInfo(host: String, port: Int, code: String): WorkerInfo? = runCatching {
+        Socket().use { s ->
+            s.connect(InetSocketAddress(host, port), 3_000)
+            s.soTimeout = 4_000
+            s.tcpNoDelay = true
+            s.getOutputStream().write("$HELLO $code INFO\n".toByteArray())
+            val reply = readLine(s.getInputStream())
+            if (!reply.startsWith("OK")) return@runCatching null
+            val p = reply.split(' ')
+            WorkerInfo(p.getOrNull(1)?.toLongOrNull() ?: 0L, p.getOrNull(3)?.toLongOrNull() ?: 0L, p.getOrNull(4)?.toDoubleOrNull() ?: 0.0)
+        }
+    }.getOrNull()
+
+    /** How layers are split: "speed" (default), "memory", "even" or "manual". */
+    fun balanceMode(context: Context): String = prefs(context).getString("clusterBalance", "speed") ?: "speed"
+
+    fun setBalanceMode(context: Context, mode: String) { prefs(context).edit().putString("clusterBalance", mode).apply() }
+
+    /** Manual shares by device ID ("local" for this device); 1 when not set. */
+    fun manualShares(context: Context): Map<String, Float> = runCatching {
+        val o = JSONObject(prefs(context).getString("clusterShares", "{}") ?: "{}")
+        o.keys().asSequence().associateWith { o.getDouble(it).toFloat() }
+    }.getOrDefault(emptyMap())
+
+    fun setManualShare(context: Context, id: String, share: Float) {
+        val o = JSONObject(manualShares(context).mapValues { it.value.toDouble() })
+        o.put(id, share.toDouble())
+        prefs(context).edit().putString("clusterShares", o.toString()).apply()
+    }
+
+    /**
+     * Each device's share of the model for [mode]: speed, free memory, equal, or the manual
+     * sliders. The automatic modes never give a device more than ~80% of its free memory.
+     */
+    fun shares(mode: String, ids: List<String>, freeMb: List<Long>, bandwidth: List<Double>, manual: Map<String, Float>, modelMb: Double): List<Double> {
+        val raw = when (mode) {
+            "memory" -> freeMb.map { it.toDouble() }
+            "even" -> ids.map { 1.0 }
+            "manual" -> ids.map { (manual[it] ?: 1f).toDouble().coerceAtLeast(0.01) }
+            // Speed, falling back to memory when a device couldn't measure it.
+            else -> if (bandwidth.all { it > 0 }) bandwidth else freeMb.map { it.toDouble() }
+        }
+        return if (mode == "manual") raw else fitSharesToMemory(raw, freeMb.map { it * 0.8 }, modelMb)
+    }
 
     /** Pairs with [device] using [code]; returns an error message, or null when paired. */
     fun pair(context: Context, device: NearbyDevice, code: String): String? {
@@ -485,7 +607,7 @@ object DeviceCluster {
                         remote.soTimeout = 5_000
                         if (!readLine(remote.getInputStream()).startsWith("OK")) error("refused")
                         remote.soTimeout = 0
-                        join(local, remote)
+                        joinThen(local, remote, sentBytes.getOrPut(device.id) { java.util.concurrent.atomic.AtomicLong() }) {}
                     }.onFailure { runCatching { local.close() } }
                 }, "cluster-relay").apply { isDaemon = true }.start()
             }
@@ -501,10 +623,10 @@ object DeviceCluster {
     /** File name of the model being loaded, sent to workers so they can label what they cache. */
     @Volatile private var loadingModel = "model"
 
-    fun prepareForLoad(context: Context, modelName: String = "model"): Int {
+    fun prepareForLoad(context: Context, modelName: String = "model", modelBytes: Long = 0, modelPath: String? = null): Int {
         loadingModel = modelName.replace(Regex("""\s+"""), "_")
         val devices = if (enabled(context)) paired(context) else emptyList()
-        val ready = devices.mapNotNull { d -> ask(d.host, d.port, d.code)?.takeIf { it > 0 }?.let { d to it } }
+        val ready = devices.mapNotNull { d -> askInfo(d.host, d.port, d.code)?.takeIf { it.freeMb > 0 }?.let { d to it } }
         active = ready.map { it.first }
         LlamaCppNative.nativeClusterClearLost()
         if (ready.isEmpty()) {
@@ -514,9 +636,24 @@ object DeviceCluster {
         }
         _loadingOn.value = ready.map { it.first.name }
         val endpoints = ready.map { (d, _) -> "127.0.0.1:${relayFor(d)}" }.toTypedArray()
-        // Shares follow free memory: a device with more room holds more layers.
-        val weights = ready.map { (_, freeMb) -> freeMb.toFloat() }.toFloatArray()
-        LlamaCppNative.nativeSetCluster(endpoints, weights, freeMemoryMb(context).toFloat())
+        // This device first, then each worker: shares by the chosen balance mode.
+        val mode = balanceMode(context)
+        val split = shares(
+            mode,
+            ids = listOf("local") + ready.map { it.first.id },
+            freeMb = listOf(freeMemoryMb(context)) + ready.map { it.second.freeMb },
+            bandwidth = listOf(if (mode == "speed") memoryBandwidth(context) else 0.0) + ready.map { it.second.bandwidth },
+            manual = manualShares(context),
+            modelMb = modelBytes / 1048576.0
+        )
+        LlamaCppNative.nativeSetCluster(endpoints, split.drop(1).map { it.toFloat() }.toFloatArray(), split.first().toFloat())
+        // Each device's expected part of the file and of the layers, for the loading progress.
+        val splitSum = split.sum().takeIf { it > 0 } ?: 1.0
+        val layerCount = modelPath?.let { LlamaCppNative.nativeBlockCount(it) }?.takeIf { it > 0 } ?: 0
+        watchSending(ready.mapIndexed { i, (d, _) ->
+            val part = split[i + 1] / splitSum
+            Triple(d, (modelBytes * part).toLong(), (layerCount * part).roundToInt())
+        })
         holdWifi(context)
         return ready.size
     }

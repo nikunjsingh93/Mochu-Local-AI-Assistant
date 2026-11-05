@@ -1,5 +1,9 @@
 package com.nikunj.gemmabuilder
 
+import java.io.File
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
@@ -222,6 +226,12 @@ fun CombineDevicesSetting() {
                     OutlinedButton(onClick = { pairing = device }) { Text("Pair") }
                 }
             }
+            if (paired.isNotEmpty()) {
+                LayerBalance(
+                    devices = listOf(Triple("local", "This device", localFreeMb)) +
+                        paired.map { d -> Triple(d.id, d.name, deviceMemory[d.id]?.first) }
+                )
+            }
         }
     }
 
@@ -324,5 +334,81 @@ private fun CombinedMemory(devices: List<DeviceMemory>) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+/**
+ * Advanced: how the model's layers are split between devices. Automatic modes never give a device
+ * more than it has room for; Manual follows the sliders exactly. [devices]: (id, name, free MB or
+ * null when not sharing), this device first.
+ */
+@Composable
+private fun LayerBalance(devices: List<Triple<String, String, Long?>>) {
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(DeviceCluster.balanceMode(context)) }
+    var manual by remember { mutableStateOf(DeviceCluster.manualShares(context)) }
+    // The model in use, to show roughly how much each device would hold.
+    val modelMb = remember {
+        savedActiveModelPath(context)?.let(::File)?.takeIf { isGgufModel(it.name) && it.exists() }?.length()?.div(1048576.0) ?: 0.0
+    }
+    TextButton(onClick = { open = !open }) { Text(if (open) "Hide advanced" else "Advanced: how layers are split") }
+    if (!open) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("speed" to "By speed", "memory" to "By memory", "even" to "Even", "manual" to "Manual").forEach { (key, label) ->
+                FilterChip(
+                    selected = mode == key,
+                    onClick = { mode = key; DeviceCluster.setBalanceMode(context, key) },
+                    label = { Text(label) }
+                )
+            }
+        }
+        Text(
+            when (mode) {
+                "memory" -> "Devices with more free memory hold more of the model."
+                "even" -> "Each device holds about the same amount, as long as it has room."
+                "manual" -> "Set each device's share yourself. Mochu follows it exactly, so leave room on each device."
+                else -> "Faster devices hold more, so replies come quicker; no device gets more than it has room for."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (mode == "manual") {
+            val sharing = devices.filter { it.third != null }
+            val total = sharing.sumOf { (manual[it.first] ?: 1f).toDouble() }.coerceAtLeast(0.01)
+            sharing.forEach { (id, name, freeMb) ->
+                val share = manual[id] ?: 1f
+                val holdMb = modelMb * share / total
+                val tooMuch = modelMb > 0 && freeMb != null && holdMb > freeMb * 0.9
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Text(
+                            "${(share / total * 100).toInt()}%" + if (modelMb > 0) " · ≈ ${String.format(Locale.US, "%.1f", holdMb / 1024)} GB" else "",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (tooMuch) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    androidx.compose.material3.Slider(
+                        value = share,
+                        onValueChange = { v -> manual = manual + (id to v) },
+                        onValueChangeFinished = { DeviceCluster.setManualShare(context, id, manual[id] ?: 1f) },
+                        valueRange = 0.1f..10f
+                    )
+                    if (tooMuch) {
+                        Text(
+                            "More than $name has free (${String.format(Locale.US, "%.1f", (freeMb ?: 0) / 1024.0)} GB). The model may load slowly or fail.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+            devices.filter { it.third == null }.forEach { (_, name, _) ->
+                Text("$name isn't sharing right now.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text("Applies the next time a GGUF model loads.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

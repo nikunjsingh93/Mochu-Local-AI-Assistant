@@ -143,7 +143,7 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 
 Current app version:
 
-- `versionName`: `2.1.0`
+- `versionName`: `2.1.1`
 - `applicationId`: `com.nikunj.mochu`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.

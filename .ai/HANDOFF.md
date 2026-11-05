@@ -7,7 +7,8 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.1.0 is released** (versionCode 32) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.0, with Combine devices (experimental).
+- **v2.1.1 is released** (versionCode 33) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.1, with layer balance modes, send progress, import progress, and the stale-status fix.
+- **v2.1.0** (versionCode 32) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.0, with Combine devices (experimental).
 - **v2.0.3** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
 - **v2.0.2** was released (versionCode 30) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.2, with the opt-in server fallback and the hidden API key field (the APK was replaced once with the key-field change). v2.0.1 (29) added the Mochu notification icon, code downloads and code colors. v2.0.0 (28) is the Smart cards release.
 - **The Athena tablet** wasn't connected, so it may still be on an older version.
@@ -60,7 +61,19 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
-**Import progress** (uncommitted; verified on the Pixel):
+**Layer balance, send progress, stale-status fix** (released in v2.1.1; verified on Pixel + Idea Tab):
+- **Native:** `nativeMemBandwidth(threads)` (multi-thread memcpy, best of 3, GB/s) and `nativeBlockCount(path)`.
+- **Speed reporting:** `memoryBandwidth(context)` is measured once per process. The worker measures at start and adds it to INFO: `OK <free> <model> <total> <bw>`. `DeviceCluster.askInfo()` returns `WorkerInfo`.
+- **Balance modes:** `DeviceCluster.balanceMode` is `speed` (default), `memory`, `even` or `manual`, and `manualShares` holds per-device sliders ("local" for this device). `shares()` picks the weights.
+  - The automatic modes go through `fitSharesToMemory`, which caps each device at 80% of its free MB and gives the rest to the others.
+  - Speed falls back to memory if any bandwidth is unknown.
+  - Tests in `DeviceClusterTest`.
+  - UI: "Advanced: how layers are split" in `CombineDevices.kt`, with mode chips and, in Manual, a slider per device showing % and ≈ GB of the active GGUF model. It turns red if that's more than 90% of the device's free memory.
+- **Send progress:** the relay counts bytes sent to each worker (`sentBytes`). `prepareForLoad` sets each device's expected bytes and layers (model size × share, layer count × share), and `watchSending` publishes `DeviceCluster.sending` every 0.5 s. `LoadingModelRow` shows "TB390FU · 7 of 13 layers sent · 1.5 / 2.8 GB" with a bar, plus "…can take several minutes…".
+- **Stale status fix:** `ClusterWorkerService.readStatus` now ignores a "running" status file when the `:cluster` process isn't alive (after an app update or kill). Before, the screen showed sharing on and disabled Delete cache.
+- **Results with LFM2.5-24B-A2B-UD-IQ3_XXS (8.3 GB):** the Pixel alone does about 0.8 tok/s (it doesn't fit in RAM and pages from storage). Pixel + Idea Tab: 5.2 and 4.9 tok/s. A fresh send of the Idea Tab's 2.8 GB / 13 layers took about 1 min 50 s.
+
+**Import progress** (released in v2.1.1; verified on the Pixel):
 - `copyModel` copies in 1 MB chunks and reports progress every 16 MB. `sizeForUri` reads the size.
 - `BuilderUiState.importingName` / `importedBytes` / `importTotalBytes` / `importDoneName`.
 - The Models page shows a progress bar ("Importing X… 56% · 4.7 / 8.3 GB") under a filled import button, then "✓ X imported and in use" for 60 s.

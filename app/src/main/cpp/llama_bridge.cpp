@@ -10,8 +10,11 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstring>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -363,6 +366,40 @@ void *rpc_symbol(const char *name) {
 }
 
 }  // namespace
+
+/**
+ * Memory copy speed in GB/s with [threads] threads: how fast this device can stream model weights,
+ * which is what limits generation. Used to give faster devices more layers. Takes ~0.3 s.
+ */
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeMemBandwidth(JNIEnv *, jobject, jint threads) {
+    const int n_threads = std::max(1, static_cast<int>(threads));
+    const size_t per_thread = 32u * 1024 * 1024;
+    std::vector<std::vector<char>> src(n_threads, std::vector<char>(per_thread, 1));
+    std::vector<std::vector<char>> dst(n_threads, std::vector<char>(per_thread, 0));
+    double best = 0.0;
+    for (int rep = 0; rep < 3; rep++) {
+        const auto start = std::chrono::steady_clock::now();
+        std::vector<std::thread> workers;
+        for (int t = 0; t < n_threads; t++) {
+            workers.emplace_back([&, t] { std::memcpy(dst[t].data(), src[t].data(), per_thread); });
+        }
+        for (auto &w : workers) w.join();
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        // A copy reads and writes every byte.
+        if (seconds > 0) best = std::max(best, 2.0 * per_thread * n_threads / seconds / 1e9);
+    }
+    return best;
+}
+
+/** The model's layer count from its GGUF header, or -1. */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeBlockCount(JNIEnv *env, jobject, jstring jpath) {
+    const char *path = env->GetStringUTFChars(jpath, nullptr);
+    const int count = read_block_count(path);
+    env->ReleaseStringUTFChars(jpath, path);
+    return count;
+}
 
 /** True once a device sharing the model has stopped answering; the model must then be reloaded. */
 extern "C" JNIEXPORT jboolean JNICALL
