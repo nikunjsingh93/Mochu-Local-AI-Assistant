@@ -96,5 +96,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Lends this device to another Mochu (Combine devices); its own process so Stop can end it. -->
+        <service
+            android:name=".ClusterWorkerService"
+            android:exported="false"
+            android:process=":cluster"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Shares this device's memory and processor with the user's own Mochu app on another device over the local network, so a larger AI model can run across both." />
+        </service>
     </application>
 </manifest>

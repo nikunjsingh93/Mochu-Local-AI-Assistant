@@ -68,6 +68,8 @@ android {
                 arguments += "-DLLAMA_CURL=OFF"
                 arguments += "-DGGML_NATIVE=OFF"
                 arguments += "-DGGML_BACKEND_DL=ON"
+                // Other devices can lend their memory for bigger models (llama.cpp RPC).
+                arguments += "-DGGML_RPC=ON"
                 arguments += "-DGGML_CPU_ALL_VARIANTS=ON"
                 arguments += "-DGGML_LLAMAFILE=OFF"
             }

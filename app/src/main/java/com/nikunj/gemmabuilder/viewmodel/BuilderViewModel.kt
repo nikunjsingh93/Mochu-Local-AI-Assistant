@@ -410,6 +410,15 @@ class BuilderViewModel : ViewModel() {
 
     private var idleUnloadJob: Job? = null
 
+    /** After a device sharing the model went away: unload, so the next message loads it again. */
+    private fun dropEngineIfDeviceLost() {
+        if ((engine as? LlamaCppEngine)?.lostDevice != true) return
+        engine.close()
+        engine = DemoBuilderEngine()
+        sessionFingerprint = null
+        _uiState.update { it.copy(gemmaLoaded = false, engineLabel = "Not loaded") }
+    }
+
     /** True while a server model's context window is the 32K guess rather than what the server said. */
     private var remoteContextGuessed = false
 
@@ -1372,6 +1381,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 generationInProgress = false
                 generationJob = null
                 scheduleIdleUnload()
+                dropEngineIfDeviceLost()
                 recheckRemoteContext()
                 _uiState.update { it.copy(isBusy = false, streamingThinking = null) }
                 refreshContextUsage()
@@ -1580,6 +1590,8 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
                 // Stopping early still keeps what was written; the session is reset by the engine.
                 val stopNote = (result.exceptionOrNull() as? StopGeneration)?.reason
+                    // A device sharing the model dropped out: say why the reply ended early.
+                    ?: result.exceptionOrNull()?.message?.takeIf { (engine as? LlamaCppEngine)?.lostDevice == true }
                 val split = splitThinking(output.toString())
                 val thinkingSeconds = when {
                     split.thinking.isEmpty() || thinkingStartedAtMs == 0L -> 0
@@ -1655,6 +1667,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 generationInProgress = false
                 generationJob = null
                 scheduleIdleUnload()
+                dropEngineIfDeviceLost()
                 recheckRemoteContext()
                 _uiState.update { it.copy(isBusy = false, streamingReply = null, streamingThinking = null, liveActivity = emptyList()) }
                 refreshContextUsage()

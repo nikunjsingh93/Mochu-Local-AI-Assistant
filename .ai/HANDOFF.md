@@ -59,6 +59,40 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
+**Combine devices (Day 1, uncommitted; verified on Pixel 8 Pro + Idea Tab Pro):** a GGUF model split across devices with llama.cpp RPC.
+- **Native** (`app/src/main/cpp/llama_bridge.cpp`, `-DGGML_RPC=ON` in `app/build.gradle.kts`):
+  - `nativeSetCluster(endpoints, weights, localWeight)` sets the workers for the next load. `plan_cluster()` registers them through `ggml_backend_rpc_add_server` (loaded from `libggml-rpc.so`).
+  - This device keeps the first layers by its share, and the workers get the rest via `tensor_split` / `n_gpu_layers`.
+  - A tensor override keeps `output` / `token_embd` on this device's CPU, and `op_offload = false`.
+  - `nativeServe(endpoint, cacheDir, threads)` runs `ggml_backend_rpc_start_server` (it blocks forever). `nativeClusterNote()` gives a label for the description.
+- **`data/DeviceCluster.kt`:**
+  - `ClusterWorkerService` runs in the `:cluster` process (special-use foreground service). It holds a wake lock and a `WIFI_MODE_FULL_LOW_LATENCY` Wi-Fi lock and advertises `_mochu-cluster._tcp` over NSD with free RAM.
+  - llama.cpp RPC listens only on `127.0.0.1:50053`. A gate on `:50052` requires `MOCHU1 <4-digit code>` first (`... INFO` returns free MB), then pipes through. Stop kills the process. Status goes to `cluster_worker_status.json`.
+  - `DeviceCluster` (main device): paired devices in prefs `clusterDevices`, the `clusterEnabled` switch, NSD discovery, and `pair()`. Per-worker relays on `127.0.0.1:<random>` send the code, then pipe. They must be IPv4: llama.cpp connects to 127.0.0.1 over IPv4 only and aborted when the relay was on `::1`.
+  - `prepareForLoad()` checks each paired device (INFO), sets the cluster weighted by free MB, and holds the low-latency Wi-Fi lock. `fastCoreCount()` sets the threads.
+- **`engine/LlamaCppEngine.kt`:** calls `prepareForLoad` before `nativeLoad`, uses fast-core threads with other devices, appends "· N devices (x of y layers here…)" to the description, and releases the Wi-Fi lock on close.
+- **`ui/CombineDevices.kt`:** the Models page section "Combine devices (experimental)". It has a Share this device switch (shows the big 4-digit code and status), a Use other devices switch, a nearby list with a Pair dialog (4 digits), and the paired list with Forget.
+- **`AndroidManifest.xml`:** the `.ClusterWorkerService` in process `:cluster` with a special-use subtype.
+- **Verified in the app:** LFM2-8B-A1B Q4_K_M (imported on the Pixel) split across the Pixel and the Idea Tab (the Idea Tab held about 1.9 GB) at **7.8 and 8.9 tok/s**, with first-token time about 1 s on the second turn. The Pixel alone does 11.8 tok/s. The same split from the command line without the Wi-Fi lock gave 0.32 tok/s. Afterwards sharing was turned off and the test files and the Downloads copy were removed. The imported model, the pairing and a test chat ("write a short poem about the sea") remain on the Pixel.
+- **Lost devices no longer crash the app:**
+  - `app/src/main/cpp/CMakeLists.txt` builds the `ggml-rpc` target from a patched copy (`ggml-rpc-mochu.cpp` in the CMake build dir; the submodule is untouched). It fails the build loudly if upstream text changes.
+  - In that copy, `RPC_STATUS_ASSERT` and the connect/handshake aborts only set `g_rpc_lost`. The dispatcher thread still starts, and requests after a loss finish at once.
+  - It exports `ggml_backend_rpc_lost` / `ggml_backend_rpc_clear_lost`, which `llama_bridge.cpp` reads via `dlopen("libggml-rpc.so", RTLD_NOLOAD)` as `nativeClusterLost` / `nativeClusterClearLost`.
+  - `LlamaCppEngine` checks paired devices before each turn (`DeviceCluster.activeStillThere`) and the lost flag after every token. Then it sets `lostDevice`, `DeviceCluster.onLost()` closes the relays (llama.cpp caches a connection per address, so new relay ports force a fresh connection), and it throws a friendly message.
+  - The ViewModel keeps the partial reply with that note and unloads the engine (`dropEngineIfDeviceLost`), so the next message reloads with the devices still sharing, or locally.
+  - `nativeLoad` now always passes an explicit device list: empty unless the cluster is used. Otherwise a registered dead RPC device was used by default and local loads failed.
+- **Verified on the Pixel + Idea Tab:**
+  - A drop during load gives "Model load failed: … across your devices" with no crash.
+  - The next message loads on the Pixel alone (10.2 tok/s).
+  - A drop mid-reply keeps the partial text plus the note, with no crash; "continue the story" then ran alone at 10.1 tok/s.
+  - The split speed stays 9.1 tok/s.
+- **Memory view:** the Models page "Memory for models" card shows this device plus each paired device's free RAM (asked over the gate every 5 s) as a colored bar and an approximate total (9.8 GB on Pixel + Idea Tab), and marks devices that aren't sharing. Several paired devices already work: each one that's sharing gets a share of the layers by free MB.
+- **Remaining gaps:**
+  - A worker that silently disappears from Wi-Fi (no TCP reset) could leave a reply hanging until TCP times out.
+  - The chat chip doesn't show the device count.
+  - No manual add-by-IP.
+  - Not yet tested with 3+ devices or a model bigger than one device.
+
 **Wake lock while generating** (released in v2.0.3; verified on the S25):
 - `data/WorkWakeLock.kt` (new):
   - A `PARTIAL_WAKE_LOCK` ("Mochu:generating") held by name ("reply", "task") and released when the last holder ends.
@@ -151,6 +185,28 @@ These are the files changed in the last release, v2.0.0:
 4. **Better news cards:** read headlines from inside news pages instead of listing search results.
 
 ## Additional Context
+
+- **Owner's test devices (from 2026-11-05; the S25 is gone):**
+  - Pixel 8 Pro: 12 GB, Tensor G3, about 4–6 GB free.
+  - Lenovo Idea Tab Pro Gen 2 (TB390FU): 8 GB, Snapdragon 8s Gen 4, about 3.3 GB free.
+  - onn tablet 8.1 core 2026: 6 GB.
+  - Wireless adb: pair on the pairing port shown by `adb mdns services`, then connect on the connect port. In Git Bash, set `MSYS_NO_PATHCONV=1` so `/data/local/tmp` paths aren't rewritten.
+- **Experiment: splitting a model across devices (llama.cpp RPC, as in DistAi) is NOT worth building.**
+  - Setup: `llama-bench` and `ggml-rpc-server` built with `GGML_RPC=ON` (arm64, armv8.2-a+dotprod+i8mm). The Pixel was the main device; the Idea Tab ran the worker over home Wi-Fi.
+  - Wi-Fi round trips between them: 88 ms on average, peaking at 255 ms.
+  - Writing speed:
+    - Qwen3-4B Q4_K_M: Pixel alone 10.0 tok/s; split 18/36 layers 1.7 tok/s.
+    - Qwen3-8B Q4_K_M: Pixel alone 4.0 tok/s; split 16/36 layers 1.4 tok/s.
+  - Splitting was 3–6× slower even for a model the Pixel could barely hold. The only upside is fitting models that can't load on one device, at about 1–1.5 tok/s.
+  - Better ideas: a pool of devices that each run a full copy (faster for several users), and the home server for big models.
+  - All test files were removed from both devices afterwards.
+- **Why PrivateLM's cluster (orailnoor/cross-platform-llm-client 1.0.7-cluster) reaches 4–6 tok/s with Gemma 4 26B on 4 phones, using the same llama.cpp RPC.** Its `jni_wrapper.cpp` and `ClusterWorkerService.kt` show:
+  1. It keeps `output.weight` / `token_embd.weight` on the main phone with a tensor override. Otherwise the last worker sends about 600 KB of word scores back over Wi-Fi every token. My test didn't do this.
+  2. Workers hold `WIFI_MODE_FULL_LOW_LATENCY` plus a wake lock. Wi-Fi power save explains the 88 ms pings.
+  3. Threads = the fast cores the process may use (2–6). Too many threads stall.
+  4. It uses a mixture-of-experts model.
+  5. The split is weighted by measured memory speed and free RAM, `op_offload = false`, workers are probed over TCP first (llama.cpp aborts if one is unreachable), the worker runs in its own `:cluster` process, there's an RPC cache dir, NSD discovery, and QR pairing.
+  The owner wants this built eventually. The plan is in the session notes: main-phone changes in `llama_bridge.cpp` / `LlamaCppEngine`, plus a worker foreground service.
 
 - **Promotion:** the owner has posted 2.0 on X and Reddit. Suggested next places: Show HN, IzzyOnDroid, XDA, AlternativeTo, Product Hunt.
 - **Release notes** embed screenshots through raw.githubusercontent URLs pinned to a commit hash, so they keep working.

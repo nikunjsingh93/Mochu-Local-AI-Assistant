@@ -43,6 +43,16 @@ internal object LlamaCppNative {
     external fun nativeNextToken(handle: Long): ByteArray?
     external fun nativeTokenCount(handle: Long): Int
     external fun nativeFree(handle: Long)
+
+    // Combining devices (see DeviceCluster.kt). An empty list turns it off for the next load.
+    external fun nativeSetCluster(endpoints: Array<String>, weights: FloatArray, localWeight: Float)
+    /** "12 of 24 layers here, 12 on other devices" after a load that used them; else "". */
+    external fun nativeClusterNote(): String
+    /** Worker: serves this device's CPU at [endpoint] until the process ends; returns why it stopped. */
+    external fun nativeServe(endpoint: String, cacheDir: String, nThreads: Int): String
+    /** A device holding part of the model stopped answering (the model must be reloaded). */
+    external fun nativeClusterLost(): Boolean
+    external fun nativeClusterClearLost()
 }
 
 /** Runs .gguf models with llama.cpp on the CPU. */
@@ -67,6 +77,20 @@ class LlamaCppEngine(
     @Volatile private var lastStats: GenerationStats? = null
     private var contextSize = 0
 
+    /** Other devices holding part of the model; 0 when it runs here alone. */
+    var sharedWith = 0
+        private set
+
+    /** A device holding part of the model went away; this engine can't be used again. */
+    @Volatile var lostDevice = false
+        private set
+
+    private fun deviceGone(): Nothing {
+        lostDevice = true
+        DeviceCluster.onLost()
+        error("A device sharing this model stopped responding. Send your message again to continue with the devices that are still sharing.")
+    }
+
     /** e.g. "qwen3 4B Q4_K - Medium · android_armv8.6_1". */
     var description: String = ""
         private set
@@ -74,11 +98,18 @@ class LlamaCppEngine(
     suspend fun load() = withContext(dispatcher) {
         val variant = LlamaCppNative.ensureInitialized(context.applicationInfo.nativeLibraryDir)
         require(variant.isNotEmpty()) { "No llama.cpp CPU backend could be loaded on this device." }
+        // Paired devices that answer lend their memory; none means this device alone.
+        val devices = DeviceCluster.prepareForLoad(context)
         // Leave a couple of cores for the UI; big.LITTLE phones gain little past four threads.
-        val threads = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 4)
+        // With other devices every step waits for the slowest thread, so only fast cores are used.
+        val threads = if (devices > 0) fastCoreCount() else (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 4)
         val kvType = savedKvCacheType(context)
         val loaded = LlamaCppNative.nativeLoad(modelPath, maxNumTokens, threads, kvType.ordinal)
-        require(loaded != 0L) { "llama.cpp could not load this .gguf model (unsupported architecture or not enough memory)." }
+        require(loaded != 0L) {
+            if (devices > 0) "llama.cpp could not load this model across your devices. Check they're still sharing, or turn off Combine devices."
+            else "llama.cpp could not load this .gguf model (unsupported architecture or not enough memory)."
+        }
+        sharedWith = devices
         handle = loaded
         contextSize = LlamaCppNative.nativeContextSize(loaded)
         // Remember the real context memory so the Models page can estimate other window sizes.
@@ -91,7 +122,8 @@ class LlamaCppEngine(
             supportsImages = runCatching { LlamaCppNative.nativeLoadVision(loaded, visionPath, threads) }.getOrDefault(false)
         }
         val cpuLabel = variant.removePrefix("libggml-cpu-").removeSuffix(".so")
-        description = "${LlamaCppNative.nativeDescribe(loaded)} · $cpuLabel"
+        description = "${LlamaCppNative.nativeDescribe(loaded)} · $cpuLabel" +
+            if (devices > 0) " · ${devices + 1} devices (${LlamaCppNative.nativeClusterNote()})" else ""
     }
 
     // Reasoning models here (Qwen3, Bonsai) write <think>...</think> into the text themselves.
@@ -106,6 +138,8 @@ class LlamaCppEngine(
             sessionPrompt = systemPrompt
             this@LlamaCppEngine.sessionKey = sessionKey
         }
+        // Every device holding part of the model must still be there, or llama.cpp would wait on it.
+        if (sharedWith > 0 && (lostDevice || !DeviceCluster.activeStillThere())) deviceGone()
         var finished = false
         try {
             when (LlamaCppNative.nativeSendUser(h, message, contextSize / 2, thinking, if (supportsImages) images.toTypedArray() else emptyArray())) {
@@ -122,7 +156,9 @@ class LlamaCppEngine(
             var thoughtTokens = 0
             while (true) {
                 currentCoroutineContext().ensureActive()
-                val bytes = LlamaCppNative.nativeNextToken(h) ?: break
+                val bytes = LlamaCppNative.nativeNextToken(h)
+                if (sharedWith > 0 && LlamaCppNative.nativeClusterLost()) deviceGone()
+                if (bytes == null) break
                 tokens++
                 val text = if (bytes.isNotEmpty()) tags.feed(String(bytes, Charsets.UTF_8)) else ""
                 if (text.isNotEmpty()) emit(text)
@@ -161,6 +197,7 @@ class LlamaCppEngine(
         val h = handle
         handle = 0L
         sessionKey = null
+        if (sharedWith > 0) DeviceCluster.releaseWifi()
         // Queue the free behind any in-flight native call, and wait briefly so memory is released
         // before the next model loads.
         runCatching {

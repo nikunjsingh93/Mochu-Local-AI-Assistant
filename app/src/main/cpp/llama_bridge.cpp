@@ -10,12 +10,15 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <cmath>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "chat.h"
 #include "common.h"
 #include "ggml-backend.h"
+#include "gguf.h"
 #include "llama.h"
 #include "sampling.h"
 #include "mtmd.h"
@@ -239,7 +242,189 @@ int send_with_images(Session *s, const std::string &text, const std::vector<std:
     return SEND_OK;
 }
 
+// ---- Device cluster: other phones and tablets lend their memory over llama.cpp's RPC backend ----
+//
+// The main device keeps the first layers and the output layer; workers hold the rest. Only a few
+// KB of activations cross Wi-Fi per token, as long as the output layer (scores for every token in
+// the vocabulary, ~600 KB) stays here, which the tensor override below makes sure of.
+
+std::mutex g_cluster_mutex;
+std::vector<std::string> g_cluster_endpoints;  // "127.0.0.1:<relay port>" per worker
+std::vector<float> g_cluster_weights;          // a worker's share (its free memory)
+float g_cluster_local_weight = 0.0f;           // this device's share
+std::vector<std::string> g_registered_endpoints;
+ggml_backend_reg_t g_rpc_reg = nullptr;
+
+/** The RPC backend library (libggml-rpc.so), loaded on first use. */
+ggml_backend_reg_t rpc_backend() {
+    if (!g_rpc_reg) {
+        g_rpc_reg = ggml_backend_load("libggml-rpc.so");
+        if (!g_rpc_reg) LOGe("RPC backend could not be loaded.");
+    }
+    return g_rpc_reg;
+}
+
+/** The model's transformer block count from its GGUF header, or -1. */
+int read_block_count(const char *model_path) {
+    gguf_init_params params = {/* .no_alloc = */ true, /* .ctx = */ nullptr};
+    gguf_context *gguf = gguf_init_from_file(model_path, params);
+    if (!gguf) return -1;
+    int count = -1;
+    const int64_t arch_id = gguf_find_key(gguf, "general.architecture");
+    if (arch_id >= 0) {
+        const std::string key = std::string(gguf_get_val_str(gguf, arch_id)) + ".block_count";
+        const int64_t id = gguf_find_key(gguf, key.c_str());
+        if (id >= 0) {
+            switch (gguf_get_kv_type(gguf, id)) {
+                case GGUF_TYPE_UINT32: count = static_cast<int>(gguf_get_val_u32(gguf, id)); break;
+                case GGUF_TYPE_INT32: count = gguf_get_val_i32(gguf, id); break;
+                default: break;
+            }
+        }
+    }
+    gguf_free(gguf);
+    return count;
+}
+
+struct ClusterPlan {
+    std::vector<ggml_backend_dev_t> devices;  // null-terminated: this device's CPU is used implicitly
+    std::vector<float> split;                 // llama_max_devices() entries
+    int n_gpu_layers = 0;
+    llama_model_tensor_buft_override overrides[2] = {};
+    int local_layers = 0;
+    int total_layers = 0;
+};
+
+/**
+ * Registers every worker and decides where layers go: this device keeps the first ones (by its
+ * share), workers get the rest by theirs. Returns an error message, or "" on success.
+ * Workers must be reachable: llama.cpp aborts if one isn't, so Kotlin checks each one first.
+ */
+std::string plan_cluster(const char *model_path, ClusterPlan &plan) {
+    std::lock_guard<std::mutex> lock(g_cluster_mutex);
+    ggml_backend_reg_t rpc = rpc_backend();
+    if (!rpc) return "This build can't use other devices (no RPC backend).";
+    using add_server_fn = ggml_backend_reg_t (*)(const char *);
+    auto add_server = reinterpret_cast<add_server_fn>(ggml_backend_reg_get_proc_address(rpc, "ggml_backend_rpc_add_server"));
+    if (!add_server) return "The RPC backend is missing ggml_backend_rpc_add_server.";
+
+    const int n_layer = read_block_count(model_path);
+    if (n_layer <= 0) return "Couldn't read the model's layer count.";
+
+    float remote_weight = 0.0f;
+    std::vector<float> device_weights;
+    for (size_t i = 0; i < g_cluster_endpoints.size(); i++) {
+        const std::string &endpoint = g_cluster_endpoints[i];
+        ggml_backend_reg_t reg = add_server(endpoint.c_str());
+        if (!reg) return "Device " + endpoint + " offered no memory.";
+        if (std::find(g_registered_endpoints.begin(), g_registered_endpoints.end(), endpoint) == g_registered_endpoints.end()) {
+            ggml_backend_register(reg);
+            g_registered_endpoints.push_back(endpoint);
+        }
+        const float w = std::max(g_cluster_weights[i], 0.01f);
+        const size_t n_dev = ggml_backend_reg_dev_count(reg);
+        for (size_t d = 0; d < n_dev; d++) {
+            plan.devices.push_back(ggml_backend_reg_dev_get(reg, d));
+            device_weights.push_back(w / static_cast<float>(n_dev));
+        }
+        remote_weight += w;
+    }
+    if (plan.devices.empty()) return "No devices to share with.";
+    plan.devices.push_back(nullptr);
+
+    plan.split.assign(llama_max_devices(), 0.0f);
+    for (size_t d = 0; d < device_weights.size() && d < plan.split.size(); d++) plan.split[d] = device_weights[d];
+
+    // llama.cpp offloads the *last* n_gpu_layers blocks (+1 for the output layer), so keeping
+    // `local` blocks here means offloading the rest.
+    const float local_weight = std::max(g_cluster_local_weight, 0.0f);
+    int local = static_cast<int>(std::lround(static_cast<float>(n_layer) * local_weight / (local_weight + remote_weight)));
+    local = std::clamp(local, 0, n_layer);
+    plan.n_gpu_layers = n_layer + 1 - local;
+    plan.local_layers = local;
+    plan.total_layers = n_layer;
+
+    // The output layer would otherwise go to the last worker and send ~600 KB back every token.
+    ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (cpu) {
+        plan.overrides[0] = {"^(output|token_embd)\\.weight$", ggml_backend_dev_buffer_type(cpu)};
+        plan.overrides[1] = {nullptr, nullptr};
+    }
+    LOGi("Cluster: %d of %d layers here, the rest on %zu device(s); output layer here.", local, n_layer, device_weights.size());
+    return "";
+}
+
+std::string g_last_cluster_note;
+
+/** A function from Mochu's patched RPC backend (see CMakeLists.txt), or null before it's loaded. */
+void *rpc_symbol(const char *name) {
+    void *lib = dlopen("libggml-rpc.so", RTLD_NOW | RTLD_NOLOAD);
+    return lib ? dlsym(lib, name) : nullptr;
+}
+
 }  // namespace
+
+/** True once a device sharing the model has stopped answering; the model must then be reloaded. */
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeClusterLost(JNIEnv *, jobject) {
+    static auto lost = reinterpret_cast<bool (*)()>(rpc_symbol("ggml_backend_rpc_lost"));
+    if (!lost) lost = reinterpret_cast<bool (*)()>(rpc_symbol("ggml_backend_rpc_lost"));
+    return lost && lost();
+}
+
+/** Before a new load across devices: forget an earlier lost connection. */
+extern "C" JNIEXPORT void JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeClusterClearLost(JNIEnv *, jobject) {
+    if (auto clear = reinterpret_cast<void (*)()>(rpc_symbol("ggml_backend_rpc_clear_lost"))) clear();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeSetCluster(JNIEnv *env, jobject, jobjectArray jendpoints, jfloatArray jweights, jfloat local_weight) {
+    std::lock_guard<std::mutex> lock(g_cluster_mutex);
+    g_cluster_endpoints.clear();
+    g_cluster_weights.clear();
+    g_cluster_local_weight = local_weight;
+    const jsize n = jendpoints ? env->GetArrayLength(jendpoints) : 0;
+    jfloat *w = jweights ? env->GetFloatArrayElements(jweights, nullptr) : nullptr;
+    const jsize n_w = jweights ? env->GetArrayLength(jweights) : 0;
+    for (jsize i = 0; i < n; i++) {
+        auto item = static_cast<jstring>(env->GetObjectArrayElement(jendpoints, i));
+        const char *chars = env->GetStringUTFChars(item, nullptr);
+        g_cluster_endpoints.emplace_back(chars);
+        env->ReleaseStringUTFChars(item, chars);
+        env->DeleteLocalRef(item);
+        g_cluster_weights.push_back(i < n_w && w ? w[i] : 1.0f);
+    }
+    if (w) env->ReleaseFloatArrayElements(jweights, w, JNI_ABORT);
+}
+
+/** "12 of 24 layers here, 12 on 1 device", after a load that used other devices; else "". */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeClusterNote(JNIEnv *env, jobject) {
+    return env->NewStringUTF(g_last_cluster_note.c_str());
+}
+
+/**
+ * Worker: serves this device's CPU to a main device until the process ends (the server loop can't
+ * be stopped, so the worker runs in its own process). Returns why it couldn't start.
+ */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeServe(JNIEnv *env, jobject, jstring jendpoint, jstring jcache_dir, jint n_threads) {
+    ggml_backend_reg_t rpc = rpc_backend();
+    if (!rpc) return env->NewStringUTF("This build can't share with other devices (no RPC backend).");
+    using start_fn = void (*)(const char *, const char *, size_t, size_t, ggml_backend_dev_t *);
+    auto start = reinterpret_cast<start_fn>(ggml_backend_reg_get_proc_address(rpc, "ggml_backend_rpc_start_server"));
+    if (!start) return env->NewStringUTF("The RPC backend is missing ggml_backend_rpc_start_server.");
+    ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (!cpu) return env->NewStringUTF("No CPU backend.");
+    const char *endpoint = env->GetStringUTFChars(jendpoint, nullptr);
+    const char *cache_dir = env->GetStringUTFChars(jcache_dir, nullptr);
+    LOGi("Sharing this device at %s with %d threads.", endpoint, n_threads);
+    start(endpoint, cache_dir, static_cast<size_t>(std::max(1, n_threads)), 1, &cpu);
+    env->ReleaseStringUTFChars(jendpoint, endpoint);
+    env->ReleaseStringUTFChars(jcache_dir, cache_dir);
+    return env->NewStringUTF("The sharing server stopped.");
+}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeInitBackends(JNIEnv *env, jobject, jstring jnative_lib_dir) {
@@ -255,7 +440,37 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeInitBackends(JNIEnv *env, jobj
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jstring jmodel_path, jint n_ctx, jint n_threads, jint kv_type) {
     const char *path = env->GetStringUTFChars(jmodel_path, nullptr);
-    llama_model *model = llama_model_load_from_file(path, llama_model_default_params());
+    llama_model_params model_params = llama_model_default_params();
+    // No other devices unless the cluster below sets them: once a device has been registered,
+    // llama.cpp would otherwise use it by default, even after it stopped sharing.
+    static ggml_backend_dev_t no_devices[] = {nullptr};
+    model_params.devices = no_devices;
+    ClusterPlan plan;
+    bool has_cluster = false;
+    g_last_cluster_note.clear();
+    {
+        bool want;
+        {
+            std::lock_guard<std::mutex> lock(g_cluster_mutex);
+            want = !g_cluster_endpoints.empty();
+        }
+        if (want) {
+            const std::string error = plan_cluster(path, plan);
+            if (!error.empty()) {
+                LOGe("%s", error.c_str());
+                env->ReleaseStringUTFChars(jmodel_path, path);
+                return 0;
+            }
+            has_cluster = true;
+            model_params.devices = plan.devices.data();
+            model_params.tensor_split = plan.split.data();
+            model_params.n_gpu_layers = plan.n_gpu_layers;
+            model_params.tensor_buft_overrides = plan.overrides;
+            g_last_cluster_note = std::to_string(plan.local_layers) + " of " + std::to_string(plan.total_layers) +
+                                  " layers here, " + std::to_string(plan.total_layers - plan.local_layers) + " on other devices";
+        }
+    }
+    llama_model *model = llama_model_load_from_file(path, model_params);
     env->ReleaseStringUTFChars(jmodel_path, path);
     if (!model) {
         LOGe("Could not load model.");
@@ -269,6 +484,8 @@ Java_com_nikunj_gemmabuilder_LlamaCppNative_nativeLoad(JNIEnv *env, jobject, jst
     ctx_params.n_ubatch = BATCH_SIZE;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = n_threads;
+    // With other devices, don't copy their weights back here to read prompts: that crosses Wi-Fi.
+    if (has_cluster) ctx_params.op_offload = false;
     if (kv_type == 1 || kv_type == 2) {
         // A quantized V cache needs flash attention.
         const ggml_type type = kv_type == 1 ? GGML_TYPE_Q8_0 : GGML_TYPE_Q4_0;

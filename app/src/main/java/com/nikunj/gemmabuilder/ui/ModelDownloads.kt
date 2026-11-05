@@ -152,6 +152,9 @@ fun ModelDownloadsScreen(
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                     Box(Modifier.padding(12.dp)) { RemoteModelSetting(state.remoteModel, onUseRemote, onStopRemote) }
                 }
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Box(Modifier.padding(12.dp)) { CombineDevicesSetting() }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
