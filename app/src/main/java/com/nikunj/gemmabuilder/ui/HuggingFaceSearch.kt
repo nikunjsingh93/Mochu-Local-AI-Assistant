@@ -142,7 +142,13 @@ private fun HfFileRow(
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(file.fileName, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(
-            String.format(Locale.US, "%.2f GB · %s", gb, fit) + if (isMixtureOfExperts(file.fileName) || isMixtureOfExperts(repo)) " · MoE (fast for its size)" else "",
+            listOfNotNull(
+                parameterCount(file.fileName) ?: parameterCount(repo),
+                String.format(Locale.US, "%.2f GB", gb),
+                fit,
+                activeParameters(file.fileName)?.let { "MoE, $it active (fast for its size)" }
+                    ?: "MoE (fast for its size)".takeIf { isMixtureOfExperts(file.fileName) || isMixtureOfExperts(repo) }
+            ).joinToString(" · "),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         when {
@@ -151,7 +157,8 @@ private fun HfFileRow(
                 LinearProgressIndicator(progress = { download.progress }, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        download.message ?: String.format(Locale.US, "%d%%", (download.progress * 100).toInt()),
+                        String.format(Locale.US, "%.2f / %.2f GB · %d%%", gb * download.progress, gb, (download.progress * 100).toInt()) +
+                            (download.message?.takeIf { download.phase != DownloadPhase.Downloading }?.let { " · $it" } ?: ""),
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = { onCancel(id) }) { Text("Cancel") }
@@ -172,3 +179,12 @@ private fun count(n: Long): String = when {
     n >= 1_000 -> String.format(Locale.US, "%.1fk", n / 1e3)
     else -> n.toString()
 }
+
+/** Total parameters from a name like "Qwen3.6-35B-A3B" (35B) or "LFM2.5-350M" (350M); the "A3B" active part is skipped. */
+fun parameterCount(name: String): String? =
+    Regex("""(?<![A-Za-z\d.])(\d+(?:\.\d+)?)([BM])(?![A-Za-z\d])""", RegexOption.IGNORE_CASE).find(name)
+        ?.let { "${it.groupValues[1]}${it.groupValues[2].uppercase(Locale.US)} params" }
+
+/** Active parameters of a mixture-of-experts name like "35B-A3B" (3B). */
+private fun activeParameters(name: String): String? =
+    Regex("""(?i)[-_]A(\d+(?:\.\d+)?)B(?![A-Za-z\d])""").find(name)?.let { "${it.groupValues[1]}B" }
