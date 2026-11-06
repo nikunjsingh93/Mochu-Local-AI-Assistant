@@ -58,6 +58,7 @@ fun CombineDevicesSetting() {
     var paired by remember { mutableStateOf(DeviceCluster.paired(context)) }
     val nearby by DeviceCluster.nearby.collectAsState()
     var pairing by remember { mutableStateOf<NearbyDevice?>(null) }
+    var forgetting by remember { mutableStateOf<ClusterDevice?>(null) }
 
     // The worker runs in its own process and reports through a file.
     LaunchedEffect(Unit) {
@@ -209,7 +210,7 @@ fun CombineDevicesSetting() {
                             color = if (device.id in connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    TextButton(onClick = { DeviceCluster.forget(context, device.id); paired = DeviceCluster.paired(context) }) { Text("Forget") }
+                    TextButton(onClick = { forgetting = device }) { Text("Forget") }
                 }
             }
             val unpaired = nearby.filter { n -> paired.none { it.id == n.id } }
@@ -233,6 +234,22 @@ fun CombineDevicesSetting() {
                 )
             }
         }
+    }
+
+    forgetting?.let { device ->
+        AlertDialog(
+            onDismissRequest = { forgetting = null },
+            title = { Text("Forget ${device.name}?") },
+            text = { Text("Mochu stops using ${device.name} for models. To use it again, pair with its 4-digit code.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    DeviceCluster.forget(context, device.id)
+                    paired = DeviceCluster.paired(context)
+                    forgetting = null
+                }) { Text("Forget", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { forgetting = null }) { Text("Cancel") } }
+        )
     }
 
     pairing?.let { device ->

@@ -61,6 +61,8 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
+**Forget confirmation** (added to the v2.1.1 APK in place): Forget on a paired device now asks "Forget X?" first. Noticed while testing: the onn tablet had disappeared from the Pixel's paired list (cause unknown; nothing in the code removes pairings by itself). Re-pair it to use it.
+
 **Layer balance, send progress, stale-status fix** (released in v2.1.1; verified on Pixel + Idea Tab):
 - **Native:** `nativeMemBandwidth(threads)` (multi-thread memcpy, best of 3, GB/s) and `nativeBlockCount(path)`.
 - **Speed reporting:** `memoryBandwidth(context)` is measured once per process. The worker measures at start and adds it to INFO: `OK <free> <model> <total> <bw>`. `DeviceCluster.askInfo()` returns `WorkerInfo`.
