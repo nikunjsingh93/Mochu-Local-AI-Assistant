@@ -15,7 +15,8 @@ import java.util.Locale
 // like a catalog model, then kept with the imported models.
 
 /** A repository in search results. */
-data class HfRepo(val id: String, val downloads: Long, val likes: Long, val gated: Boolean)
+/** [parameters] is the model's total parameter count from its GGUF metadata, or 0 if unknown. */
+data class HfRepo(val id: String, val downloads: Long, val likes: Long, val gated: Boolean, val parameters: Long = 0)
 
 /** A GGUF file in a repository. */
 data class HfFile(val path: String, val sizeBytes: Long, val sha256: String) {
@@ -43,12 +44,12 @@ private fun getJson(url: String): String {
 /** GGUF repositories matching [query], most downloaded first. */
 suspend fun searchHuggingFace(query: String): List<HfRepo> = withContext(Dispatchers.IO) {
     val q = URLEncoder.encode(query.trim(), "UTF-8")
-    val array = JSONArray(getJson("$HF/api/models?search=$q&filter=gguf&sort=downloads&direction=-1&limit=25"))
+    val array = JSONArray(getJson("$HF/api/models?search=$q&filter=gguf&sort=downloads&direction=-1&limit=25&expand%5B%5D=downloads&expand%5B%5D=likes&expand%5B%5D=gated&expand%5B%5D=gguf"))
     (0 until array.length()).map { i ->
         val o = array.getJSONObject(i)
         // "gated" is false, or "auto"/"manual" when a login and approval are needed.
         val gated = o.opt("gated").let { it != null && it != false && it.toString() != "false" }
-        HfRepo(o.getString("id"), o.optLong("downloads"), o.optLong("likes"), gated)
+        HfRepo(o.getString("id"), o.optLong("downloads"), o.optLong("likes"), gated, o.optJSONObject("gguf")?.optLong("total") ?: 0)
     }
 }
 

@@ -110,7 +110,7 @@ fun HuggingFaceSearchCard(
                         )
                         Text(
                             if (repo.gated) "Needs Hugging Face access — not available here"
-                            else "${count(repo.downloads)} downloads · ${count(repo.likes)} likes",
+                            else listOfNotNull("${count(repo.downloads)} downloads · ${count(repo.likes)} likes", repoSize(repo)).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -188,3 +188,11 @@ fun parameterCount(name: String): String? =
 /** Active parameters of a mixture-of-experts name like "35B-A3B" (3B). */
 private fun activeParameters(name: String): String? =
     Regex("""(?i)[-_]A(\d+(?:\.\d+)?)B(?![A-Za-z\d])""").find(name)?.let { "${it.groupValues[1]}B" }
+
+/** "27B params · ≈16.6 GB at Q4": exact count from the GGUF metadata, else from the name; the size assumes Q4_K_M (about 4.85 bits per weight). */
+private fun repoSize(repo: HfRepo): String? {
+    if (repo.parameters <= 0) return parameterCount(repo.id)
+    val p = repo.parameters.toDouble()
+    val params = if (p >= 1e9) String.format(Locale.US, if (p >= 1e10) "%.0fB" else "%.1fB", p / 1e9) else String.format(Locale.US, "%.0fM", p / 1e6)
+    return String.format(Locale.US, "%s params · ≈%.1f GB at Q4", params, p * 4.85 / 8 / 1e9)
+}
