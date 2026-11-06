@@ -148,6 +148,14 @@ class BuilderViewModel : ViewModel() {
             ModelDownloadTracker.completed.collect { id ->
                 refreshModelDownloads(context)
                 if (generationInProgress || uiState.value.isBusy) return@collect
+                // A model from Hugging Face search: it joins the imported models and is used right away.
+                if (HfDownloads.isHf(id)) {
+                    HfDownloads.find(context, id)?.let { model ->
+                        _uiState.update { it.copy(importedModels = importedModelNames(context)) }
+                        useImportedModel(context, model.fileName)
+                    }
+                    return@collect
+                }
                 // An image model is used from Chat when asked; it never replaces the chat model.
                 if (MODEL_CATALOG.firstOrNull { it.id == id }?.isImage == true) return@collect
                 val owner = MODEL_CATALOG.firstOrNull { it.visionId == id }
@@ -173,7 +181,7 @@ class BuilderViewModel : ViewModel() {
 
     fun downloadModel(context: Context, id: String) {
         val appContext = context.applicationContext
-        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: HfDownloads.find(appContext, id) ?: return
         val needed = model.sizeBytes - partialBytes(appContext, model) + 200L * 1024 * 1024
         val free = runCatching { freeBytesForDownloads(appContext) }.getOrDefault(0L)
         if (free < needed) {
@@ -205,7 +213,7 @@ class BuilderViewModel : ViewModel() {
 
     fun cancelModelDownload(context: Context, id: String) {
         val appContext = context.applicationContext
-        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: return
+        val model = MODEL_CATALOG.firstOrNull { it.id == id } ?: HfDownloads.find(appContext, id) ?: return
         if (ModelDownloadTracker.states.value[id]?.phase in ACTIVE_DOWNLOAD_PHASES) {
             ModelDownloadService.cancel(appContext, id)
         } else {
@@ -293,7 +301,7 @@ class BuilderViewModel : ViewModel() {
         val live = ModelDownloadTracker.states.value
         val states = MODEL_CATALOG.associate { model ->
             model.id to (live[model.id] ?: storedDownloadState(appContext, model))
-        }
+        } + live.filterKeys { HfDownloads.isHf(it) }
         val contexts = MODEL_CATALOG.associate { it.fileName to savedModelContextTokens(appContext, it.fileName) } +
             importedModelNames(appContext).associateWith { savedModelContextTokens(appContext, it) }
         val imageSettings = MODEL_CATALOG.filter { it.isImage }.associate { it.fileName to savedImageSettings(appContext, it) }

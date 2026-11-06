@@ -251,3 +251,9 @@ These are the files changed in the last release, v2.0.0:
 
 - **Promotion:** the owner has posted 2.0 on X and Reddit. Suggested next places: Show HN, IzzyOnDroid, XDA, AlternativeTo, Product Hunt.
 - **Release notes** embed screenshots through raw.githubusercontent URLs pinned to a commit hash, so they keep working.
+
+## Hugging Face search in the Models tab (2026-11-05, uncommitted, after v2.1.1)
+- `data/HuggingFace.kt`: `searchHuggingFace` (api/models, filter=gguf, by downloads), `huggingFaceFiles` (tree/main recursive; skips mmproj and split `-0000N-of-0000M` files; `lfs.oid` = SHA-256), `isMixtureOfExperts`, `HfDownloads` registry in prefs `hfDownloads` (ids `hf:repo/path` → CatalogModel).
+- `ui/HuggingFaceSearch.kt`: card under Import; repos (gated greyed), files with size, fit label, MoE note, Download/progress/Cancel.
+- ModelDownloadService/ViewModel accept `hf:` ids; finished file goes to `importedModelFile` (copy fallback because external→internal rename fails across file systems) and is used immediately.
+- Tested on Pixel: search "LFM2 350M" and "unsloth Qwen3", downloaded LFM2.5-350M-Q4_0 (verified, imported, in use); test model deleted and Qwen3.6-35B restored.

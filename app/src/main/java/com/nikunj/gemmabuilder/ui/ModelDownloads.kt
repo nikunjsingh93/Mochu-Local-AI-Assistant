@@ -176,6 +176,7 @@ fun ModelDownloadsScreen(
                     Text("Import a .litertlm or .gguf file")
                 }
                 state.importingName?.let { name -> ImportProgress(name, state.importedBytes, state.importTotalBytes) }
+                HuggingFaceSearchCard(state, ramGb, onDownload = startDownload, onCancel = onCancel)
                 state.importDoneName?.let { name ->
                     Text(
                         "✓ ${name.substringBeforeLast('.')} imported and in use. Send a message to load it.",

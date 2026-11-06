@@ -81,7 +81,7 @@ class ModelDownloadService : Service() {
         worker = scope.launch {
             while (true) {
                 val next = synchronized(pending) { pending.removeFirstOrNull() } ?: break
-                val model = MODEL_CATALOG.firstOrNull { it.id == next } ?: continue
+                val model = MODEL_CATALOG.firstOrNull { it.id == next } ?: HfDownloads.find(this@ModelDownloadService, next) ?: continue
                 current = next
                 currentJob = launch { download(model) }
                 currentJob?.join()
@@ -95,7 +95,7 @@ class ModelDownloadService : Service() {
     private fun cancel(id: String) {
         synchronized(pending) { pending.remove(id) }
         if (current == id) currentJob?.cancel()
-        MODEL_CATALOG.firstOrNull { it.id == id }?.let { partialModelFile(this, it).delete() }
+        (MODEL_CATALOG.firstOrNull { it.id == id } ?: HfDownloads.find(this, id))?.let { partialModelFile(this, it).delete() }
         ModelDownloadTracker.set(id, null)
     }
 
@@ -132,9 +132,12 @@ class ModelDownloadService : Service() {
                 ModelDownloadTracker.set(model.id, ModelDownloadState(DownloadPhase.Failed, message = "The file didn't match its expected fingerprint and was deleted. Try again."))
                 return
             }
-            val target = downloadedModelFile(this, model)
+            // A file found on Hugging Face joins the imported models (Use, context and Delete like any GGUF).
+            val target = if (HfDownloads.isHf(model.id)) importedModelFile(this, model.fileName).also { it.parentFile?.mkdirs() } else downloadedModelFile(this, model)
             target.delete()
-            if (!partial.renameTo(target)) {
+            // Imported models live in internal storage, a different file system from downloads, so copy when a rename can't.
+            val saved = partial.renameTo(target) || runCatching { partial.copyTo(target, overwrite = true); partial.delete(); true }.getOrElse { target.delete(); false }
+            if (!saved) {
                 ModelDownloadTracker.set(model.id, ModelDownloadState(DownloadPhase.Failed, message = "Could not save the downloaded file."))
                 return
             }
