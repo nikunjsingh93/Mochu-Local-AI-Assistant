@@ -77,6 +77,8 @@ fun localNetworkAddress(): String? = runCatching {
 fun openAiMessagesToPrompt(messages: JSONArray): Pair<String, String> {
     val system = StringBuilder()
     val turns = mutableListOf<Pair<String, String>>()
+    // Tool results name the call they answer by id; this finds the function's name for the prompt.
+    val callNames = mutableMapOf<String, String>()
     for (i in 0 until messages.length()) {
         val msg = messages.optJSONObject(i) ?: continue
         val role = msg.optString("role")
@@ -86,19 +88,44 @@ fun openAiMessagesToPrompt(messages: JSONArray): Pair<String, String> {
             is JSONArray -> (0 until c.length()).mapNotNull { j -> c.optJSONObject(j)?.takeIf { it.optString("type") == "text" }?.optString("text") }.joinToString("\n")
             else -> ""
         }
-        if (role == "system" || role == "developer") {
-            if (system.isNotEmpty()) system.append("\n\n")
-            system.append(content)
-        } else if (content.isNotBlank()) {
-            turns += (if (role == "assistant") "Assistant" else "User") to content
+        when (role) {
+            "system", "developer" -> {
+                if (system.isNotEmpty()) system.append("\n\n")
+                system.append(content)
+            }
+            "assistant" -> {
+                val calls = msg.optJSONArray("tool_calls")
+                calls?.let { list ->
+                    for (j in 0 until list.length()) {
+                        val call = list.optJSONObject(j) ?: continue
+                        callNames[call.optString("id")] = call.optJSONObject("function")?.optString("name").orEmpty()
+                    }
+                }
+                val text = listOf(content.trim(), calls?.let { toolCallsAsText(it) }.orEmpty()).filter { it.isNotEmpty() }.joinToString("\n")
+                if (text.isNotEmpty()) turns += "Assistant" to text
+            }
+            "tool", "function" -> {
+                val name = msg.optString("name").ifBlank { callNames[msg.optString("tool_call_id")].orEmpty() }
+                turns += (if (name.isNotBlank()) "Result of $name" else "Function result") to content.ifBlank { "(empty)" }
+            }
+            else -> if (content.isNotBlank()) turns += "User" to content
         }
     }
     val systemPrompt = system.toString().ifBlank { "You are a helpful assistant." }
-    val last = turns.lastOrNull()?.second.orEmpty()
-    val message = if (turns.size <= 1) last else buildString {
-        append("Conversation so far:\n")
-        turns.dropLast(1).forEach { (who, text) -> append("$who: $text\n") }
-        append("\nReply to the user's latest message:\n$last")
+    val last = turns.lastOrNull()
+    val message = when {
+        turns.size <= 1 -> last?.second.orEmpty()
+        last?.first == "User" -> buildString {
+            append("Conversation so far:\n")
+            turns.dropLast(1).forEach { (who, text) -> append("$who: $text\n") }
+            append("\nReply to the user's latest message:\n${last.second}")
+        }
+        // The conversation ends with function results (or the assistant): carry on from there.
+        else -> buildString {
+            append("Conversation so far:\n")
+            turns.forEach { (who, text) -> append("$who: $text\n") }
+            append("\nContinue as the assistant. Use the function results above to answer the user, or call another function if you still need one.")
+        }
     }
     return systemPrompt to message
 }
@@ -215,7 +242,10 @@ class ApiServerService : Service() {
         val messages = request.optJSONArray("messages")
             ?: return respond(out, 400, error("\"messages\" is required.", "invalid_request_error"))
         val stream = request.optBoolean("stream", false)
-        val (systemPrompt, message) = openAiMessagesToPrompt(messages)
+        val (basePrompt, message) = openAiMessagesToPrompt(messages)
+        val choice = toolChoiceFrom(request)
+        val tools = toolsOffered(apiToolsFrom(request), choice)
+        val systemPrompt = if (tools.isEmpty()) basePrompt else basePrompt + "\n\n" + toolsSystemPrompt(tools, choice)
         if (message.isBlank()) return respond(out, 400, error("No user message to answer.", "invalid_request_error"))
         if (EngineHolder.foregroundBusy || EngineHolder.backgroundRunning || generation.isLocked) {
             return respond(out, 503, error("The model is busy with another request. Try again in a moment.", "server_busy"))
@@ -241,27 +271,52 @@ class ApiServerService : Service() {
                             .put("id", id).put("object", "chat.completion.chunk").put("created", created).put("model", modelId())
                             .put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", delta).put("finish_reason", finish ?: JSONObject.NULL)))
                         out.write("data: ${chunk(JSONObject().put("role", "assistant").put("content", ""), null)}\n\n".toByteArray())
+                        fun send(delta: JSONObject, finish: String? = null) {
+                            out.write("data: ${chunk(delta, finish)}\n\n".toByteArray())
+                            out.flush()
+                        }
                         engine.generate(sessionKey, message, systemPrompt).collect { piece ->
                             raw.append(piece)
                             // Send only the answer: hold back reasoning until it closes.
                             val split = splitThinking(raw.toString())
                             val answer = if (split.stillThinking) "" else split.answer
-                            if (answer.length > sent) {
-                                out.write("data: ${chunk(JSONObject().put("content", answer.substring(sent)), null)}\n\n".toByteArray())
-                                out.flush()
-                                sent = answer.length
+                            // With tools, a function call must not leak out as text while it streams.
+                            val ready = if (tools.isEmpty()) answer.length else streamableLength(answer)
+                            if (ready > sent) {
+                                send(JSONObject().put("content", answer.substring(sent, ready)))
+                                sent = ready
                             }
                         }
-                        out.write("data: ${chunk(JSONObject(), "stop")}\n\ndata: [DONE]\n\n".toByteArray())
+                        // The same split as while streaming, so [sent] still counts into it.
+                        val answer = splitThinking(raw.toString()).answer
+                        val reply = if (tools.isEmpty()) null else parseToolCalls(answer, tools)
+                        if (reply != null && reply.calls.isNotEmpty()) {
+                            send(JSONObject().put("tool_calls", toolCallsJson(reply.calls, withIndex = true)))
+                            send(JSONObject(), "tool_calls")
+                        } else {
+                            // Text that was held back in case it was a call.
+                            if (answer.length > sent) send(JSONObject().put("content", answer.substring(sent)))
+                            send(JSONObject(), "stop")
+                        }
+                        out.write("data: [DONE]\n\n".toByteArray())
                         out.flush()
                     } else {
                         val raw = StringBuilder()
                         engine.generate(sessionKey, message, systemPrompt).collect { raw.append(it) }
-                        val answer = stripThinking(raw.toString()).trim()
+                        val reply = if (tools.isEmpty()) ToolReply(stripThinking(raw.toString()).trim(), emptyList())
+                            else parseToolCalls(stripThinking(raw.toString()), tools)
+                        val answer = reply.content
+                        val replyMessage = JSONObject().put("role", "assistant")
+                        if (reply.calls.isEmpty()) {
+                            replyMessage.put("content", answer)
+                        } else {
+                            // OpenAI sends null content when the reply is only calls.
+                            replyMessage.put("content", answer.ifEmpty { null } ?: JSONObject.NULL).put("tool_calls", toolCallsJson(reply.calls))
+                        }
                         val response = JSONObject()
                             .put("id", id).put("object", "chat.completion").put("created", created).put("model", modelId())
                             .put("choices", JSONArray().put(JSONObject().put("index", 0)
-                                .put("message", JSONObject().put("role", "assistant").put("content", answer)).put("finish_reason", "stop")))
+                                .put("message", replyMessage).put("finish_reason", if (reply.calls.isEmpty()) "stop" else "tool_calls")))
                             .put("usage", JSONObject().put("prompt_tokens", (systemPrompt.length + message.length) / 4).put("completion_tokens", answer.length / 4)
                                 .put("total_tokens", (systemPrompt.length + message.length + answer.length) / 4))
                         respond(out, 200, response.toString())

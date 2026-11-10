@@ -2,7 +2,7 @@
 
 ## Last Updated
 
-Date: 2026-10-22
+Date: 2026-11-10
 Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
@@ -60,6 +60,32 @@ These are the files changed in the last release, v2.0.0:
 - **`README.md`, `docs/assets/cards/`:** the Smart cards section and screenshots.
 
 ## Work in Progress
+
+**Tool calling in the local API** (2026-11-10, uncommitted; from a GitHub feature request asking for "tool calling / function calling"):
+- `/v1/chat/completions` now takes OpenAI `tools` (and the older `functions`), `tool_choice` (auto, none, required or a named function) and `tool`/`tool_calls` messages. It answers with `tool_calls` and `finish_reason: "tool_calls"`, streamed or not.
+- **New `data/ToolCalling.kt`:**
+  - The tools are listed in the system prompt, and the model is asked to write `<tool_call>{"name","arguments"}</tool_call>`.
+  - `parseToolCalls` also accepts a reply that is only a JSON call (fenced or not). Only offered names count as calls.
+  - `streamableLength` holds back a call while it streams.
+- **`openAiMessagesToPrompt`** now writes the assistant's calls and "Result of <name>: …" turns. When the conversation ends with a result, it asks the model to continue. Plain conversations produce the same prompt as before.
+- Tests: `ToolCallingTest.kt`. `gradle testReleaseUnitTest assembleRelease` passed, using Gradle 8.13 downloaded to the session scratchpad (AGP 8.12 needs 8.13; only 8.10.2 is installed at `C:\Users\Nikunj\Android\gradle-8.10.2`). The signature was verified (`ad1dbbc3…`).
+- **Verified on the S26 Ultra** (SM-S948U1, wireless adb; pairing port from `adb mdns services`) with Gemma 4 E2B LiteRT, using curl from the PC:
+  - A non-streamed call returned `get_weather {"city":"Paris"}`.
+  - Sending the tool result back gave a correct text answer.
+  - A streamed call returned `{"city":"Oslo","unit":"fahrenheit"}`.
+  - A streamed reply with no call needed came through as normal text.
+  - A request without tools was unchanged.
+  - The API server was switched off afterwards.
+- **Gemma 4 E4B (LiteRT)** sometimes writes its own native call format, `<|tool_call>call:get_weather{city:<|"|>Paris<|"|>}<tool_call|>`, and that text came back as the answer. `withGemmaCallsAsJson` now rewrites those blocks before parsing, and `streamableLength` holds them back while streaming. After the fix, 10 of 10 E4B requests (3 prompts × 3, plus 1 streamed) returned correct `tool_calls`. 16 unit tests pass.
+- **GGUF, LFM2.5 1.2B:** it improvises formats, and the parser now reads them:
+  - `<name>fn</name>` followed by JSON, sometimes with the arguments under "properties", plus stray `}}` or `</argument>`. Handled by `looseCalls`.
+  - Its trained format, `<|tool_call_start|>[fn(city="Paris")]<|tool_call_end|>`. Handled by `withLfmCallsAsJson` and `pythonCalls`.
+  - A made-up result after a call ("The weather is 22°C") is dropped.
+  - Final runs: 15/16, then 13/16. The misses were `<name>get_weather</name>` followed by "I don't have real-time data", with no arguments, so they're correctly treated as text. It also never called for "Is it cold in Oslo?" These are limits of a 1.2B model, not parser bugs.
+- **GGUF, Qwen3 1.7B Q8_0** (from the in-app Hugging Face search): 12/12 correct calls, plus correct result answers, streaming and plain text. Qwen is trained on the same `<tool_call>` format. The test download was deleted afterwards and LFM2.5 is selected again.
+- **API card:** the Base URL, API key and model values are now bold (`Detail()` in `ApiServerSetting`). The key is saved in settings and stays the same until changed with "Change".
+- Tests: 18 in `ToolCallingTest`, 90 in total, all passing. Small issue: `usage.completion_tokens` is 0 for a reply that is only a call.
+- Not done: tools the model picks inside the app's own chat (web search and so on). That would be a separate, opt-in feature.
 
 **Forget confirmation** (added to the v2.1.1 APK in place): Forget on a paired device now asks "Forget X?" first. Noticed while testing: the onn tablet had disappeared from the Pixel's paired list (cause unknown; nothing in the code removes pairings by itself). Re-pair it to use it.
 
@@ -220,6 +246,7 @@ These are the files changed in the last release, v2.0.0:
 
 ## Next Steps
 
+0. **Tool calling:** document `tools` in the README's Local API section, and reply on the GitHub issue to ask whether they also want in-app tools. If so, build the read-only, opt-in version (see PROJECT.md).
 1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
 2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
 3. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.

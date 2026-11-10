@@ -95,7 +95,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
   ```
   adb -t <transport_id> install -r <apk>
   ```
-  The owner's test phones are a Samsung S25 (SM-S938U1) and an Athena tablet (9425X), both connected over wireless adb.
+  The owner's test phones are a Samsung S25 (SM-S938U1), a Samsung S26 Ultra (SM-S948U1) and an Athena tablet (9425X), all connected over wireless adb.
 - **Release flow** (only when the owner asks):
   1. Bump `versionCode`/`versionName` in `app/build.gradle.kts` and in the README's Build Notes.
   2. Build and verify the signature.
@@ -108,6 +108,8 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
 
 ## Important Decisions
 
+- **API tool calling is done in the prompt, not by each runtime's chat template** (`data/ToolCalling.kt`). Every engine (LiteRT, GGUF, home server, combined devices) gets the same `<tool_call>{"name","arguments"}</tool_call>` format, and only function names the client offered come back as calls. Gemma 4 sometimes ignores that and writes its native `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>` format instead, so the parser reads both. LFM2 does the same with `<|tool_call_start|>[fn(key="value")]<|tool_call_end|>`, and small models improvise `<name>fn</name>` followed by JSON, so those are read too. Qwen3 follows `<tool_call>` best.
+- **Planned in-app tools (not built yet):** if the model is ever allowed to pick tools in chat, it should be an opt-in setting with read-only tools only, such as web search, reading a page, the calculator, date and time, or reading Memory. Anything that writes (reminders, tasks, sending, deleting, webhooks) stays with the app's own parsers or needs the user to tap to confirm. Small models call tools unreliably and claim actions they didn't take, and web pages can carry instructions (prompt injection), so a read-only tool can at worst give a wrong answer.
 - **Cards are text blocks, not a separate message type,** so they're saved with chats, copy as text, and fall back gracefully.
 - **Card numbers must appear in the source.** Small models invent prices and scores, so unverified values are dropped rather than shown.
 - **Price history is only Mochu's own checks.** Points within 10 minutes replace each other. A store's "typical/list price" is read from labeled text on the page and shown as a reference, not as a history point.

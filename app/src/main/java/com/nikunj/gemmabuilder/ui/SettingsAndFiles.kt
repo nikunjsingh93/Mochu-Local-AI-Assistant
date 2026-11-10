@@ -5,6 +5,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.size
@@ -596,10 +599,21 @@ fun ApiServerSetting() {
                 )
             }
             SelectionContainer {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Base URL: $base", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                    Text("API key: $key", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                    Text("Model: ${savedModelName(context).substringBeforeLast('.')}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Values in bold so they're easy to read off the screen and type on another device.
+                    @Composable
+                    fun Detail(label: String, value: String) = Text(
+                        buildAnnotatedString {
+                            append("$label: ")
+                            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)) { append(value) }
+                        },
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Detail("Base URL", base)
+                    Detail("API key", key)
+                    Detail("Model", savedModelName(context).substringBeforeLast('.'))
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
