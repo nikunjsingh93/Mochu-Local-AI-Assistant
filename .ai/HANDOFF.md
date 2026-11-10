@@ -7,6 +7,8 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
+- **v2.3.0 is released** (versionCode 35) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.3.0 (commit `d779c3f`), with tool calling in the local API and bold API details. The signature was verified (`ad1dbbc3…`), and it's installed on the S26 Ultra.
+- **LFM3 (GitHub issue #3) doesn't load yet.** LiquidAI's LFM3 GGUFs (LFM3-1.7B, LFM3-Omni-2B, LFM3-VL-2B) report architecture `lfm3`. The llama.cpp submodule (`c061df1`, 2026-10-01) only has `lfm2` and `lfm2moe`, so a download from Search Hugging Face would fail to load. Next: update the llama.cpp submodule to a version with `lfm3`, rebuild, and test LFM3-1.7B Q4_K_M. Also check that `llama_bridge.cpp` and Combine devices (RPC) still build and work. Omni's audio input isn't supported by Mochu.
 - **v2.1.1 is released** (versionCode 33) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.1, with layer balance modes, send progress, import progress, and the stale-status fix.
 - **v2.1.0** (versionCode 32) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.0, with Combine devices (experimental).
 - **v2.0.3** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
@@ -61,7 +63,7 @@ These are the files changed in the last release, v2.0.0:
 
 ## Work in Progress
 
-**Tool calling in the local API** (2026-11-10, uncommitted; from a GitHub feature request asking for "tool calling / function calling"):
+**Tool calling in the local API** (2026-11-10, released in v2.3.0; from a GitHub feature request asking for "tool calling / function calling"):
 - `/v1/chat/completions` now takes OpenAI `tools` (and the older `functions`), `tool_choice` (auto, none, required or a named function) and `tool`/`tool_calls` messages. It answers with `tool_calls` and `finish_reason: "tool_calls"`, streamed or not.
 - **New `data/ToolCalling.kt`:**
   - The tools are listed in the system prompt, and the model is asked to write `<tool_call>{"name","arguments"}</tool_call>`.
@@ -246,7 +248,8 @@ These are the files changed in the last release, v2.0.0:
 
 ## Next Steps
 
-0. **Tool calling:** document `tools` in the README's Local API section, and reply on the GitHub issue to ask whether they also want in-app tools. If so, build the read-only, opt-in version (see PROJECT.md).
+0. **LFM3 support:** update llama.cpp so `lfm3` GGUFs load (see Current State).
+1. **Tool calling:** the owner is replying on the GitHub issue to ask whether in-app tools are wanted too. Chat already runs web search, page reading and Memory by itself. A model-chosen version would be opt-in and read-only (see PROJECT.md).
 1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
 2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
 3. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
