@@ -7,7 +7,8 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **Default digital assistant (GitHub feature request), uncommitted, not released:**
+- **v2.4.1 is released** (versionCode 37) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.1 (commit `0098c41`), with Mochu as the default digital assistant. The signature was verified (`ad1dbbc3…`). It's installed on the S26 Ultra and the onn tablet.
+- **Default digital assistant (GitHub feature request), released in v2.4.1:**
   - **Manifest:** `MainActivity` handles `android.intent.action.ASSIST` and `VOICE_COMMAND`. That's enough for Android's assistant role: Samsung's Digital assistant app list on the S26 shows "Mochu AI" under Others, next to ChatGPT. No VoiceInteractionService is needed.
   - **`MainActivity.handleTaskIntent`:** sets `AppEvents.assist`, only on a fresh launch (`savedInstanceState == null`), so a rotation or restore doesn't start another voice chat.
   - **`AppShell`:** opens a new assistant chat, or reuses the open one if it's empty, then sets `AppEvents.listenNow`. `AssistantChatScreen` starts the mic. While a reply is running it only shows the app.
