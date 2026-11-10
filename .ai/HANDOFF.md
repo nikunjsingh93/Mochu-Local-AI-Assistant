@@ -7,8 +7,9 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
-- **v2.3.0 is released** (versionCode 35) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.3.0 (commit `d779c3f`), with tool calling in the local API and bold API details. The signature was verified (`ad1dbbc3…`), and it's installed on the S26 Ultra.
-- **LFM3 support (GitHub issue #3), uncommitted, not released:**
+- **v2.4.0 is released** (versionCode 36) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.0 (commit `8ca8a93`), with LFM3 support, llama.cpp b12134 and the Combine devices version check. The signature was verified (`ad1dbbc3…`). It's installed on the S26 Ultra and the onn 8 Core tablet.
+- **v2.3.0** (versionCode 35) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.3.0 (commit `d779c3f`), with tool calling in the local API and bold API details.
+- **LFM3 support (GitHub issue #3), released in v2.4.0:**
   - **llama.cpp submodule** moved from `c061df1` (2026-10-01) to tag `b12134` (`040ce19`, 2026-11-05). That's after LFM3 support (#31252) and its fixes (tensor split, NVFP4, spec-dec), and before the 2026-11-10 FP8 KV-cache change.
   - **Build fixes:**
     - `llama_bridge.cpp`: `common_chat_templates_apply(...).prompt` is now a `common_chat_prompt` made of parts, so the bridge calls `.str()`. That's the same string as before.
@@ -276,7 +277,7 @@ These are the files changed in the last release, v2.0.0:
 
 ## Next Steps
 
-0. **LFM3 support:** everything is tested. When the owner says so, bump to 2.4.0 (versionCode 36), commit, release, and post the LFM3 issue reply. The release notes must say every Combine device needs the update (RPC protocol 8). See Current State.
+0. **GitHub replies:** the owner posts the replies on the tool-calling issue and the LFM3 issue (#3).
 1. **Tool calling:** the owner is replying on the GitHub issue to ask whether in-app tools are wanted too. Chat already runs web search, page reading and Memory by itself. A model-chosen version would be opt-in and read-only (see PROJECT.md).
 1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
 2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
