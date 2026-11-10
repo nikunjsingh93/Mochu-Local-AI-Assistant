@@ -108,7 +108,8 @@ fun parseToolCalls(reply: String, tools: List<ApiTool>, newId: () -> String = ::
         val bodyStart = open + CALL_OPEN.length
         val close = answer.indexOf(CALL_CLOSE, bodyStart)
         val end = if (close >= 0) close + CALL_CLOSE.length else answer.length
-        val found = callsInJson(answer.substring(bodyStart, if (close >= 0) close else answer.length), names)
+        val body = answer.substring(bodyStart, if (close >= 0) close else answer.length)
+        val found = callsInJson(body, names).ifEmpty { xmlCalls(body, names) }
         if (found.isEmpty()) content.append(answer.substring(open, end)) else calls += found
         at = end
     }
@@ -274,6 +275,35 @@ fun toolCallsJson(calls: List<ApiToolCall>, withIndex: Boolean = false): JSONArr
 }
 
 private fun newToolCallId(): String = "call_" + UUID.randomUUID().toString().replace("-", "").take(24)
+
+private val XML_FUNCTION = Regex("""<function=([\w.\-]+)>(.*?)(?:</function>|$)""", RegexOption.DOT_MATCHES_ALL)
+private val XML_PARAMETER = Regex("""<parameter=([\w.\-]+)>(.*?)(?:</parameter>|$)""", RegexOption.DOT_MATCHES_ALL)
+
+/**
+ * The XML call style inside <tool_call> that LFM3 writes (as Qwen3-Coder does):
+ * <function=get_weather><parameter=city>Paris</parameter></function>. Values that read as JSON
+ * (numbers, true/false, lists, objects) keep their type; anything else is a string.
+ */
+private fun xmlCalls(body: String, names: Set<String>): List<Pair<String, String>> =
+    XML_FUNCTION.findAll(body).mapNotNull { function ->
+        val name = function.groupValues[1]
+        if (name !in names) return@mapNotNull null
+        val args = JSONObject()
+        XML_PARAMETER.findAll(function.groupValues[2]).forEach { parameter ->
+            val raw = parameter.groupValues[2].trim()
+            val value: Any = when {
+                raw.startsWith("{") -> runCatching { JSONObject(raw) }.getOrDefault(raw)
+                raw.startsWith("[") -> runCatching { JSONArray(raw) }.getOrDefault(raw)
+                raw == "true" || raw == "false" -> raw.toBoolean()
+                raw == "null" -> JSONObject.NULL
+                raw.matches(Regex("""-?\d+""")) -> raw.toLongOrNull() ?: raw
+                raw.matches(Regex("""-?\d+\.\d+([eE][-+]?\d+)?""")) -> raw.toDouble()
+                else -> raw
+            }
+            args.put(parameter.groupValues[1], value)
+        }
+        name to args.toString()
+    }.toList()
 
 private val NAME_TAG = Regex("""<name>\s*([\w.\-]+)\s*</name>""")
 

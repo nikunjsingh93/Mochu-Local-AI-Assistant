@@ -135,13 +135,15 @@ std::string render_chat(Session *s) {
     inputs.messages = s->messages;
     inputs.add_generation_prompt = true;
     inputs.enable_thinking = s->thinking;
+    // llama.cpp returns the prompt in parts (template text and user input); joined, it is the same
+    // string as before, which the prompt cache compares against.
     try {
         inputs.use_jinja = true;
-        return common_chat_templates_apply(s->templates.get(), inputs).prompt;
+        return common_chat_templates_apply(s->templates.get(), inputs).prompt.str();
     } catch (const std::exception &e) {
         LOGw("Jinja chat template failed (%s); using the built-in template.", e.what());
         inputs.use_jinja = false;
-        return common_chat_templates_apply(s->templates.get(), inputs).prompt;
+        return common_chat_templates_apply(s->templates.get(), inputs).prompt.str();
     }
 }
 

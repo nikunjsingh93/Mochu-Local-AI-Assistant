@@ -50,7 +50,12 @@ if (TARGET ggml-rpc)
     set(RPC_PATCHED ${CMAKE_CURRENT_BINARY_DIR}/ggml-rpc-mochu.cpp)
     file(WRITE ${RPC_PATCHED}.tmp "${RPC_SRC}")
     configure_file(${RPC_PATCHED}.tmp ${RPC_PATCHED} COPYONLY)
-    set_property(TARGET ggml-rpc PROPERTY SOURCES ${RPC_PATCHED} ${RPC_DIR}/transport.cpp)
+    # Swap only ggml-rpc.cpp and keep upstream's other sources (transport.cpp, log.cpp, ...), so new
+    # files added upstream are built without changes here.
+    get_property(RPC_SOURCES TARGET ggml-rpc PROPERTY SOURCES)
+    list(FILTER RPC_SOURCES EXCLUDE REGEX "(^|/)ggml-rpc\\.cpp$")
+    list(TRANSFORM RPC_SOURCES PREPEND ${RPC_DIR}/ REGEX "^[^/]+\\.(c|cpp)$")
+    set_property(TARGET ggml-rpc PROPERTY SOURCES ${RPC_PATCHED} ${RPC_SOURCES})
     target_include_directories(ggml-rpc PRIVATE ${RPC_DIR})
 endif()
 

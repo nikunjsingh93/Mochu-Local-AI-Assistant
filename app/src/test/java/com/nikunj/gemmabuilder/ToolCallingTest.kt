@@ -143,6 +143,32 @@ class ToolCallingTest {
     }
 
     @Test
+    fun readsXmlStyleCalls() {
+        // What LFM3 1.7B wrote on the S26 Ultra, every time.
+        val reply = parseToolCalls(
+            "<tool_call>\n<function=get_weather>\n<parameter=city>\nOslo\n</parameter>\n<parameter=unit>\nfahrenheit\n</parameter>\n</function>\n</tool_call>",
+            tools, ::id
+        )
+        assertEquals("", reply.content)
+        val args = JSONObject(reply.calls.single().arguments)
+        assertEquals("Oslo", args.getString("city"))
+        assertEquals("fahrenheit", args.getString("unit"))
+        // Types are kept where the value reads as JSON; dates and words stay strings.
+        val typed = parseToolCalls(
+            "<tool_call><function=get_weather><parameter=city>2026-12-03</parameter><parameter=days>3</parameter>" +
+                "<parameter=metric>true</parameter><parameter=hours>[9, 12]</parameter></function></tool_call>",
+            tools, ::id
+        )
+        val t = JSONObject(typed.calls.single().arguments)
+        assertEquals("2026-12-03", t.getString("city"))
+        assertEquals(3, t.getInt("days"))
+        assertTrue(t.getBoolean("metric"))
+        assertEquals(12, t.getJSONArray("hours").getInt(1))
+        // Unknown function names are still left as text.
+        assertTrue(parseToolCalls("<tool_call><function=send_email></function></tool_call>", tools, ::id).calls.isEmpty())
+    }
+
+    @Test
     fun readsLfmNativeCalls() {
         // What LFM2.5 1.2B wrote on the S26 Ultra, in its trained format.
         val reply = parseToolCalls("<|tool_call_start|>[get_weather(city=\"Paris\", unit='celsius')]<|tool_call_end|>", tools, ::id)

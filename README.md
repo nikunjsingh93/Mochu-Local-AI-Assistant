@@ -37,7 +37,7 @@ Try: *"https://www.amazon.com/dp/… show its current price"*, *"what's the NVDA
 ## App Features
 
 - **Smart cards** under answers: prices with history and the store's typical price, stocks and crypto, headlines, sports scores, product comparisons, recipes, document summaries with "ask more" buttons, and places with hours and Open in Maps
-- **Chat** with on-device models: Gemma 4 E2B/E4B on the GPU, and GGUF models (Qwen3.5, Gemma 3 1B, LFM2.5, Bonsai) on the CPU, with visible thinking and a Quick / Balanced / Deep thinking button
+- **Chat** with on-device models: Gemma 4 E2B/E4B on the GPU, and GGUF models (Qwen3.5, Gemma 3 1B, LFM2.5, LFM3, Bonsai) on the CPU, with visible thinking and a Quick / Balanced / Deep thinking button
 - **Small models for budget phones**: phones with 6 GB of RAM or less get a 1B-class model recommended
 - **Documents**: attach PDF, Word, text, CSV or code files and ask Mochu to summarize them or find things in them
 - **Photos**: ask about pictures and screenshots (Gemma 4 and the GGUF models with photo support)
@@ -49,7 +49,7 @@ Try: *"https://www.amazon.com/dp/… show its current price"*, *"what's the NVDA
 - **Code**: build web apps, React + TypeScript apps and Python programs in projects with several chats, run them right away (preview, console, Python terminal), and export as an Android APK, a Capacitor project or a ZIP
 - **Local API server**: let other devices on your Wi-Fi use the phone's model through an OpenAI-compatible API, including **tool calling** (OpenAI `tools` / `tool_calls`, streamed or not) for agents and apps that run their own functions
 - **Home server models**: use a bigger model from Ollama, LM Studio, llama.cpp, vLLM, Unsloth or any OpenAI-compatible API on your computer or server
-- **Combine devices (experimental)**: run a GGUF model too big for one device across your phones and tablets on the same Wi-Fi. Pair with a 4-digit code; Mochu splits the model by free memory, keeps going if a device briefly drops out, and the local API server can serve the combined model to your laptop
+- **Combine devices (experimental)**: run a GGUF model too big for one device across your phones and tablets on the same Wi-Fi. Pair with a 4-digit code; Mochu splits the model by free memory, keeps going if a device briefly drops out, and the local API server can serve the combined model to your laptop. All devices need the same Mochu version
 - Everything runs on the phone by default; chats, files and models stay on the device
 
 ## Screenshots
@@ -143,7 +143,7 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 
 Current app version:
 
-- `versionName`: `2.3.0`
+- `versionName`: `2.4.0`
 - `applicationId`: `com.nikunj.mochu`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.

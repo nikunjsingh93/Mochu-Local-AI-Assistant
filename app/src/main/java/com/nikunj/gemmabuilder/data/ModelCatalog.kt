@@ -99,6 +99,21 @@ val MODEL_CATALOG = listOf(
         summary = "Small and quick on the CPU: the best pick for phones with 6 GB of RAM or less (e.g. Helio G-series). Good for chat, notes and web answers. LFM Open License."
     ),
     CatalogModel(
+        id = "lfm3-1.7b-gguf",
+        name = "LFM3 1.7B",
+        engine = "GGUF",
+        repo = "LiquidAI/LFM3-1.7B-GGUF",
+        revision = "cd0c74c575b5c416f3011b5b4c298077f26ca8c2",
+        // LiquidAI's quantization-aware Q4_0: Q4_0 is the fastest format on phone CPUs.
+        fileName = "LFM3-1.7B-QAD-Q4_0.gguf",
+        // 6 full-attention layers x 4 KV heads x 128 x K+V x F16; the 5 sliding-window layers keep only 256 tokens.
+        maxContext = 131072, kvBytesPerToken = 12_288L,
+        sizeBytes = 1_049_615_680,
+        sha256 = "43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452",
+        minRamGb = 4,
+        summary = "LiquidAI's newest small model: smarter than LFM2.5 and still quick on the CPU, with a long context that stays light on memory. LFM Open License."
+    ),
+    CatalogModel(
         id = "gemma-3-1b-gguf",
         name = "Gemma 3 1B",
         engine = "GGUF",

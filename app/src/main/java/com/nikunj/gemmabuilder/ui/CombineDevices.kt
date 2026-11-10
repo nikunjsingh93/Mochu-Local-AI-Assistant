@@ -88,7 +88,7 @@ fun CombineDevicesSetting() {
             Column(Modifier.weight(1f)) {
                 Text("Share this device")
                 Text(
-                    "Lend this device's memory to Mochu on another phone or tablet.",
+                    "Lend this device's memory to Mochu on another phone or tablet. Both devices need the same Mochu version: update them together.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -124,6 +124,10 @@ fun CombineDevicesSetting() {
                             else "Ready · ${memoryText(sharing.optLong("freeMb"), sharing.optLong("totalMb"))} · enter this code on the other device",
                             style = MaterialTheme.typography.labelSmall
                         )
+                    }
+                    // A main device on another Mochu version tried to use this one and was turned away.
+                    sharing.optString("mismatch").takeIf { it.isNotBlank() && peer.isBlank() }?.let { problem ->
+                        Text(problem, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -172,19 +176,21 @@ fun CombineDevicesSetting() {
             // Free memory here and on each paired device, checked every few seconds.
             var localFreeMb by remember { mutableStateOf(freeMemoryMb(context)) }
             val localTotalMb = remember { totalMemoryMb(context) }
-            var deviceMemory by remember { mutableStateOf<Map<String, Pair<Long, Long>?>>(emptyMap()) }
+            var deviceInfo by remember { mutableStateOf<Map<String, WorkerInfo?>>(emptyMap()) }
             LaunchedEffect(paired) {
                 while (true) {
                     localFreeMb = freeMemoryMb(context)
-                    deviceMemory = withContext(Dispatchers.IO) {
-                        paired.associate { d -> d.id to DeviceCluster.askMemory(d.host, d.port, d.code)?.takeIf { it.first >= 0 } }
+                    deviceInfo = withContext(Dispatchers.IO) {
+                        paired.associate { d -> d.id to DeviceCluster.askInfo(d.host, d.port, d.code) }
                     }
                     delay(5_000)
                 }
             }
+            // A device on a different Mochu version can't hold part of the model, so it isn't counted.
+            fun usable(id: String) = deviceInfo[id]?.takeIf { it.protocol == CLUSTER_PROTOCOL }
             CombinedMemory(
                 listOf(DeviceMemory("This device", localFreeMb, localTotalMb)) +
-                    paired.map { d -> deviceMemory[d.id].let { m -> DeviceMemory(d.name, m?.first, m?.second ?: 0L) } }
+                    paired.map { d -> usable(d.id).let { m -> DeviceMemory(d.name, m?.freeMb, m?.totalMb ?: 0L) } }
             )
             Text(
                 "You can pair several devices; each one sharing holds part of the model.",
@@ -204,10 +210,19 @@ fun CombineDevicesSetting() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("${device.name} · ${device.host}", style = MaterialTheme.typography.bodyMedium)
+                        val versionProblem = deviceInfo[device.id]?.let { clusterVersionProblem(device.name, it.protocol) }
                         Text(
-                            if (device.id in connected) "● Connected · holding part of the model" else "Paired · used when a GGUF model loads",
+                            when {
+                                versionProblem != null -> versionProblem
+                                device.id in connected -> "● Connected · holding part of the model"
+                                else -> "Paired · used when a GGUF model loads"
+                            },
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (device.id in connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = when {
+                                versionProblem != null -> MaterialTheme.colorScheme.error
+                                device.id in connected -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
                     TextButton(onClick = { forgetting = device }) { Text("Forget") }
@@ -230,7 +245,7 @@ fun CombineDevicesSetting() {
             if (paired.isNotEmpty()) {
                 LayerBalance(
                     devices = listOf(Triple("local", "This device", localFreeMb)) +
-                        paired.map { d -> Triple(d.id, d.name, deviceMemory[d.id]?.first) }
+                        paired.map { d -> Triple(d.id, d.name, usable(d.id)?.freeMb) }
                 )
             }
         }

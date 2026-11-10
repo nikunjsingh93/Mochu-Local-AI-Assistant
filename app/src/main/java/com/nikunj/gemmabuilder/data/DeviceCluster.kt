@@ -44,6 +44,36 @@ private const val RPC_PORT = 50053
 private const val SERVICE_TYPE = "_mochu-cluster._tcp."
 private const val HELLO = "MOCHU1"
 
+/**
+ * Devices can only combine when they speak the same llama.cpp RPC protocol: this is
+ * RPC_PROTO_MAJOR_VERSION in llama.cpp/ggml/include/ggml-rpc.h (a unit test checks they match), so
+ * it changes when a llama.cpp update changes the protocol. Mochu 2.3.0 and older (protocol 7)
+ * don't send it, which reads as 0.
+ */
+const val CLUSTER_PROTOCOL = 8
+
+/** What a worker reports: free and total memory (MB), memory speed (GB/s, 0 when unknown) and its [CLUSTER_PROTOCOL]. */
+data class WorkerInfo(val freeMb: Long, val totalMb: Long, val bandwidth: Double, val protocol: Int = 0)
+
+/** Reads a worker's "OK <free> <model> <total> <GB/s> <protocol>" reply; older workers send fewer fields. */
+fun parseWorkerInfo(reply: String): WorkerInfo? {
+    if (!reply.startsWith("OK")) return null
+    val p = reply.trim().split(' ')
+    return WorkerInfo(
+        p.getOrNull(1)?.toLongOrNull() ?: 0L,
+        p.getOrNull(3)?.toLongOrNull() ?: 0L,
+        p.getOrNull(4)?.toDoubleOrNull() ?: 0.0,
+        p.getOrNull(5)?.toIntOrNull() ?: 0
+    )
+}
+
+/** Why [name] can't combine with this device, or null when its Mochu speaks the same protocol. */
+fun clusterVersionProblem(name: String, protocol: Int): String? = when {
+    protocol == CLUSTER_PROTOCOL -> null
+    protocol < CLUSTER_PROTOCOL -> "$name has an older Mochu, so it can't combine with this device. Update Mochu on $name to the latest version."
+    else -> "$name has a newer Mochu, so it can't combine with this device. Update Mochu here to the latest version."
+}
+
 /** A worker the main device has paired with. */
 data class ClusterDevice(val id: String, val name: String, val host: String, val port: Int, val code: String)
 
@@ -172,6 +202,8 @@ class ClusterWorkerService : Service() {
     private var wifiLock: WifiManager.WifiLock? = null
     @Volatile private var peer: String? = null
     @Volatile private var peerName: String? = null
+    // The last main device turned away for a different Mochu version, as a message for the screen.
+    @Volatile private var mismatch: String? = null
     /** Open connections from the main device (llama.cpp may open more than one). */
     private val peerConnections = java.util.concurrent.atomic.AtomicInteger(0)
 
@@ -224,11 +256,22 @@ class ClusterWorkerService : Service() {
                         if (parts.size < 2 || parts[0] != HELLO || parts[1] != code) {
                             out.write("NO\n".toByteArray()); client.close(); return@runCatching
                         }
-                        if (parts.getOrNull(2) == "INFO") {
-                            out.write("OK ${freeMemoryMb(this)} ${Build.MODEL.replace(' ', '_')} ${totalMemoryMb(this)} ${String.format(java.util.Locale.US, "%.1f", memoryBandwidth(this))}\n".toByteArray()); client.close(); return@runCatching
-                        }
-                        // One main device at a time: another one is turned away while this one is connected.
                         val from = client.inetAddress.hostAddress
+                        // The main device's protocol: after INFO, or after CONNECT's name and model. Older
+                        // Mochu versions don't send it (0). Shown here so the owner knows which one to update.
+                        val theirs = (if (parts.getOrNull(2) == "INFO") parts.getOrNull(3) else parts.getOrNull(5))?.toIntOrNull() ?: 0
+                        val theirName = parts.getOrNull(3)?.takeIf { parts.getOrNull(2) == "CONNECT" }?.replace('_', ' ') ?: from
+                        val problem = clusterVersionProblem(theirName, theirs)
+                        if (problem != null && problem != mismatch) { mismatch = problem; writeStatus("running", code) }
+                        if (parts.getOrNull(2) == "INFO") {
+                            out.write("OK ${freeMemoryMb(this)} ${Build.MODEL.replace(' ', '_')} ${totalMemoryMb(this)} ${String.format(java.util.Locale.US, "%.1f", memoryBandwidth(this))} $CLUSTER_PROTOCOL\n".toByteArray()); client.close(); return@runCatching
+                        }
+                        // A different protocol would fail inside llama.cpp; turn it away clearly instead.
+                        if (problem != null) {
+                            out.write("OLD\n".toByteArray()); client.close(); return@runCatching
+                        }
+                        if (mismatch != null) { mismatch = null; writeStatus("running", code) }
+                        // One main device at a time: another one is turned away while this one is connected.
                         if (peer != null && peer != from && peerConnections.get() > 0) {
                             out.write("BUSY\n".toByteArray()); client.close(); return@runCatching
                         }
@@ -311,6 +354,7 @@ class ClusterWorkerService : Service() {
         val json = JSONObject().put("state", state).put("code", code).put("freeMb", freeMemoryMb(this)).put("totalMb", totalMemoryMb(this))
         peer?.let { json.put("peer", it) }
         peerName?.let { json.put("peerName", it) }
+        mismatch?.let { json.put("mismatch", it) }
         error?.let { json.put("error", it) }
         statusFile(this).writeText(json.toString())
     }
@@ -483,20 +527,15 @@ object DeviceCluster {
         }
     }.getOrNull()
 
-/** What a worker reports: free and total memory (MB) and memory speed (GB/s, 0 when unknown). */
-    data class WorkerInfo(val freeMb: Long, val totalMb: Long, val bandwidth: Double)
-
     /** A worker's [WorkerInfo]; null if unreachable or it refused the code. Background thread. */
     fun askInfo(host: String, port: Int, code: String): WorkerInfo? = runCatching {
         Socket().use { s ->
             s.connect(InetSocketAddress(host, port), 3_000)
             s.soTimeout = 4_000
             s.tcpNoDelay = true
-            s.getOutputStream().write("$HELLO $code INFO\n".toByteArray())
-            val reply = readLine(s.getInputStream())
-            if (!reply.startsWith("OK")) return@runCatching null
-            val p = reply.split(' ')
-            WorkerInfo(p.getOrNull(1)?.toLongOrNull() ?: 0L, p.getOrNull(3)?.toLongOrNull() ?: 0L, p.getOrNull(4)?.toDoubleOrNull() ?: 0.0)
+            // Our protocol goes along so the worker can show that this device needs updating, if it's older.
+            s.getOutputStream().write("$HELLO $code INFO $CLUSTER_PROTOCOL\n".toByteArray())
+            parseWorkerInfo(readLine(s.getInputStream()))
         }
     }.getOrNull()
 
@@ -536,6 +575,7 @@ object DeviceCluster {
     fun pair(context: Context, device: NearbyDevice, code: String): String? {
         val free = ask(device.host, device.port, code) ?: return "Couldn't reach ${device.name}. Is sharing still on?"
         if (free < 0) return "Wrong code. Check the 4 digits on ${device.name}."
+        askInfo(device.host, device.port, code)?.let { info -> clusterVersionProblem(device.name, info.protocol)?.let { return it } }
         savePaired(context, paired(context).filterNot { it.id == device.id } + ClusterDevice(device.id, device.name, device.host, device.port, code))
         return null
     }
@@ -603,7 +643,7 @@ object DeviceCluster {
                     runCatching {
                         local.tcpNoDelay = true
                         val remote = Socket().apply { tcpNoDelay = true; connect(InetSocketAddress(device.host, device.port), 5_000) }
-                        remote.getOutputStream().write("$HELLO ${device.code} CONNECT ${Build.MODEL.replace(' ', '_')} $loadingModel\n".toByteArray())
+                        remote.getOutputStream().write("$HELLO ${device.code} CONNECT ${Build.MODEL.replace(' ', '_')} $loadingModel $CLUSTER_PROTOCOL\n".toByteArray())
                         remote.soTimeout = 5_000
                         if (!readLine(remote.getInputStream()).startsWith("OK")) error("refused")
                         remote.soTimeout = 0
@@ -626,7 +666,8 @@ object DeviceCluster {
     fun prepareForLoad(context: Context, modelName: String = "model", modelBytes: Long = 0, modelPath: String? = null): Int {
         loadingModel = modelName.replace(Regex("""\s+"""), "_")
         val devices = if (enabled(context)) paired(context) else emptyList()
-        val ready = devices.mapNotNull { d -> askInfo(d.host, d.port, d.code)?.takeIf { it.freeMb > 0 }?.let { d to it } }
+        // A device with a different Mochu version would fail inside llama.cpp, so it's left out.
+        val ready = devices.mapNotNull { d -> askInfo(d.host, d.port, d.code)?.takeIf { it.freeMb > 0 && it.protocol == CLUSTER_PROTOCOL }?.let { d to it } }
         active = ready.map { it.first }
         LlamaCppNative.nativeClusterClearLost()
         if (ready.isEmpty()) {

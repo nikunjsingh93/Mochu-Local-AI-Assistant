@@ -8,7 +8,35 @@ Agent: Claude Code (Claude Opus 5.5)
 ## Current State
 
 - **v2.3.0 is released** (versionCode 35) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.3.0 (commit `d779c3f`), with tool calling in the local API and bold API details. The signature was verified (`ad1dbbc3…`), and it's installed on the S26 Ultra.
-- **LFM3 (GitHub issue #3) doesn't load yet.** LiquidAI's LFM3 GGUFs (LFM3-1.7B, LFM3-Omni-2B, LFM3-VL-2B) report architecture `lfm3`. The llama.cpp submodule (`c061df1`, 2026-10-01) only has `lfm2` and `lfm2moe`, so a download from Search Hugging Face would fail to load. Next: update the llama.cpp submodule to a version with `lfm3`, rebuild, and test LFM3-1.7B Q4_K_M. Also check that `llama_bridge.cpp` and Combine devices (RPC) still build and work. Omni's audio input isn't supported by Mochu.
+- **LFM3 support (GitHub issue #3), uncommitted, not released:**
+  - **llama.cpp submodule** moved from `c061df1` (2026-10-01) to tag `b12134` (`040ce19`, 2026-11-05). That's after LFM3 support (#31252) and its fixes (tensor split, NVFP4, spec-dec), and before the 2026-11-10 FP8 KV-cache change.
+  - **Build fixes:**
+    - `llama_bridge.cpp`: `common_chat_templates_apply(...).prompt` is now a `common_chat_prompt` made of parts, so the bridge calls `.str()`. That's the same string as before.
+    - `CMakeLists.txt`: the patched RPC copy now swaps only `ggml-rpc.cpp` inside upstream's own source list. Upstream added `log.cpp`, and listing files by hand broke the link. All four Mochu RPC patches still applied.
+  - **Catalog:** a new LFM3 1.7B entry (`LiquidAI/LFM3-1.7B-GGUF` @ `cd0c74c`, `LFM3-1.7B-QAD-Q4_0.gguf`, 1,049,615,680 bytes, sha256 `43a7d09a…`). KV is 12,288 bytes per token: 6 full-attention layers × 4 KV heads × 128 head dim; the 5 sliding layers hold only 256 tokens.
+  - **Tool-calling parser:** LFM3 writes the XML style `<tool_call><function=name><parameter=k>v</parameter></function></tool_call>`, and `xmlCalls` now reads it. Before this fix it scored 0/12, after it 12/12.
+  - **Verified on the S26 Ultra:**
+    - The catalog download passed its fingerprint check.
+    - Chat, multi-turn, tool-result answers, streaming calls, and plain text with tools offered all worked.
+    - LFM3 runs at roughly 50 tok/s on the CPU (chars ÷ 4 over the request time, including prompt time).
+    - LFM2.5 still loads and works on the new llama.cpp.
+    - 91 unit tests pass.
+  - **The RPC protocol changed from 7.0.0 to 8.0.1.** Every device in a Combine group must run the new version. Release notes must say so.
+  - **Version check for Combine devices** (`DeviceCluster.kt`, `CombineDevices.kt`):
+    - `CLUSTER_PROTOCOL = 8` matches llama.cpp's `RPC_PROTO_MAJOR_VERSION`. `DeviceClusterTest.clusterProtocolMatchesLlamaCpp` reads `ggml-rpc.h` and fails if they differ, so a llama.cpp update that changes the protocol can't slip through.
+    - **Protocol:** the worker's INFO reply adds the protocol as a 6th field. The main device sends its protocol after `INFO` and as a 6th field of `CONNECT`. Older Mochu sends none, which reads as 0.
+    - **Main device:** a paired device on a different protocol gets a red message in its row ("… has an older Mochu … Update Mochu on … to the latest version"). It's left out of the memory total and skipped by `prepareForLoad`, and `pair()` refuses it.
+    - **Worker:** it answers a mismatched `CONNECT` with `OLD`, writes `mismatch` to its status file, and the Share card shows the message.
+    - The Share this device text now says both devices need the same Mochu version.
+    - Tests: `parseWorkerInfo`, `clusterVersionProblem`, and the header check. 94 unit tests in total, all passing.
+  - **Combine devices verified on the new llama.cpp** with the S26 (main) and the onn 8 Core tablet (6 GB, sharing):
+    - LFM3 loaded split across both: the tablet showed "✓ Connected · SM-S948U1", and chat and a tool call worked.
+    - The first load took 11 s including sending parts. Speed was about 20 tok/s, against about 50 on the S26 alone; expected for a small model.
+    - With 2.3.0 on the tablet, the S26 row showed the "older Mochu" message, and a fresh load ran on the S26 alone.
+    - With the old tablet as main and the S26 sharing, the S26's Share card showed "192.168.1.222 has an older Mochu…". Older Mochu sends no name with INFO, so it shows the IP.
+    - **Afterwards:** both devices have the new build, the pairings were forgotten, Share, Create a cluster and the API server are off on both, and the S26 is back on LFM2.5. LFM3 is still downloaded on the S26.
+  - Omni's audio input and LFM3-VL vision aren't wired up in Mochu. The Hugging Face search hides mmproj files.
+  - Noticed: Gemma 4 E4B (LiteRT) is no longer downloaded on the S26. This session didn't delete it; the only delete was the Qwen3 1.7B test file.
 - **v2.1.1 is released** (versionCode 33) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.1, with layer balance modes, send progress, import progress, and the stale-status fix.
 - **v2.1.0** (versionCode 32) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.0, with Combine devices (experimental).
 - **v2.0.3** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
@@ -248,7 +276,7 @@ These are the files changed in the last release, v2.0.0:
 
 ## Next Steps
 
-0. **LFM3 support:** update llama.cpp so `lfm3` GGUFs load (see Current State).
+0. **LFM3 support:** everything is tested. When the owner says so, bump to 2.4.0 (versionCode 36), commit, release, and post the LFM3 issue reply. The release notes must say every Combine device needs the update (RPC protocol 8). See Current State.
 1. **Tool calling:** the owner is replying on the GitHub issue to ask whether in-app tools are wanted too. Chat already runs web search, page reading and Memory by itself. A model-chosen version would be opt-in and read-only (see PROJECT.md).
 1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
 2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
