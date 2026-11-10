@@ -7,6 +7,21 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
 
+- **Default digital assistant (GitHub feature request), uncommitted, not released:**
+  - **Manifest:** `MainActivity` handles `android.intent.action.ASSIST` and `VOICE_COMMAND`. That's enough for Android's assistant role: Samsung's Digital assistant app list on the S26 shows "Mochu AI" under Others, next to ChatGPT. No VoiceInteractionService is needed.
+  - **`MainActivity.handleTaskIntent`:** sets `AppEvents.assist`, only on a fresh launch (`savedInstanceState == null`), so a rotation or restore doesn't start another voice chat.
+  - **`AppShell`:** opens a new assistant chat, or reuses the open one if it's empty, then sets `AppEvents.listenNow`. `AssistantChatScreen` starts the mic. While a reply is running it only shows the app.
+  - **Settings › `DigitalAssistantSetting()`:** shows whether Mochu holds `RoleManager.ROLE_ASSISTANT`, re-checked on resume. Its button opens `Settings.ACTION_VOICE_INPUT_SETTINGS`, falling back to `ACTION_MANAGE_DEFAULT_APPS_SETTINGS`. Apps can't request the assistant role themselves.
+  - **Verified on the S26:**
+    - Choosing Mochu set the role holder to `com.nikunj.mochu`.
+    - `KEYCODE_ASSIST` opened Mochu, asked for the mic once (granted "Only this time"), and listened. Speech came through ("Hello what's up"), was sent, answered by LFM2.5 and read aloud.
+    - The Settings row showed ✓, its button opened the role screen, and switching back to Google updated the row on resume.
+    - The S26's assistant is back to Google.
+    - 94 unit tests pass.
+  - **Not yet checked:**
+    - The physical side-button long-press. Samsung's Side key setting may need "Digital assistant" chosen; the test used `KEYCODE_ASSIST`.
+    - Invoking from the lock screen. The activity doesn't show over the keyguard, so the user unlocks first.
+  - **Left on the S26:** the test chat "Hello what's up". Deleting it from the drawer was blocked by the permission check, so the owner should delete it.
 - **v2.4.0 is released** (versionCode 36) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.0 (commit `8ca8a93`), with LFM3 support, llama.cpp b12134 and the Combine devices version check. The signature was verified (`ad1dbbc3…`). It's installed on the S26 Ultra and the onn 8 Core tablet.
 - **v2.3.0** (versionCode 35) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.3.0 (commit `d779c3f`), with tool calling in the local API and bold API details.
 - **LFM3 support (GitHub issue #3), released in v2.4.0:**

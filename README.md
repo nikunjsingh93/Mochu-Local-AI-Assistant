@@ -45,7 +45,7 @@ Try: *"https://www.amazon.com/dp/… show its current price"*, *"what's the NVDA
 - **Web search and an in-app Browser**: Mochu searches when a question needs current info and cites its sources; open any page and tap **Ask about this page**
 - **Memory**: "remember that…" facts used in every chat, managed in Settings
 - **Tasks**: scheduled assistant tasks ("every day at 11pm give me the latest tech news") with notifications, plus timers, a stopwatch and reminders
-- **Voice**: talk with the mic; replies can be read aloud
+- **Voice**: talk with the mic; replies can be read aloud. Mochu can be your phone's **default digital assistant**: hold the side button or use the assistant gesture to start a voice chat
 - **Code**: build web apps, React + TypeScript apps and Python programs in projects with several chats, run them right away (preview, console, Python terminal), and export as an Android APK, a Capacitor project or a ZIP
 - **Local API server**: let other devices on your Wi-Fi use the phone's model through an OpenAI-compatible API, including **tool calling** (OpenAI `tools` / `tool_calls`, streamed or not) for agents and apps that run their own functions
 - **Home server models**: use a bigger model from Ollama, LM Studio, llama.cpp, vLLM, Unsloth or any OpenAI-compatible API on your computer or server
@@ -143,7 +143,7 @@ Upgrading from v1.0.6 or earlier: v1.0.7 and later are signed with a new key, so
 
 Current app version:
 
-- `versionName`: `2.4.0`
+- `versionName`: `2.4.1`
 - `applicationId`: `com.nikunj.mochu`
 
 LiteRT-LM dependency is pinned in app Gradle config. If your environment needs it, you can switch to `latest.release`.

@@ -157,6 +157,14 @@ fun AssistantChatScreen(
     }
     val context = LocalContext.current
     val mic = rememberVoiceMic(onPartial = onPromptChange, onFinal = onVoiceSend, onStart = onStopSpeaking)
+    // Opened as the digital assistant: start listening right away, like other assistants.
+    val listenNow by AppEvents.listenNow.collectAsState()
+    LaunchedEffect(listenNow) {
+        if (listenNow) {
+            AppEvents.listenNow.value = false
+            if (!mic.listening) mic.onMic()
+        }
+    }
     val listening = mic.listening
     val micLevel = mic.level
     val onMic = mic.onMic

@@ -183,7 +183,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Draw behind the status and navigation bars; screens pad themselves with window insets.
         enableEdgeToEdge()
-        handleTaskIntent(intent)
+        handleTaskIntent(intent, fresh = savedInstanceState == null)
         setContent { OnDeviceRoot() }
     }
 
@@ -202,9 +202,17 @@ class MainActivity : ComponentActivity() {
         handleTaskIntent(intent)
     }
 
-    /** Notifications from timers, reminders and scheduled tasks open a chat or the Tasks screen. */
-    private fun handleTaskIntent(intent: Intent?) {
+    /**
+     * Notifications from timers, reminders and scheduled tasks open a chat or the Tasks screen. As the
+     * phone's digital assistant, the side button or assistant gesture sends ACTION_ASSIST.
+     */
+    private fun handleTaskIntent(intent: Intent?, fresh: Boolean = true) {
         intent ?: return
+        if (intent.action == Intent.ACTION_ASSIST || intent.action == Intent.ACTION_VOICE_COMMAND) {
+            // Only on a real press: a recreated activity (rotation, restore) keeps the old intent.
+            if (fresh) AppEvents.assist.value = true
+            intent.action = Intent.ACTION_MAIN
+        }
         intent.getStringExtra(EXTRA_OPEN_CHAT)?.let { AppEvents.openChat.value = it }
         if (intent.getBooleanExtra(EXTRA_OPEN_TASKS, false)) AppEvents.openTasks.value = true
         intent.getStringExtra(EXTRA_RUN_TASK)?.let { id ->

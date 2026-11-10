@@ -290,6 +290,7 @@ fun SettingsScreen(
                         }
                         Switch(checked = speakVoiceReplies, onCheckedChange = onSpeakVoiceRepliesChange)
                     }
+                    DigitalAssistantSetting()
                     HorizontalDivider()
                     OutlinedButton(onClick = { settingsSubPage = "privacy" }) {
                         Text("Open Privacy Policy")
@@ -628,5 +629,45 @@ fun ApiServerSetting() {
             )
         }
         server.lastError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+/**
+ * Mochu as the phone's digital assistant: holding the side button or the assistant gesture then
+ * opens a voice chat. Apps can't take the assistant role themselves, so this opens
+ * Android's default-apps screen, and shows whether Mochu holds it.
+ */
+@Composable
+fun DigitalAssistantSetting() {
+    val context = LocalContext.current
+    val roles = remember { context.getSystemService(android.app.role.RoleManager::class.java) }
+    fun held() = roles?.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT) == true
+    var isAssistant by remember { mutableStateOf(held()) }
+    // Checked again when the user comes back from Android's settings.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) isAssistant = held()
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Use Mochu as your digital assistant")
+        Text(
+            if (isAssistant) "✓ Mochu is your digital assistant. Hold the side button or use the assistant gesture to start a voice chat."
+            else "Hold the side button or use the assistant gesture to start a voice chat with Mochu. Choose Mochu under Digital assistant app.",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isAssistant) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedButton(onClick = {
+            val opened = listOf(
+                android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS),
+                android.content.Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+            ).any { intent ->
+                runCatching { context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+            }
+            if (!opened) android.widget.Toast.makeText(context, "Open Settings › Apps › Default apps to choose Mochu.", android.widget.Toast.LENGTH_LONG).show()
+        }) { Text(if (isAssistant) "Change in Android settings" else "Choose Mochu in Android settings") }
     }
 }

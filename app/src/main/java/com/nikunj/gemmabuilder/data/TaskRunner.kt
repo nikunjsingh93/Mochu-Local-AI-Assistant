@@ -49,6 +49,10 @@ object AppEvents {
     val openChat = MutableStateFlow<String?>(null)
     /** A notification asked to show the Tasks screen. */
     val openTasks = MutableStateFlow(false)
+    /** Mochu was opened as the phone's digital assistant (side button, gesture): start a voice chat. */
+    val assist = MutableStateFlow(false)
+    /** The chat screen should start listening (set after [assist] opened a fresh chat). */
+    val listenNow = MutableStateFlow(false)
     /** The scheduled task running now, so its chat can show it live. */
     val taskProgress = MutableStateFlow<TaskProgress?>(null)
 }

@@ -162,6 +162,23 @@ fun OnDeviceApp(
             AppEvents.openChat.value = null
         }
     }
+    // Opened as the digital assistant: a fresh chat (the open one if it's still empty) with the mic on.
+    val assist by AppEvents.assist.collectAsState()
+    LaunchedEffect(assist) {
+        if (assist) {
+            tasksOpen = false
+            settingsOpen = false
+            pinnedTab = null
+            // While a reply is still running, just show it; a new chat and the mic would cut it off.
+            if (!vm.uiState.value.isBusy) {
+                if (vm.uiState.value.activeKind != CHAT_KIND_ASSISTANT || vm.uiState.value.messages.isNotEmpty()) {
+                    vm.newConversation(app, CHAT_KIND_ASSISTANT)
+                }
+                AppEvents.listenNow.value = true
+            }
+            AppEvents.assist.value = false
+        }
+    }
     val openTasks by AppEvents.openTasks.collectAsState()
     LaunchedEffect(openTasks) {
         if (openTasks) {
