@@ -32,4 +32,21 @@ class RepetitionTest {
     fun shortTextIsIgnored() {
         assertNull(degenerateRepetitionStart("| | | |"))
     }
+
+    @Test
+    fun similarCodeLinesAreNotFlaggedWhileStreaming() {
+        val code = "```javascript\n" + (1..30).joinToString("\n") {
+            "sun.shadow.camera.propertyNumber$it = ${it * 10};"
+        } + "\nconst materials = { grass: new THREE.MeshStandardMaterial() };"
+        for (end in 1..code.length) {
+            assertNull("False repetition at character $end", degenerateRepetitionStart(code.substring(0, end)))
+        }
+    }
+
+    @Test
+    fun repeatedCodeBlockIsStillStopped() {
+        val block = "sun.shadow.camera.left = -42;\nsun.shadow.camera.right = 42;\n"
+        val text = answer + block.repeat(8)
+        assertEquals((answer + block).trimEnd(), text.substring(0, degenerateRepetitionStart(text)!!).trimEnd())
+    }
 }

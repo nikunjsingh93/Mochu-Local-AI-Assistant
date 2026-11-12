@@ -20,30 +20,25 @@ fun degenerateRepetitionStart(text: CharSequence): Int? {
         return start
     }
 
-    // The same 40-character chunk repeated six or more times near the end.
-    val window = text.subSequence(maxOf(0, text.length - 1200), text.length).toString()
-    val chunk = window.takeLast(40)
-    if (chunk.isBlank()) return null
-    val hits = mutableListOf<Int>()
-    var from = 0
-    while (true) {
-        val at = window.indexOf(chunk, from)
-        if (at < 0) break
-        hits += at
-        from = at + 1
+    // Common prefixes in code and lists can occur many times without being a loop. Require
+    // consecutive identical blocks covering at least 240 characters, including the current tail.
+    for (period in 1..minOf(200, text.length / 6)) {
+        val copies = maxOf(6, (240 + period - 1) / period)
+        val length = period * copies
+        if (length > text.length) continue
+        var matches = true
+        for (i in text.length - length until text.length - period) {
+            if (text[i] != text[i + period]) {
+                matches = false
+                break
+            }
+        }
+        if (!matches) continue
+        var start = text.length - length
+        while (start > 0 && text[start - 1] == text[start - 1 + period]) start--
+        return start + period
     }
-    if (hits.size < 6) return null
-    // The loop's period is the gap between repeats. Walk back over earlier copies (which may lie
-    // before the window) so exactly one copy is kept.
-    val period = hits[hits.size - 1] - hits[hits.size - 2]
-    if (period <= 0) return null
-    var start = text.length - window.length + hits.first()
-    while (start - period >= 0 &&
-        text.subSequence(start - period, start).toString() == text.subSequence(start, start + period).toString()
-    ) {
-        start -= period
-    }
-    return minOf(start + period, text.length)
+    return null
 }
 
 /** Thrown inside a collector to end generation early (user pressed Stop, or a repetition loop). */

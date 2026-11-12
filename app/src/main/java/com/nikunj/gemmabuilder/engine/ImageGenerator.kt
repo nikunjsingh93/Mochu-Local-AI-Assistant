@@ -128,14 +128,23 @@ class ImageGenerator(private val context: Context) {
  * a beach at sunset"), or null for anything else.
  */
 fun imagePromptFrom(message: String): String? {
-    val text = message.trim().trimEnd('.', '!', '?')
+    val text = message.trim().trimStart('¿', '¡').trimEnd('.', '!', '?', '¿', '¡').trim()
     val polite = """^(?:hey\s+)?(?:mochu[,\s]+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"""
     val drawVerb = Regex("""$polite(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:(?:an?|the)\s+)?(?:(?:image|picture|pic|drawing|painting|sketch|illustration)\s+of\s+)?(.{3,})$""", RegexOption.IGNORE_CASE)
     val makeVerb = Regex(
         """$polite(?:generate|create|make|render|design|show\s+me|give\s+me)\s+(?:me\s+)?(?:(?:an?|the|some)\s+)?(?:ai\s+)?(?:image|picture|pic|photo|drawing|painting|illustration|artwork|wallpaper|portrait|art)s?\s*(?:of|showing|with|for|:)?\s*(.{3,})$""",
         RegexOption.IGNORE_CASE
     )
-    val match = drawVerb.find(text) ?: makeVerb.find(text) ?: return null
+    val spanishPolite = """^(?:hola[ ,]+)?(?:mochu[ ,]+)?(?:por\s+favor[ ,]+)?(?:(?:puedes|podr[ií]as|podr[ií]a|puede|quiero\s+que|me\s+gustar[ií]a\s+que)\s+)?"""
+    val spanishDraw = Regex(
+        """${spanishPolite}(?:dib[uú]jame|dib[uú]j[aá]me|dibujarme|dibujar|dibuja|dibuje|p[ií]ntame|pintar(?:me)?|pinta|pinte|ilustra|ilustrar)\s+(.{3,})$""",
+        RegexOption.IGNORE_CASE
+    )
+    val spanishMake = Regex(
+        """${spanishPolite}(?:crea(?:me|r(?:me)?)?|cr[eé]ame|crees?|genera(?:me|r(?:me)?)?|gen[eé]rame|generes?|haz(?:me)?|hacer(?:me)?|haga|dise[ñn]a(?:r)?|mu[eé]strame|quiero|necesito|me\s+gustar[ií]a)\s+(?:(?:me|una?|la|el)\s+)*(?:imagen|im[aá]genes|foto(?:graf[ií]a)?|dibujo|ilustraci[oó]n|retrato|pintura|fondo\s+de\s+pantalla)(?:\s+(?:de|del|con|sobre))?\s*:?\s*(.{3,})$""",
+        RegexOption.IGNORE_CASE
+    )
+    val match = drawVerb.find(text) ?: makeVerb.find(text) ?: spanishMake.find(text) ?: spanishDraw.find(text) ?: return null
     return match.groupValues[1].trim().takeIf { it.length >= 3 }
 }
 

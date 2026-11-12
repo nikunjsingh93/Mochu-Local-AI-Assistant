@@ -1,5 +1,25 @@
 # Development Handoff
 
+## 2026-11-12: v2.4.2 release
+
+- Prepared v2.4.2 (versionCode 38) with the repetition false-positive fix and Spanish image-request recognition described below. `README.md` and `app/build.gradle.kts` carry the new version.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed. The APK has package `com.nikunj.mochu`, version 2.4.2, and the expected signing certificate (`ad1dbbc3…`). The prior build of the repetition fix was tested on the S26; Spanish image generation has not been tested on a device.
+- Next: publish the v2.4.2 commit and signed APK on GitHub, then verify the release. The Spanish prompt is not translated.
+
+## 2026-11-12: Spanish image requests
+
+- Added Spanish image-request recognition in `app/src/main/java/com/nikunj/gemmabuilder/engine/ImageGenerator.kt`, with positive and non-image cases in `app/src/test/java/com/nikunj/gemmabuilder/ImagePromptTest.kt`. The original Spanish description goes to the image model; no translation is performed, so image quality depends on the model's language support.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed. Not installed or tested on a device for this change.
+- Next: try Spanish image prompts with the user's chosen image model; assess whether optional, reliable offline prompt translation is needed.
+
+## 2026-11-12: Repetition false positive
+
+- Fixed the shared repetition detector stopping valid code with recurring prefixes; it now requires consecutive identical blocks. Chat and scheduled tasks both use it.
+- Changed `app/src/main/java/com/nikunj/gemmabuilder/data/Repetition.kt` and `app/src/test/java/com/nikunj/gemmabuilder/RepetitionTest.kt`; updated `.ai/PROJECT.md`.
+- Compiled the detector and test with the installed Gradle 8.10.2 Kotlin compiler and ran JUnitCore: 6 tests passed. Full Android Gradle tests/build were not run: Gradle 8.13 is unavailable and downloading it failed due to DNS/network restrictions. No phone testing or installation.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed; the signed APK (certificate `ad1dbbc3…`) was installed on the S26. In a temporary chat, Qwen3.5-4B-3D-Coder generated the same series of `sun.shadow.camera` assignments and continued through several materials without a repetition warning. Stopped the still-running long response after verifying that behavior; the test chat and temporary phone files were removed.
+- Next: the owner can try their original prompt on the installed build. The earlier test chat "Hello what's up" mentioned below is unrelated.
+
 ## Last Updated
 
 Date: 2026-11-12
