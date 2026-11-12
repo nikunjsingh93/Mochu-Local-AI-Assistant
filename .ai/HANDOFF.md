@@ -2,7 +2,7 @@
 
 ## Last Updated
 
-Date: 2026-11-10
+Date: 2026-11-12
 Agent: Claude Code (Claude Opus 5.5)
 
 ## Current State
@@ -54,6 +54,7 @@ Agent: Claude Code (Claude Opus 5.5)
     - **Afterwards:** both devices have the new build, the pairings were forgotten, Share, Create a cluster and the API server are off on both, and the S26 is back on LFM2.5. LFM3 is still downloaded on the S26.
   - Omni's audio input and LFM3-VL vision aren't wired up in Mochu. The Hugging Face search hides mmproj files.
   - Noticed: Gemma 4 E4B (LiteRT) is no longer downloaded on the S26. This session didn't delete it; the only delete was the Qwen3 1.7B test file.
+- **v2.2.0** (versionCode 34) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.2.0, with Hugging Face search and download in the Models tab. The APK was replaced twice in place (parameter counts and GB progress, then search-result sizes), so the v2.2.0 tag points to the first commit.
 - **v2.1.1 is released** (versionCode 33) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.1, with layer balance modes, send progress, import progress, and the stale-status fix.
 - **v2.1.0** (versionCode 32) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.1.0, with Combine devices (experimental).
 - **v2.0.3** (versionCode 31) at https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.0.3, with the wake lock while generating.
@@ -327,8 +328,8 @@ These are the files changed in the last release, v2.0.0:
 - **Promotion:** the owner has posted 2.0 on X and Reddit. Suggested next places: Show HN, IzzyOnDroid, XDA, AlternativeTo, Product Hunt.
 - **Release notes** embed screenshots through raw.githubusercontent URLs pinned to a commit hash, so they keep working.
 
-## Hugging Face search in the Models tab (2026-11-05, uncommitted, after v2.1.1)
+## Hugging Face search in the Models tab (released in v2.2.0)
 - `data/HuggingFace.kt`: `searchHuggingFace` (api/models, filter=gguf, by downloads), `huggingFaceFiles` (tree/main recursive; skips mmproj and split `-0000N-of-0000M` files; `lfs.oid` = SHA-256), `isMixtureOfExperts`, `HfDownloads` registry in prefs `hfDownloads` (ids `hf:repo/path` → CatalogModel).
-- `ui/HuggingFaceSearch.kt`: card under Import; repos (gated greyed), files with size, fit label, MoE note, Download/progress/Cancel.
+- `ui/HuggingFaceSearch.kt`: card under Import; repos (gated greyed), files with parameter count (from the name), size, fit label, MoE active parameters, Download with GB/percent progress and Cancel. Search results show the exact parameter count from GGUF metadata and an estimated Q4 size.
 - ModelDownloadService/ViewModel accept `hf:` ids; finished file goes to `importedModelFile` (copy fallback because external→internal rename fails across file systems) and is used immediately.
 - Tested on Pixel: search "LFM2 350M" and "unsloth Qwen3", downloaded LFM2.5-350M-Q4_0 (verified, imported, in use); test model deleted and Qwen3.6-35B restored.

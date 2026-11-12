@@ -40,6 +40,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
 - **`data/`:**
   - `ModelCatalog.kt`: the downloadable models and `modelCapabilities()`.
   - `ProjectStorage.kt`: SharedPreferences settings, imported models in `filesDir/models/imported/`, and the auto-unload setting.
+  - `HuggingFace.kt`: Hugging Face search (`searchHuggingFace`, GGUF repos with parameter counts from `expand[]=gguf`), file listing (`huggingFaceFiles`, which skips mmproj and split files and uses `lfs.oid` as the SHA-256), and `HfDownloads`, a prefs registry that turns a picked file into a `CatalogModel` with an `hf:` ID. The UI is `ui/HuggingFaceSearch.kt` in the Models tab.
   - `Tasks.kt`: `ScheduledTask`, the stopwatch, and the chat command parser `taskCommandFrom()`.
   - `TaskRunner.kt`: AlarmManager alarms (`TaskAlarms`), notifications (`TaskNotifications`), and `TaskRunnerService`, which runs scheduled assistant tasks.
   - `web/WebTools.kt`: search (DuckDuckGo with a Bing fallback), page fetching, `WebPolicy`, `chatNeedsWeb()` and `linksIn()`. `web/WebViewReader.kt` reads JS-heavy pages.
@@ -120,6 +121,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
 - **KV cache options are F16 and Q8_0 only.** Q4_0 was removed because it hurt answer quality.
 - **Qwen2.5 Coder was removed** from the catalog.
 - **Imported models** each get their own file in `models/imported/`. Several can coexist.
+- **Hugging Face downloads** reuse `ModelDownloadService` (resume, SHA-256 check) through `hf:` IDs, then land in `models/imported/` and are used right away. Downloads are in external app storage and imported models in internal storage, so the service copies when a rename fails across the two file systems. Search results show an estimated Q4 size (about 4.85 bits per weight), because Hugging Face gives no per-repo size.
 - **Timers and the stopwatch** live in the chat that started them (`ChatClocks`), not on the Tasks page.
 - **Voice** uses on-device recognition first. On errors 12/13 (language pack missing), it asks Android to download the pack and falls back to the standard recognizer.
 - **The chat box placeholder** is always "Message Mochu…". Web search state shows only on the globe button.
