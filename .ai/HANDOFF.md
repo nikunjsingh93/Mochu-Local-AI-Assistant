@@ -4,7 +4,8 @@
 
 - Prepared v2.4.2 (versionCode 38) with the repetition false-positive fix and Spanish image-request recognition described below. `README.md` and `app/build.gradle.kts` carry the new version.
 - Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed. The APK has package `com.nikunj.mochu`, version 2.4.2, and the expected signing certificate (`ad1dbbc3…`). The prior build of the repetition fix was tested on the S26; Spanish image generation has not been tested on a device.
-- Next: publish the v2.4.2 commit and signed APK on GitHub, then verify the release. The Spanish prompt is not translated.
+- Published [v2.4.2](https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.2) at commit `dfc3f17`; GitHub's APK SHA-256 matches the local build (`0914039e…`).
+- Next: try Spanish image generation on a device and assess image quality; the Spanish prompt is not translated.
 
 ## 2026-11-12: Spanish image requests
 
