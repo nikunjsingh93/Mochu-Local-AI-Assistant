@@ -65,6 +65,15 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Recently Completed
 
+- **v2.4.1 (2026-11-10):** Mochu as the default digital assistant. The side button, the assistant gesture, and Bluetooth/car voice buttons open a listening voice chat. Settings has a "Use Mochu as your digital assistant" row.
+- **v2.4.0 (2026-11-10):**
+  - LFM3 support: llama.cpp moved to b12134, and LFM3 1.7B was added to the catalog.
+  - LFM3's XML tool-call format is read.
+  - Combine devices checks versions (`CLUSTER_PROTOCOL`).
+- **v2.3.0 (2026-11-10):** OpenAI-style tool calling in the local API, and bold Base URL, API key and model on the API card.
+- **v2.2.0:** Hugging Face search and download in the Models tab.
+
+Earlier:
 - **v2.0.0 Smart cards:**
   - Product price with history chart and the store's typical price with the % saving.
   - Stocks and crypto, headlines, sports scores, two-link product comparison.
@@ -90,7 +99,32 @@ Agent: Claude Code (Claude Opus 5.5)
 
 ## Files Changed
 
-These are the files changed in the last release, v2.0.0:
+Paths below are under `app/src/main/java/com/nikunj/gemmabuilder/` unless they start with `app/`.
+
+**v2.4.1:**
+- **`app/src/main/AndroidManifest.xml`:** `ASSIST` and `VOICE_COMMAND` intent filters on `MainActivity`.
+- **`MainActivity.kt`:** `handleTaskIntent(intent, fresh)` sets `AppEvents.assist`.
+- **`data/TaskRunner.kt`:** `AppEvents.assist` and `listenNow`.
+- **`ui/AppShell.kt`:** opens or reuses a chat when invoked.
+- **`ui/chat/AssistantChatScreen.kt`:** starts the mic on `listenNow`.
+- **`ui/SettingsAndFiles.kt`:** `DigitalAssistantSetting()`.
+
+**v2.4.0:**
+- **`app/src/main/cpp/llama.cpp`:** the submodule moved to b12134.
+- **`app/src/main/cpp/llama_bridge.cpp`:** `.prompt.str()`.
+- **`app/src/main/cpp/CMakeLists.txt`:** the RPC source list.
+- **`data/ModelCatalog.kt`:** the LFM3 1.7B entry.
+- **`data/ToolCalling.kt`:** `xmlCalls`.
+- **`data/DeviceCluster.kt`, `ui/CombineDevices.kt`:** the version check.
+- **Tests:** `DeviceClusterTest.kt`, `ToolCallingTest.kt`.
+
+**v2.3.0:**
+- **`data/ToolCalling.kt`** (new).
+- **`data/ApiServer.kt`:** tools in requests and `tool_calls` in replies.
+- **`ui/SettingsAndFiles.kt`:** bold API details.
+- **Tests:** `ToolCallingTest.kt` (new).
+
+**v2.0.0 (older):**
 
 - **`data/RichCards.kt`** (new): card detection, prompts, checks, `richBlocksFor()`.
 - **`data/PriceTracking.kt`** (new): price extraction, the typical price, history storage (`recordValue`).
@@ -108,6 +142,8 @@ These are the files changed in the last release, v2.0.0:
 - **`README.md`, `docs/assets/cards/`:** the Smart cards section and screenshots.
 
 ## Work in Progress
+
+Nothing is in progress: everything is committed and released up to v2.4.1. The notes below are detailed records of released features, kept for reference.
 
 **Tool calling in the local API** (2026-11-10, released in v2.3.0; from a GitHub feature request asking for "tool calling / function calling"):
 - `/v1/chat/completions` now takes OpenAI `tools` (and the older `functions`), `tool_choice` (auto, none, required or a named function) and `tool`/`tool_calls` messages. It answers with `tool_calls` and `finish_reason: "tool_calls"`, streamed or not.
@@ -282,11 +318,17 @@ These are the files changed in the last release, v2.0.0:
 - **Card extraction** adds one extra model call, about 5–15 s, after the reply.
 - **The voice error-13 fallback** couldn't be reproduced here, so it's untested on an affected phone.
 - **Older scheduled tasks:** the owner's earlier tasks (Tesla news, Best Buy laptop, Summarize tech news, Amazon) were no longer on the Tasks page during 2.0 testing. It's not known whether they were deleted on purpose.
+- **API `usage.completion_tokens` is 0** when a reply is only a tool call. It counts the text content, which is empty.
+- **Digital assistant from the lock screen:** Mochu doesn't open over the keyguard, so the user has to unlock first.
+- **Combine devices with an older Mochu** shows the other device's IP instead of its name, because older versions don't send a name with INFO.
 
 ## Verification
 
-- **Unit tests:** `gradle testReleaseUnitTest assembleRelease` passed for the v2.0.0 build, and the APK signature was verified (SHA-256 `ad1dbbc3…`).
-- **Manual tests on the S25 with Gemma 4 E2B:**
+- **v2.4.1 build:** `gradle testReleaseUnitTest assembleRelease` (Gradle 8.13) passed with 94 unit tests, and the APK signature was verified (SHA-256 `ad1dbbc3…`). The S26 Ultra and onn tablet tests for 2.3.0–2.4.1 are listed under Current State and Work in Progress.
+- **Not tested on a device:**
+  - Holding the physical side button for the digital assistant; only `KEYCODE_ASSIST` was sent over adb.
+  - The weekly llama.cpp update check (a proposed task, not built).
+- **v2.0.0, manual tests on the S25 with Gemma 4 E2B:**
   - Price card plus history chart, and the typical-price line.
   - Stock, news, sports (re-checked after the placeholder fix), place (Open in Maps opens Google Maps), recipe, comparison and document cards, plus an "ask more" chip.
   - The "Today at 11:50 p.m" scheduling, and the drawer scroll.
@@ -294,19 +336,25 @@ These are the files changed in the last release, v2.0.0:
 
 ## Next Steps
 
-0. **GitHub replies:** the owner posts the replies on the tool-calling issue and the LFM3 issue (#3).
-1. **Tool calling:** the owner is replying on the GitHub issue to ask whether in-app tools are wanted too. Chat already runs web search, page reading and Memory by itself. A model-chosen version would be opt-in and read-only (see PROJECT.md).
-1. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
-2. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
-3. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
-4. **Better news cards:** read headlines from inside news pages instead of listing search results.
+1. **GitHub issues:**
+   - The owner replied on the LFM3 issue (#3), and on the tool-calling issue about local models.
+   - Still to post: the digital-assistant issue reply, now that v2.4.1 is out.
+   - If the tool-calling requester wants in-app tools, build the opt-in, read-only version (see PROJECT.md). Chat already runs web search, page reading and Memory by itself.
+2. **Digital assistant:** hold the S26's physical side button (Samsung: Settings › Advanced features › Side button › Digital assistant) to confirm it opens Mochu. Delete the leftover test chat "Hello what's up" on the S26.
+3. **Weekly llama.cpp update check:** a GitHub Action that bumps the submodule to the newest `bNNNNN` tag, builds, runs tests and opens a PR. It should flag new architectures and `RPC_PROTO` changes. It was proposed as a separate task and isn't built.
+4. **API `usage` for tool-call replies:** count the raw reply, not the empty content.
+5. **Price-drop alerts:** for example, "tell me if it goes under $60". Only notify when a tracked price drops below a target. It builds on `recordValue` history.
+6. **Weather card:** temperature, high and low, rain chance and an hourly chart. Good for daily morning tasks.
+7. **Test a scheduled task end to end** that produces a card (price or stock) and check the result chat.
+8. **Better news cards:** read headlines from inside news pages instead of listing search results.
 
 ## Additional Context
 
 - **Owner's test devices (from 2026-11-05; the S25 is gone):**
+  - Samsung S26 Ultra (SM-S948U1): 11 GB, 192.168.1.47. It's the main test phone since 2026-11-10, with a PIN lock.
   - Pixel 8 Pro: 12 GB, Tensor G3, about 4–6 GB free.
   - Lenovo Idea Tab Pro Gen 2 (TB390FU): 8 GB, Snapdragon 8s Gen 4, about 3.3 GB free.
-  - onn tablet 8.1 core 2026: 6 GB.
+  - onn tablet 8.1 core 2026 (onn8Core, model number 36018340): 6 GB, 192.168.1.222, with a PIN lock. It runs v2.4.1.
   - Wireless adb: pair on the pairing port shown by `adb mdns services`, then connect on the connect port. In Git Bash, set `MSYS_NO_PATHCONV=1` so `/data/local/tmp` paths aren't rewritten.
 - **Experiment: splitting a model across devices (llama.cpp RPC, as in DistAi) is NOT worth building.**
   - Setup: `llama-bench` and `ggml-rpc-server` built with `GGML_RPC=ON` (arm64, armv8.2-a+dotprod+i8mm). The Pixel was the main device; the Idea Tab ran the worker over home Wi-Fi.

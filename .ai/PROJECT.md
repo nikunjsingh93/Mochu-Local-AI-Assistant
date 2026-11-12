@@ -11,11 +11,13 @@ Main features:
 - **Web search** and an in-app **Browser**.
 - **Memory:** facts the user asks Mochu to remember.
 - **Scheduled assistant tasks**, reminders, timers and a stopwatch.
-- **Voice** input and read-aloud replies.
+- **Voice** input and read-aloud replies. Mochu can be the phone's **default digital assistant** (2.4.1): the side button or assistant gesture opens a voice chat.
 - **Code:** build web, React and Python apps and export them as APKs.
-- **Local API server** (OpenAI-compatible) for other devices on the same Wi-Fi.
+- **Local API server** (OpenAI-compatible) for other devices on the same Wi-Fi, with **tool calling** (2.3.0).
 - **Home-server models** from Ollama, LM Studio and similar.
 - **Smart cards** under answers (new in 2.0).
+- **Combine devices** (experimental, 2.1): one GGUF model split across several phones and tablets with llama.cpp RPC.
+- **Hugging Face search** (2.2.0): find and download any GGUF from the Models tab.
 
 ## Technology Stack
 
@@ -47,12 +49,15 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
   - `PriceTracking.kt`: product price extraction and price history in `filesDir/price_history/`.
   - `RichCards.kt`: card detection (`cardKindFor`), extraction prompts and validation, and `richBlocksFor()`.
   - `Speech.kt`: text-to-speech and `VoiceInput` speech recognition.
-  - `ChatDocuments.kt`, `Memory.kt`, `ApiServer.kt`, `ApkExport.kt`, and others.
+  - `ApiServer.kt`: the local API server (`ApiServerService`) and `openAiMessagesToPrompt`. `ToolCalling.kt`: tool definitions in the prompt, and `parseToolCalls`, which reads the call formats models write.
+  - `DeviceCluster.kt`: Combine devices. `ClusterWorkerService` (the sharing side, in the `:cluster` process), `DeviceCluster` (pairing, relays, `prepareForLoad`), and `CLUSTER_PROTOCOL`.
+  - `ChatDocuments.kt`, `Memory.kt`, `ApkExport.kt`, and others.
 - **`ui/`:**
-  - `AppShell.kt`: navigation, the chats drawer and screen wiring.
-  - `ModelDownloads.kt`: the Models page.
+  - `AppShell.kt`: navigation, the chats drawer and screen wiring. It also reacts to `AppEvents` (notification taps, and `assist` from the digital assistant).
+  - `ModelDownloads.kt`: the Models page. `CombineDevices.kt` and `HuggingFaceSearch.kt` are sections of it.
   - `TasksScreen.kt`: Scheduled tasks, Memory and Reminders.
-  - `SettingsAndFiles.kt`.
+  - `SettingsAndFiles.kt`: Settings, the API server card (`ApiServerSetting`) and the digital assistant row (`DigitalAssistantSetting`).
+  - `VoiceMic.kt`: the mic button state (`rememberVoiceMic`).
   - `chat/`: `AssistantChatScreen.kt`, `RichMarkdown.kt` (markdown renderer), `RichBlocks.kt` and `RichCardTypes.kt` (card and chart UI), and `ChatClocks.kt` (in-chat timers and stopwatch).
 - **`docs/assets/`:** the icon and the card screenshots used in the README and release notes.
 
@@ -77,6 +82,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
   - Tasks store the `chatId` they were created from. Rescheduling ("actually make it 9am") and notification taps use it.
 - **Chat commands** in `taskCommandFrom()` (in `Tasks.kt`): timers, reminders, the stopwatch, scheduled tasks and `Reschedule`. Polite openings like "could you please" are stripped first. A reminder that asks for writing ("…and add a mindful note") becomes an assistant task.
 - **Idle auto-unload:** the model unloads after `autoUnloadSeconds` without use (default 60; set in Settings). The Models page has an Unload button.
+- **Digital assistant:** `MainActivity` handles `ACTION_ASSIST` and `VOICE_COMMAND` and sets `AppEvents.assist` (only on a fresh launch). `AppShell` opens a new chat, or the open one if it's empty, then sets `AppEvents.listenNow`, and `AssistantChatScreen` starts the mic. Nothing happens while a reply is running.
 
 ## Development Commands
 
@@ -85,7 +91,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
   gradle testReleaseUnitTest assembleRelease --console=plain -q
   ```
   - Set `ANDROID_HOME` to the Android SDK (on the owner's machine, `C:\Users\Nikunj\Android\Sdk`).
-  - There's no Gradle wrapper on that machine. Previous sessions used a downloaded Gradle 8.13.
+  - There's no Gradle wrapper on that machine, and only Gradle 8.10.2 is installed (`C:\Users\Nikunj\Android\gradle-8.10.2`). AGP 8.12.1 needs Gradle 8.13, so download `https://services.gradle.org/distributions/gradle-8.13-bin.zip` into the session's scratchpad and run its `bin/gradle`.
 - **APK output:** `app/build/outputs/apk/release/app-release.apk`. It's signed only when `keystore.properties` exists.
 - **Verify the signature:**
   ```
@@ -96,7 +102,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
   ```
   adb -t <transport_id> install -r <apk>
   ```
-  The owner's test phones are a Samsung S25 (SM-S938U1), a Samsung S26 Ultra (SM-S948U1) and an Athena tablet (9425X), all connected over wireless adb.
+  The owner's test devices (see HANDOFF.md › Additional Context) are a Samsung S26 Ultra (SM-S948U1), a Pixel 8 Pro, a Lenovo Idea Tab Pro (TB390FU) and an onn 8 Core tablet (model number 36018340), all over wireless adb. The S25 is gone.
 - **Release flow** (only when the owner asks):
   1. Bump `versionCode`/`versionName` in `app/build.gradle.kts` and in the README's Build Notes.
   2. Build and verify the signature.
@@ -109,6 +115,7 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
 
 ## Important Decisions
 
+- **The digital assistant is an `ACTION_ASSIST` activity, not a VoiceInteractionService.** That's enough for Android's assistant role (Samsung lists Mochu next to ChatGPT), and the system opens `MainActivity` in its own task. A VoiceInteractionService would launch a second assistant-type activity with its own ViewModel and could load a second model. Apps can't request the assistant role themselves, so Settings opens Android's assistant screen instead.
 - **Combine devices checks Mochu versions** (`CLUSTER_PROTOCOL` in `DeviceCluster.kt`). Devices must speak the same llama.cpp RPC protocol, so a device on another version is told to update and is skipped, rather than failing inside llama.cpp. When a llama.cpp update changes `RPC_PROTO_MAJOR_VERSION`, update `CLUSTER_PROTOCOL` (a unit test enforces it) and say in the release notes that every device needs the update.
 - **Updating llama.cpp:** move the submodule to a release tag (`bNNNNN`), not to master's tip. Mochu's patched RPC copy in `app/src/main/cpp/CMakeLists.txt` swaps only `ggml-rpc.cpp` within upstream's own source list, and fails loudly if one of its four patches no longer applies. A new architecture loads as soon as llama.cpp supports it; there's no allowlist in the app.
 - **API tool calling is done in the prompt, not by each runtime's chat template** (`data/ToolCalling.kt`). Every engine (LiteRT, GGUF, home server, combined devices) gets the same `<tool_call>{"name","arguments"}</tool_call>` format, and only function names the client offered come back as calls. Gemma 4 sometimes ignores that and writes its native `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>` format instead, so the parser reads both. LFM2 does the same with `<|tool_call_start|>[fn(key="value")]<|tool_call_end|>`, and small models improvise `<name>fn</name>` followed by JSON, so those are read too. Qwen3 follows `<tool_call>` best.
@@ -137,10 +144,13 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
 - **`mergeDexRelease` occasionally fails** with a transient error. Rerunning the build fixes it.
 - **Shell edits with `node -e` or heredocs break on apostrophes and backslashes.** Write a script file, or use an editor tool, for multi-line Kotlin edits.
 - **adb transport ids change** when the adb server restarts. Look them up again with `adb devices -l`.
+- **Test devices lock themselves with a PIN** after a few minutes. Agents must not enter PINs, so check `dumpsys window | grep isKeyguardShowing` and ask the owner to unlock.
+- **The owner's PC has Git Bash but no Python or `bc`.** Use `awk` for math. Set `MSYS_NO_PATHCONV=1` before adb commands with device paths like `/sdcard/...`.
+- **On a tablet, swiping down from near the top** opens Quick Settings instead of scrolling the app. Start scroll swipes lower on the screen.
 - **When testing on the phone,** a "Stop" button gap can end a wait loop early, while a card is still being made. Wait for several quiet checks in a row.
 
 ## Conventions
 
 - Comments explain *why* in plain words. User-facing strings are short, friendly sentences.
-- New behavior gets a unit test when it's parsing or logic (`TasksTest`, `RichCardsTest`, `PriceTrackingTest`, `WebToolsTest`).
+- New behavior gets a unit test when it's parsing or logic (`TasksTest`, `RichCardsTest`, `PriceTrackingTest`, `WebToolsTest`, `ToolCallingTest`, `DeviceClusterTest`).
 - Release notes and README use plain language, headings and emoji bullets, with screenshots in `docs/assets/`.
