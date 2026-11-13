@@ -1,5 +1,11 @@
 # Development Handoff
 
+## 2026-11-13: Updated v2.4.2 APK
+
+- Replaced the APK in the existing [v2.4.2 release](https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.2) with the Code undo, focused context, Chat HTML preview and LFM3 retry changes, built from commit `88a506d`. Updated the release notes; the v2.4.2 tag and source archives still point to the original release.
+- GitHub's APK SHA-256 (`cb056050…`) matches the local build and the APK installed on the S26. Version remains 2.4.2 / code 38; signing certificate is `ad1dbbc3…`. The previous Gradle 8.13 release build and 109 unit tests passed.
+- LFM3 still failed a repeat edit on an existing test project, stopping after two invalid attempts; Gemma 4 E2B succeeded on the same request. See the test details below. Next: improve LFM3 editing reliability and verify Chat HTML preview on a device.
+
 ## 2026-11-13: LFM3 retry loop and Gemma comparison
 
 - On the S26, reproduced LFM3 reusing an old starter-page snippet on a repeat request, followed by an unrecognized `new_text` argument and malformed edits. Changed `FileEdits.kt` to accept the `new_text` alias, reset Code model context after edits, detect no-op writes, and stop after two invalid edit attempts across failure types with an accurate message. Added unit tests.
