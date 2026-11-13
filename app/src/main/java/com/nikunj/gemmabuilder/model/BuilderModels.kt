@@ -111,6 +111,7 @@ data class BuilderUiState(
     val currentCode: String = "",
     val files: List<String> = emptyList(),
     val lastWrittenPaths: List<String> = emptyList(),
+    val undoChangedPaths: List<String> = emptyList(),
     val lastRawResponse: String = "",
     val streamingCode: String = "",
     val previewFullscreen: Boolean = false,
@@ -196,7 +197,8 @@ data class BuilderUiState(
     /** Shows the one-time web access consent dialog. */
     val webConsentPending: Boolean = false,
     /** URL the Browser tab should open next (set by tapping a source link). */
-    val browserUrl: String? = null
+    val browserUrl: String? = null,
+    val browserHtml: String? = null
 )
 
 enum class DownloadPhase { NotDownloaded, Queued, WaitingForNetwork, Downloading, Verifying, Downloaded, Failed }

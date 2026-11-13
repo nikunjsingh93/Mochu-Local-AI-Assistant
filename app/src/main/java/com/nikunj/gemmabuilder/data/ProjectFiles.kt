@@ -663,7 +663,7 @@ fun htmlContextForModel(html: String, maxChars: Int = 12000): String {
     return """
 $head
 
-<!-- GEMMA BUILDER NOTE: The imported HTML was very large, so the middle was omitted before sending to the local model. Preserve the intent of the page and rewrite a complete, self-contained index.html. -->
+<!-- The middle of this file was omitted. Do not rewrite the entire file based on this partial view; use exact edit_file changes from the relevant original excerpts. -->
 
 $tail
     """.trimIndent()

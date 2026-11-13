@@ -593,7 +593,10 @@ class BuilderViewModel : ViewModel() {
         conversations = conversations.filterNot { it.id == id }.toMutableList()
         File(chatsRoot(context), "$id.chat").delete()
         // A project's files go only with its last chat.
-        if (conversations.none { it.projectKey == deleted.projectKey }) File(projectsRoot(context), deleted.projectKey).deleteRecursively()
+        if (conversations.none { it.projectKey == deleted.projectKey }) {
+            File(projectsRoot(context), deleted.projectKey).deleteRecursively()
+            File(context.filesDir, "project_undo/${deleted.projectKey}").deleteRecursively()
+        }
         // Stay in the same space: fall back to that space's newest chat, or a fresh one.
         if (conversations.none { it.kind == deleted.kind }) {
             val fresh = newBlankConversation(deleted.kind)
@@ -1082,6 +1085,13 @@ class BuilderViewModel : ViewModel() {
         val chatWithDocs = uiState.value.activeKind == CHAT_KIND_ASSISTANT && uiState.value.chatDocs.isNotEmpty()
         val prompt = typed.ifBlank { if (chatWithDocs) "Summarize ${if (uiState.value.chatDocs.size == 1) "this document" else "these documents"}." else if (chatWithPhoto) "What's in this photo?" else "" }
         if (prompt.isBlank() || uiState.value.isBusy || generationInProgress) return
+        if (uiState.value.activeKind == CHAT_KIND_STUDIO && wantsHtmlPreview(prompt) && uiState.value.pendingAttachments.isEmpty() &&
+            File(activeProjectRoot(context), "index.html").isFile) {
+            val messages = uiState.value.messages + ChatMessage("user", prompt) + ChatMessage("assistant", "Opening the project preview.")
+            persistActiveConversation(context, messages)
+            _uiState.update { it.copy(prompt = "", messages = messages, tab = 0, workPanelCollapsed = false, previewVersion = it.previewVersion + 1, status = "Project preview opened.") }
+            return
+        }
         idleUnloadJob?.cancel()
         generationInProgress = true
         if (uiState.value.activeKind == CHAT_KIND_ASSISTANT) {
@@ -1098,6 +1108,8 @@ class BuilderViewModel : ViewModel() {
         }
 
         generationJob = viewModelScope.launch {
+            var undo: ProjectUndo? = null
+            var undoPending: File? = null
             try {
                 if (!uiState.value.modelReady) {
                     _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
@@ -1127,6 +1139,14 @@ class BuilderViewModel : ViewModel() {
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
+                val root = activeProjectRoot(context)
+                undo = ProjectUndo(root, File(context.filesDir, "project_undo/${root.name}"))
+                val backup = runCatching { withContext(Dispatchers.IO) { undo!!.begin() } }
+                if (backup.isFailure) {
+                    _uiState.update { it.copy(status = "Could not save a backup. No changes were made.") }
+                    return@launch
+                }
+                undoPending = backup.getOrThrow()
                 // "Make a React app" / "write a Python script" on a new project starts from a working template.
                 withContext(Dispatchers.IO) { seedProjectForRequest(activeProjectRoot(context), prompt) }?.let { kind ->
                     refreshWorkspace(context)
@@ -1190,7 +1210,8 @@ class BuilderViewModel : ViewModel() {
                     compactHistoryIfNeeded(context, pendingMessages)
                     withContext(Dispatchers.IO) { buildPrompt(context, prompt, pendingMessages, userMessage.attachments) }
                 }.also { cachedSnapshotPrompt = it }
-                val turnPrompt = buildTurnPrompt(prompt)
+                val focusedContext = withContext(Dispatchers.IO) { focusedProjectContext(activeProjectRoot(context), prompt) }
+                val turnPrompt = buildTurnPrompt(prompt, focusedContext)
                 val continuesSession = workspaceKey == sessionFingerprint && hasRoomForTurn(sessionKey, turnPrompt)
                 if (!continuesSession) engine.resetSession()
                 val basePrompt = if (continuesSession) turnPrompt else snapshotPrompt()
@@ -1199,6 +1220,8 @@ class BuilderViewModel : ViewModel() {
                 var assistantReply: String? = null
                 var lastError: Throwable? = null
                 val maxAttempts = 4
+                var attemptsUsed = 0
+                val retryGuard = CodeEditRetryGuard()
                 var retryNote: String? = null
                 var editedPaths = emptySet<String>()
                 var editCount = 0
@@ -1212,6 +1235,7 @@ class BuilderViewModel : ViewModel() {
                 fun readyToWrite(action: WriteFileAction) = action.path in editedPaths || isCompleteEnoughForWriting(action)
 
                 for (attempt in 1..maxAttempts) {
+                    attemptsUsed = attempt
                     val output = StringBuilder()
                     var lastUiUpdate = 0L
                     val attemptPrompt = if (attempt == 1) {
@@ -1286,16 +1310,36 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                         )
                     }
                     val editActions = parseEditFileActions(responseText)
+                    if (responseText.contains("<tool_call", ignoreCase = true) && editActions.isEmpty()) {
+                        retryNote = "The file action was incomplete or unsupported. Return a complete edit_file action with a path and exact find/replace text."
+                        actions = emptyList()
+                        assistantReply = null
+                        if (retryGuard.invalidCall()) break
+                        continue
+                    }
                     // With edits present, take write_file actions literally rather than guessing at HTML.
                     val rawWrites = if (editActions.isEmpty()) recoverWriteFileActions(responseText) else parseWriteFileActions(responseText)
                     val writes = normalizeWriteActions(rawWrites)
+                    val focusedEdit = isFocusedEditRequest(prompt, focusedContext, pendingAttachments.isNotEmpty())
+                    val explicitRewrite = isExplicitProjectRewrite(prompt)
+                    val unsafeRewrite = if (focusedEdit && !explicitRewrite) writes.firstOrNull { action ->
+                        runCatching { safeResolve(activeProjectRoot(context), action.path).isFile }.getOrDefault(false)
+                    } else null
+                    if (unsafeRewrite != null) {
+                        retryNote = "Only excerpts of ${unsafeRewrite.path} may be available. Use edit_file with a unique exact find/replace, not write_file for an existing file."
+                        actions = emptyList()
+                        assistantReply = null
+                        if (retryGuard.invalidCall()) break
+                        continue
+                    }
                     val edited = withContext(Dispatchers.IO) { applyEditActions(activeProjectRoot(context), editActions, writes) }
                     if (edited.missing != null) {
                         val (path, snippet) = edited.missing
-                        retryNote = "Your edit_file <find> text was not found in $path:\n${snippet.take(300)}\n" +
-                            "Return write_file with the complete updated $path instead."
+                        retryNote = "Your edit_file <find> text was missing or matched more than once in $path:\n${snippet.take(300)}\n" +
+                            "Use a unique exact passage from the project excerpts. Do not rewrite a partially shown file."
                         actions = emptyList()
                         assistantReply = null
+                        if (retryGuard.missingEdit(edited.missing)) break
                         if (attempt < maxAttempts) {
                             _uiState.update { it.copy(status = "Edit didn't match the file. Trying again...") }
                         }
@@ -1304,7 +1348,9 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     actions = writes.filterNot { w -> edited.writes.any { it.path == w.path } } + edited.writes
                     editedPaths = edited.writes.map { it.path }.toSet()
                     editCount = edited.editCount
-                    actionsMatchModel = rawWrites == writes
+                    // A small model may repeat the original snapshot after an edit instead of
+                    // applying its own action mentally. Rebuild context after edits.
+                    actionsMatchModel = rawWrites == writes && editActions.isEmpty()
                     val recoveredReply = if (actions.isEmpty()) recoverAssistantReplyContent(responseText) else null
                     assistantReply = if (recoveredReply != null) {
                         continueAssistantReplyIfNeeded(
@@ -1352,9 +1398,11 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 if (actions.isEmpty() || actions.any { !readyToWrite(it) }) {
                     val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
                     val message = if (lastError != null) {
-                        "Generation failed after $maxAttempts attempts. The previous working project was kept. Try a shorter request."
+                        "Generation failed after $attemptsUsed attempt(s). The previous working project was kept. Try a shorter request."
+                    } else if (retryNote != null) {
+                        "The model couldn't make a valid file edit after $attemptsUsed attempt(s). The previous working project was kept. Try a different model or a more specific request."
                     } else {
-                        "The model stopped before finishing write actions after $maxAttempts attempts. The previous working project was kept. Try asking for a shorter complete rewrite."
+                        "The model stopped before finishing write actions after $attemptsUsed attempt(s). The previous working project was kept. Try asking for a shorter complete rewrite."
                     }
                     val finalMessages = uiState.value.messages + ChatMessage("assistant", message, statsInline = metrics, thinking = studioThinking)
                     persistActiveConversation(context, finalMessages)
@@ -1371,6 +1419,22 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                             generationMetrics = metrics
                         )
                     }
+                    return@launch
+                }
+
+                val alreadyMatches = withContext(Dispatchers.IO) {
+                    val root = activeProjectRoot(context)
+                    actions.all { action ->
+                        runCatching { safeResolve(root, action.path).takeIf { it.isFile }?.readText() == action.content }.getOrDefault(false)
+                    }
+                }
+                if (alreadyMatches) {
+                    val metrics = buildGenerationMetrics(generationStartedAtMs, firstTokenAtMs)
+                    val finalMessages = uiState.value.messages + ChatMessage("assistant", "That edit doesn't change the file. Here's the current preview.", statsInline = metrics, thinking = studioThinking)
+                    persistActiveConversation(context, finalMessages)
+                    engine.resetSession()
+                    sessionFingerprint = null
+                    _uiState.update { it.copy(isBusy = false, status = "No changes needed.", messages = finalMessages, streamingCode = "", tab = 0, workPanelCollapsed = false, previewVersion = it.previewVersion + 1, generationMetrics = metrics) }
                     return@launch
                 }
 
@@ -1433,6 +1497,17 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     }
                 }
             } finally {
+                val pending = undoPending
+                if (pending != null) {
+                    val saved = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        runCatching { undo!!.finish(pending); undo!!.changedFiles() }
+                    }
+                    if (saved.isSuccess) {
+                        _uiState.update { it.copy(undoChangedPaths = saved.getOrThrow()) }
+                    } else {
+                        _uiState.update { it.copy(status = "Changes were saved, but the undo backup could not be completed.") }
+                    }
+                }
                 generationInProgress = false
                 generationJob = null
                 scheduleIdleUnload()
@@ -1471,10 +1546,6 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             // The chat before this message, so it can be answered again if a sharing device drops out.
             var retryHistory: List<ChatMessage>? = null
             try {
-                if (!uiState.value.modelReady) {
-                    _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
-                    return@launch
-                }
                 val images = if (presetResearch == null) uiState.value.chatImages else emptyList()
                 val attachedDocs = if (presetResearch == null) uiState.value.chatDocs else emptyList()
                 if (images.isEmpty() && attachedDocs.isEmpty() && presetResearch == null) retryHistory = uiState.value.messages
@@ -1493,6 +1564,19 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                     )
                 }
                 persistActiveConversation(context, pendingMessages)
+                if (presetResearch == null && images.isEmpty() && attachedDocs.isEmpty() && wantsHtmlPreview(prompt)) {
+                    val html = lastHtmlDocument(pendingMessages.dropLast(1).filter { it.role == "assistant" }.takeLast(8).map { it.text })
+                    if (html != null) {
+                        val done = pendingMessages + ChatMessage("assistant", "Opening the HTML in the Browser tab.")
+                        persistActiveConversation(context, done)
+                        _uiState.update { it.copy(messages = done, browserHtml = html, streamingReply = null) }
+                        return@launch
+                    }
+                }
+                if (!uiState.value.modelReady) {
+                    _uiState.update { it.copy(status = "Download a model from the Models tab first.") }
+                    return@launch
+                }
                 // A GGUF model sees photos only with its photo-support file: say so before loading it.
                 if (images.isNotEmpty() && isGgufModel(savedModelName(context)) && visionFileFor(context, savedModelName(context)) == null) {
                     val reply = if (hasVisionSupport(savedModelName(context))) {
@@ -1857,6 +1941,10 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
 
     fun consumeBrowserUrl() {
         _uiState.update { it.copy(browserUrl = null) }
+    }
+
+    fun consumeBrowserHtml() {
+        _uiState.update { it.copy(browserHtml = null) }
     }
 
     /**
@@ -2338,6 +2426,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         File(chatsRoot(context), "${chat.id}.chat").delete()
         if (!keepProjectFiles && conversations.none { it.projectKey == chat.projectKey }) {
             File(projectsRoot(context), chat.projectKey).deleteRecursively()
+            File(context.filesDir, "project_undo/${chat.projectKey}").deleteRecursively()
             saveProjectName(context, chat.projectKey, null)
         }
         _uiState.update { it.copy(conversations = conversationInfos(), projectNames = savedProjectNames(context)) }
@@ -2370,6 +2459,24 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
         val id = uiState.value.activeConversationId ?: conversations.firstOrNull()?.id
         require(!id.isNullOrBlank()) { "No active conversation." }
         return ensureProjectForConversation(context, projectKeyOf(id), migrateLegacy = false)
+    }
+
+    fun undoLastCodeRequest(context: Context) {
+        if (uiState.value.isBusy || generationInProgress) return
+        _uiState.update { it.copy(isBusy = true, status = "Restoring files...") }
+        viewModelScope.launch {
+            val root = activeProjectRoot(context)
+            val undo = ProjectUndo(root, File(context.filesDir, "project_undo/${root.name}"))
+            val result = withContext(Dispatchers.IO) { runCatching { undo.restore() } }
+            if (result.isSuccess) {
+                engine.resetSession()
+                sessionFingerprint = null
+                refreshWorkspace(context)
+                _uiState.update { it.copy(isBusy = false, status = "Undid the last code request.", previewVersion = it.previewVersion + 1, undoChangedPaths = emptyList(), lastWrittenPaths = emptyList()) }
+            } else {
+                _uiState.update { it.copy(isBusy = false, status = result.exceptionOrNull()?.message ?: "Could not undo the request.") }
+            }
+        }
     }
 
     private fun refreshWorkspace(context: Context, conversationId: String? = null) {
@@ -2405,6 +2512,7 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
                 selectedCodePath = effectivePath,
                 currentCode = current,
                 files = files,
+                undoChangedPaths = ProjectUndo(root, File(context.filesDir, "project_undo/${root.name}")).changedFiles(),
                 estimatedFileContextChars = estimatedFileContextChars,
                 modelName = modelNameNow,
                 modelSupportsMultimodal = isLikelyMultimodalModel(modelNameNow),
@@ -2471,16 +2579,22 @@ ${retryNote ?: "Your previous response was incomplete. If the user asked a quest
             if (summary.isNotBlank()) append("Summary of the earlier conversation:\n$summary\n\nLatest messages:\n")
             append(recentMessages.joinToString("\n") { msg -> "${msg.role}: ${msg.text.take(1000)}" })
         }.takeLast(budget / 5)
-        val current = htmlContextForModel(
+        val focused = focusedProjectContext(root, userRequest)
+        val focusedEdit = isFocusedEditRequest(userRequest, focused, preferredAttachmentPaths.isNotEmpty()) &&
+            !isExplicitProjectRewrite(userRequest)
+        val current = if (focusedEdit) "(See the original excerpts below.)" else htmlContextForModel(
             File(root, "index.html").takeIf { it.exists() }?.readText().orEmpty(),
             maxChars = minOf(12000, budget / 2)
         )
-        val fileContext = buildProjectContextForModel(
+        val fileContext = if (focusedEdit) {
+            "Project files:\n" + root.walkTopDown().filter { it.isFile }.map { it.relativeTo(root).invariantSeparatorsPath }
+                .sorted().take(100).joinToString("\n")
+        } else buildProjectContextForModel(
             context = context,
             root = root,
             preferredPaths = preferredAttachmentPaths,
             onlyPreferredWhenProvided = preferredAttachmentPaths.isNotEmpty(),
-            maxTotalChars = (budget - recent.length - current.length).coerceAtLeast(0)
+            maxTotalChars = (budget - recent.length - current.length - focused.length).coerceAtLeast(0)
         )
         val multimodalHint = if (uiState.value.modelSupportsMultimodal) {
             "Model capability routing: multimodal-capable model detected. Prioritize attached image/audio understanding first, then use extracted file text."
@@ -2504,15 +2618,16 @@ $fileContext
 
 $multimodalHint
 
-${buildTurnPrompt(userRequest)}
+${buildTurnPrompt(userRequest, focused)}
         """.trimIndent()
     }
 
     /** Prompt for a turn that continues an open session, where the model already holds the project in its history. */
-    private fun buildTurnPrompt(userRequest: String): String = """
+    private fun buildTurnPrompt(userRequest: String, focusedContext: String = ""): String = """
 User request:
 $userRequest
 
+${if (focusedContext.isNotBlank()) "Relevant original project excerpts (other lines omitted):\n$focusedContext" else ""}
 To change a file that already exists, use edit_file with <find>/<replace> for only the lines that change; don't rewrite the whole file. Use write_file only for new files or a complete rewrite.
 Return the XML action(s) now.
     """.trimIndent()

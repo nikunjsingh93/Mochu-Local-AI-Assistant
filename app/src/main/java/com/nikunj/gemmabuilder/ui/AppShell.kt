@@ -189,6 +189,13 @@ fun OnDeviceApp(
     val tab = pinnedTab ?: if (state.activeKind == CHAT_KIND_STUDIO) AppTab.Studio else AppTab.Chat
     LaunchedEffect(state.browserUrl) { if (state.browserUrl != null) pinnedTab = AppTab.Browser }
     val browser = rememberSaveable(saver = BrowserSession.Saver) { BrowserSession() }
+    LaunchedEffect(state.browserHtml) {
+        state.browserHtml?.let { html ->
+            browser.openHtml(html)
+            pinnedTab = AppTab.Browser
+            vm.consumeBrowserHtml()
+        }
+    }
     DisposableEffect(Unit) { onDispose { browser.destroy() } }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -280,7 +287,10 @@ fun OnDeviceApp(
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    AppTab.Chat -> AssistantChatScreen(
+                    AppTab.Chat -> CompositionLocalProvider(LocalHtmlPreview provides { html ->
+                        browser.openHtml(html)
+                        pinnedTab = AppTab.Browser
+                    }) { AssistantChatScreen(
                         state = state,
                         onOpenDrawer = openDrawer,
                         onNewChat = { vm.newConversation(app, CHAT_KIND_ASSISTANT) },
@@ -310,7 +320,7 @@ fun OnDeviceApp(
                         onStopSpeaking = vm::stopSpeaking,
                         onOpenLink = { url -> vm.openInBrowserTab(url) },
                         onStop = vm::stopGeneration
-                    )
+                    ) }
                     AppTab.Browser -> BrowserScreen(
                         session = browser,
                         requestedUrl = state.browserUrl,
@@ -343,6 +353,7 @@ fun OnDeviceApp(
                         },
                         onSaveZip = { zipSaver.launch("MochuProject.zip") },
                         onSavePwaZip = { pwaZipSaver.launch("MochuPWA.zip") },
+                        onUndo = { vm.undoLastCodeRequest(app) },
                         onStop = vm::stopGeneration
                     ) }
                     AppTab.Models -> ModelDownloadsScreen(
@@ -464,6 +475,10 @@ private fun HistoryDrawer(
     onOpenTasks: () -> Unit
 ) {
     val studio = kind == CHAT_KIND_STUDIO
+    val context = LocalContext.current
+    val versionName = remember(context) {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+    }
     var pendingDelete by remember { mutableStateOf<ConversationInfo?>(null) }
     var pendingDeleteProject by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingRenameProject by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -475,6 +490,8 @@ private fun HistoryDrawer(
                 MochuLogo(32.dp)
                 Spacer(Modifier.width(12.dp))
                 Text("Mochu AI", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.width(8.dp))
+                Text("v$versionName", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(16.dp))
             FilledTonalButton(onClick = { onNew(kind) }, modifier = Modifier.fillMaxWidth()) {

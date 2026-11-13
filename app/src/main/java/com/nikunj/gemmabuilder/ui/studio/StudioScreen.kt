@@ -203,6 +203,7 @@ fun StudioScreen(
     onSaveFile: (String) -> Unit,
     onSaveZip: () -> Unit,
     onSavePwaZip: () -> Unit,
+    onUndo: () -> Unit,
     onStop: () -> Unit = {}
 ) {
     val configuration = LocalConfiguration.current
@@ -272,7 +273,8 @@ fun StudioScreen(
                     onDeleteFile = onDeleteFile,
                     onSaveFile = onSaveFile,
                     onSaveZip = onSaveZip,
-                    onSavePwaZip = onSavePwaZip
+                    onSavePwaZip = onSavePwaZip,
+                    onUndo = onUndo
                 )
             }
         } else {
@@ -347,7 +349,8 @@ fun StudioScreen(
                         onDeleteFile = onDeleteFile,
                         onSaveFile = onSaveFile,
                         onSaveZip = onSaveZip,
-                        onSavePwaZip = onSavePwaZip
+                        onSavePwaZip = onSavePwaZip,
+                        onUndo = onUndo
                     )
                 }
             }

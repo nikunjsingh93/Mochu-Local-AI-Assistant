@@ -267,9 +267,10 @@ fun recoverAssistantReplyContent(text: String): AssistantReplyContent? {
     val stripped = text
         .replace(Regex("""<action\s+name=["']write_file["'][\s\S]*?</action>""", RegexOption.IGNORE_CASE), "")
         .replace(Regex("""<action\s+name=["']reply["'][\s\S]*?</action>""", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("""<tool_call>[\s\S]*?</tool_call>""", RegexOption.IGNORE_CASE), "")
         .trim()
     return stripped
-        .takeIf { it.isNotBlank() && !it.startsWith("<action", ignoreCase = true) }
+        .takeIf { it.isNotBlank() && !it.startsWith("<action", ignoreCase = true) && !it.startsWith("<tool_call", ignoreCase = true) }
         ?.let { AssistantReplyContent(it, complete = true) }
 }
 

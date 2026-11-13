@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -49,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 // Markdown for assistant replies: headings, lists, quotes, rules, code blocks, and inline styles.
+
+val LocalHtmlPreview = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
 private sealed class MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock()
@@ -392,6 +396,12 @@ private fun CodeBlock(language: String, code: String, body: TextStyle) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
+                val openPreview = LocalHtmlPreview.current
+                if (openPreview != null && isCompleteHtmlDocument(code)) {
+                    IconButton(onClick = { openPreview(code) }) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = "Open HTML in browser")
+                    }
+                }
                 CopyButton(code, contentDescription = "Copy code")
                 val (ext, mime) = codeFileType(language)
                 DownloadButton(codeFileName(code, language), mime, { code }, contentDescription = "Download .$ext file")

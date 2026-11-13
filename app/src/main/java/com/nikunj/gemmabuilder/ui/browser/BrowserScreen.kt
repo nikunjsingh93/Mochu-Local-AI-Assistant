@@ -88,6 +88,7 @@ class BrowserSession {
     var canGoBack by mutableStateOf(false)
     var canGoForward by mutableStateOf(false)
     var blockedNotice by mutableStateOf<String?>(null)
+    private var previewHtml: String? = null
 
     fun open(target: String) {
         if (!WebPolicy.isAllowed(target)) {
@@ -95,13 +96,24 @@ class BrowserSession {
             return
         }
         blockedNotice = null
+        previewHtml = null
         currentUrl = target
         address = TextFieldValue(target)
         webView?.loadUrl(target)
     }
 
+    /** An in-memory page has an opaque origin and no access to app or phone files. */
+    fun openHtml(html: String) {
+        previewHtml = html
+        blockedNotice = null
+        currentUrl = "about:blank"
+        address = TextFieldValue("HTML preview")
+        webView?.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+    }
+
     /** Back to the empty start page, forgetting this page's history. */
     fun close() {
+        previewHtml = null
         releaseFocus()
         webView?.apply {
             stopLoading()
@@ -132,7 +144,7 @@ class BrowserSession {
     companion object {
         /** Keeps the open page's address if Android stops the app in the background. */
         val Saver: Saver<BrowserSession, String> = Saver(
-            save = { it.currentUrl },
+            save = { it.currentUrl?.takeIf { url -> WebPolicy.isAllowed(url) } },
             restore = { url -> BrowserSession().apply { open(url) } }
         )
     }
@@ -158,6 +170,8 @@ class BrowserSession {
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                     if (url == "about:blank") return
+                    if (previewHtml != null && url.startsWith("data:")) return
+                    previewHtml = null
                     address = TextFieldValue(url)
                     currentUrl = url
                 }
@@ -173,7 +187,9 @@ class BrowserSession {
                 }
             }
             webView = this
-            currentUrl?.let { loadUrl(it) }
+            val html = previewHtml
+            if (html != null) loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            else currentUrl?.let { loadUrl(it) }
         }
     }
 }

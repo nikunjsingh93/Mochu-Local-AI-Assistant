@@ -1,5 +1,33 @@
 # Development Handoff
 
+## 2026-11-13: LFM3 retry loop and Gemma comparison
+
+- On the S26, reproduced LFM3 reusing an old starter-page snippet on a repeat request, followed by an unrecognized `new_text` argument and malformed edits. Changed `FileEdits.kt` to accept the `new_text` alias, reset Code model context after edits, detect no-op writes, and stop after two invalid edit attempts across failure types with an accurate message. Added unit tests.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed and the resulting APK was installed on the S26 (still version 2.4.2). No diagnostic logging remains in the source.
+- Device tests: Gemma 4 E2B completed the hello-world request and a repeat showed the existing preview without a retry loop. LFM3 created the page in a fresh test project but still failed the repeated request after two invalid attempts; the project stayed intact. This is not a complete LFM3 reliability fix. LFM3 was restored as the selected model, and the temporary test projects and phone files were deleted; the owner's original project remains.
+- Next: improve LFM3's Code prompt/action compatibility and retest existing-project edits; compare results with Gemma. The retry guard limits wasted attempts but does not guarantee a successful edit.
+
+## 2026-11-13: Chat HTML preview and LFM3 code actions
+
+- The S26 screen showed LFM3 outputting `<tool_call><function=edit_file>` with `path`, `replace` (old text), and `new`; Code displayed it as prose. `FileEdits.kt` now parses that native format and keeps exact-match checks; unsupported/incomplete tool calls trigger a retry. `ActionParsing.kt` strips tool markup from replies.
+- Chat can open a complete HTML code block in the Browser using a play button or a direct follow-up such as “open it in the browser”. The page is in memory, not a Code project, and relative project files are unavailable. Code's own direct run/preview request opens its preview panel. Added `HtmlPreview.kt`, parser tests, and Browser/Chat UI wiring.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed. The previous Code undo/focused-context build was installed on the S26; this newer browser/LFM3 build has not been installed or device-tested. The owner's existing project and chat were not altered. A temporary phone screenshot used for diagnosis was removed.
+- Next: test the new build on a disposable Code project with LFM3 and test Chat's HTML play button and follow-up request; clean up the test items. Do not change the owner's existing project.
+
+## 2026-11-12: Code changes, undo and focused context
+
+- Code requests now capture a project snapshot before template seeding or model writes. The Code work panel lists files changed by the latest request and offers Undo with confirmation; undo checks all affected files for subsequent edits before restoring, resets the model session, and refreshes the preview. Snapshots live outside projects and exports and are removed with the project. Only the most recent changed request is retained; an interrupted process cannot recover its pending snapshot automatically.
+- `FocusedProjectContext.kt` finds bounded original excerpts by filenames and request words. Focused edit requests receive a file inventory and those excerpts, with short edit instructions; continued model sessions can keep their existing KV cache. A partial view cannot overwrite an existing file unless the user explicitly requests a rewrite. Exact edits reject ambiguous matches. Retrieval is heuristic, not autonomous list/read/search tools.
+- Changed `ProjectUndo.kt`, `FocusedProjectContext.kt`, `FileEdits.kt`, `ProjectFiles.kt`, `BuilderModels.kt`, `BuilderViewModel.kt`, `AppShell.kt`, `StudioScreen.kt`, and `StudioPanels.kt`; added `ProjectUndoTest.kt` and `FocusedProjectContextTest.kt`, and extended `FileEditsTest.kt`.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed. Not installed or tested on a device. The existing uncommitted drawer version label is included in the working tree.
+- Next: test the changed-files panel, conflict-safe undo and focused edits on a disposable Code project on a device, then clean up the test project. Evaluate autonomous file tools separately if heuristic retrieval is insufficient.
+
+## 2026-11-12: Drawer version label
+
+- Added the installed app's version beside the Mochu AI title in the chat and Code history drawers (`app/src/main/java/com/nikunj/gemmabuilder/ui/AppShell.kt`). It reads `versionName` from the package manager, so it follows future version bumps.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --console=plain -q` passed. Not installed or visually checked on a device. The released v2.4.2 was installed on the S26 before this change.
+- Next: visually check the drawer on a phone when convenient; include this change in a future release.
+
 ## 2026-11-12: v2.4.2 release
 
 - Prepared v2.4.2 (versionCode 38) with the repetition false-positive fix and Spanish image-request recognition described below. `README.md` and `app/build.gradle.kts` carry the new version.

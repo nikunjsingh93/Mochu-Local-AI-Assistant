@@ -358,10 +358,21 @@ fun WorkPanel(
     onDeleteFile: (String) -> Unit,
     onSaveFile: (String) -> Unit,
     onSaveZip: () -> Unit,
-    onSavePwaZip: () -> Unit
+    onSavePwaZip: () -> Unit,
+    onUndo: () -> Unit
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var showUndo by remember { mutableStateOf(false) }
+    if (showUndo) {
+        AlertDialog(
+            onDismissRequest = { showUndo = false },
+            title = { Text("Undo last code changes?") },
+            text = { Text("Restore these files to their previous state?\n\n${state.undoChangedPaths.joinToString("\n")}") },
+            confirmButton = { TextButton(onClick = { showUndo = false; onUndo() }) { Text("Undo") } },
+            dismissButton = { TextButton(onClick = { showUndo = false }) { Text("Cancel") } }
+        )
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = modifier
@@ -413,6 +424,12 @@ fun WorkPanel(
             }
 
             if (!state.workPanelCollapsed) {
+                if (state.undoChangedPaths.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Changed: ${state.undoChangedPaths.joinToString()}", modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { showUndo = true }, enabled = !state.isBusy) { Text("Undo") }
+                    }
+                }
                 when (state.tab) {
                     0 -> PreviewPane(state)
                     1 -> CodePane(state)
