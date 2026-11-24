@@ -1,5 +1,14 @@
 # Development Handoff
 
+## 2026-11-24: v2.4.3 saved remote APIs
+
+- The Models screen can save multiple named OpenAI-compatible APIs and connect to any saved API to choose a model. Existing single-server settings migrate automatically. Profiles keep separate keys, context overrides and last-used models. Selecting a model still uses the existing Chat and Code engine path.
+- Changed `ui/ModelDownloads.kt` and added `data/RemoteConnections.kt` and `RemoteConnectionsTest.kt`. Tests cover migration, address validation and two connections sharing an address with different keys.
+- Release version is 2.4.3 (versionCode 39). Updated `README.md` and `app/build.gradle.kts`.
+- The 2.4.3 Gradle release build passed with the 112-test suite up to date. Package metadata and signature were verified. The signed APK SHA-256 starts with `23251f55`. [GitHub release](https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.3).
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --offline --console=plain` passed with 112 tests. `apksigner verify --print-certs` confirmed the release certificate (`ad1dbbc3…`). Wireless `adb install -r` succeeded on the S26 Ultra and `dumpsys package` confirmed the updated install (2.4.2 / code 38). Live endpoint switching has not been tested on the phone.
+- Next: try switching between two real APIs on the S26, then reopen Models and confirm both profiles and their model selections are available.
+
 ## 2026-11-13: Updated v2.4.2 APK
 
 - Replaced the APK in the existing [v2.4.2 release](https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.2) with the Code undo, focused context, Chat HTML preview and LFM3 retry changes, built from commit `88a506d`. Updated the release notes; the v2.4.2 tag and source archives still point to the original release.

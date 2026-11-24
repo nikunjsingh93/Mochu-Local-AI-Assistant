@@ -45,6 +45,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -65,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import java.util.Locale
+import java.util.UUID
 
 @Composable
 fun ModelDownloadsScreen(
@@ -150,7 +153,7 @@ fun ModelDownloadsScreen(
                     Box(Modifier.padding(12.dp)) { ApiServerSetting() }
                 }
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
-                    Box(Modifier.padding(12.dp)) { RemoteModelSetting(state.remoteModel, onUseRemote, onStopRemote) }
+                    Box(Modifier.padding(12.dp)) { RemoteModelSetting(state.remoteModel, state.isBusy, onUseRemote, onStopRemote) }
                 }
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                     Box(Modifier.padding(12.dp)) { CombineDevicesSetting() }
@@ -557,16 +560,28 @@ private fun ImageSettings(model: CatalogModel, options: ImageOptions, onChange: 
 
 /** A model on the user's own computer or server (Ollama, LM Studio, llama.cpp, vLLM, another Mochu). */
 @Composable
-private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelConfig) -> Unit, onStop: () -> Unit) {
+private fun RemoteModelSetting(
+    active: RemoteModelConfig?,
+    busy: Boolean,
+    onUse: (RemoteModelConfig) -> Unit,
+    onStop: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val saved = remember { savedRemoteModelConfig(context) }
-    var url by remember { mutableStateOf(saved?.baseUrl ?: "") }
-    var key by remember { mutableStateOf(saved?.apiKey ?: "") }
+    var connections by remember { mutableStateOf(savedRemoteConnections(context)) }
+    val saved = remember {
+        val last = savedRemoteModelConfig(context)
+        connections.firstOrNull { last != null && it.baseUrl == last.baseUrl && it.apiKey == last.apiKey }
+            ?: connections.firstOrNull()
+    }
+    var selectedId by remember { mutableStateOf(saved?.id) }
+    var name by remember { mutableStateOf(saved?.name.orEmpty()) }
+    var url by remember { mutableStateOf(saved?.baseUrl.orEmpty()) }
+    var key by remember { mutableStateOf(saved?.apiKey.orEmpty()) }
     var contextText by remember { mutableStateOf(saved?.contextTokens?.takeIf { it > 0 }?.toString().orEmpty()) }
     var fallback by remember { mutableStateOf(remoteFallbackEnabled(context)) }
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
-    var chosen by remember { mutableStateOf(saved?.model) }
+    var chosen by remember { mutableStateOf(saved?.lastModel) }
     var message by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
     // Servers outside your network get your messages: ask once per address before connecting.
@@ -574,8 +589,41 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
     var allowedOutside by remember { mutableStateOf(allowedRemoteHosts(context)) }
     var connectAgain by remember { mutableStateOf(0) }
     var enabled by remember { mutableStateOf(active != null) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showKey by remember { mutableStateOf(false) }
+    val canEdit = !checking && confirmOutside == null
+    val baseUrl = remoteConnectionAddress(url)
+
+    fun selectConnection(connection: RemoteConnection?) {
+        selectedId = connection?.id
+        name = connection?.name.orEmpty()
+        url = connection?.baseUrl.orEmpty()
+        key = connection?.apiKey.orEmpty()
+        contextText = connection?.contextTokens?.takeIf { it > 0 }?.toString().orEmpty()
+        chosen = connection?.lastModel
+        models = emptyList()
+        message = null
+        showKey = false
+    }
+
+    fun saveConnection(base: String, model: String? = null): RemoteConnection {
+        val previous = connections.firstOrNull { it.id == selectedId }
+        val connection = RemoteConnection(
+            selectedId ?: UUID.randomUUID().toString(),
+            name.trim().ifEmpty { base },
+            base, key, contextText.toIntOrNull() ?: 0,
+            model ?: previous?.lastModel?.takeIf { previous.baseUrl == base && previous.apiKey == key }
+        )
+        connections = if (previous == null) connections + connection
+            else connections.map { if (it.id == connection.id) connection else it }
+        saveRemoteConnections(context, connections)
+        selectedId = connection.id
+        return connection
+    }
+
     fun connectNow() {
-            val base = normalizeBaseUrl(url)
+            val base = remoteConnectionAddress(url) ?: return
+            val apiKey = key
             checking = true
             message = null
             scope.launch {
@@ -583,7 +631,7 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                 if (!local && base !in allowedOutside) {
                     confirmOutside = base
                 } else {
-                    runCatching { listRemoteModels(base, key) }
+                    runCatching { listRemoteModels(base, apiKey) }
                         .onSuccess { list ->
                             models = list
                             url = base
@@ -606,23 +654,49 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                 )
             }
             // Off by default; turning it off while a server model is in use goes back to the phone's.
-            Switch(checked = enabled, onCheckedChange = { on -> enabled = on; if (!on && active != null) onStop() })
+            Switch(checked = enabled, enabled = canEdit && !busy, onCheckedChange = { on -> enabled = on; if (!on && active != null) onStop() })
         }
         if (enabled) {
         if (active != null) {
             Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
-                Text("In use: ${active.model}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
+                Text("In use: ${active.model} · ${active.baseUrl}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
+            }
+        }
+        if (connections.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    OutlinedButton(enabled = canEdit, onClick = { menuOpen = true }) {
+                        Text(
+                            connections.firstOrNull { it.id == selectedId }?.name ?: "Saved APIs",
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        connections.forEach { connection ->
+                            DropdownMenuItem(text = { Text(connection.name) }, onClick = {
+                                menuOpen = false
+                                selectConnection(connection)
+                            })
+                        }
+                    }
+                }
+                TextButton(enabled = canEdit, onClick = { selectConnection(null) }) { Text("Add API") }
             }
         }
         OutlinedTextField(
-            value = url, onValueChange = { url = it; models = emptyList(); message = null }, singleLine = true,
+            value = name, onValueChange = { name = it }, enabled = canEdit, singleLine = true,
+            label = { Text("API name (optional)") }, modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = url, onValueChange = { url = it; models = emptyList(); chosen = null; message = null },
+            enabled = canEdit, singleLine = true,
             label = { Text("Server address") }, placeholder = { Text("192.168.1.20:11434") }, modifier = Modifier.fillMaxWidth()
         )
         // Hidden like a password; the eye shows it, and while shown it can be selected or copied.
-        var showKey by remember { mutableStateOf(false) }
         val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
         OutlinedTextField(
-            value = key, onValueChange = { key = it.trim() }, singleLine = true,
+            value = key, onValueChange = { key = it.trim(); models = emptyList(); chosen = null; message = null },
+            enabled = canEdit, singleLine = true,
             label = { Text("API key (if the server needs one)") },
             visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
                 else androidx.compose.ui.text.input.PasswordVisualTransformation(),
@@ -648,7 +722,8 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
             modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
-            value = contextText, onValueChange = { contextText = it.filter(Char::isDigit).take(7) }, singleLine = true,
+            value = contextText, onValueChange = { contextText = it.filter(Char::isDigit).take(7) },
+            enabled = canEdit, singleLine = true,
             label = { Text("Context size in tokens (optional)") },
             placeholder = { Text("Ask the server") },
             supportingText = { Text("Leave empty to use what the server reports. Set it (like 131072) if the context meter shows the wrong size.") },
@@ -674,9 +749,13 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // Allowing an outside address continues the same Connect.
             LaunchedEffect(connectAgain) { if (connectAgain > 0) connectNow() }
-            OutlinedButton(enabled = url.isNotBlank() && !checking, onClick = { connectNow() }) { Text(if (checking) "Connecting…" else "Connect") }
-            if (active != null) TextButton(onClick = onStop) { Text("Use phone model") }
+            OutlinedButton(enabled = baseUrl != null && canEdit, onClick = { connectNow() }) { Text(if (checking) "Connecting…" else "Connect") }
+            TextButton(enabled = baseUrl != null && canEdit, onClick = {
+                baseUrl?.let { saveConnection(it) }
+                message = null
+            }) { Text("Save API") }
         }
+        if (active != null) TextButton(enabled = !busy, onClick = onStop) { Text("Use phone model") }
         if (models.isNotEmpty()) {
             Text("Models on the server", style = MaterialTheme.typography.labelLarge)
             models.forEach { id ->
@@ -685,7 +764,11 @@ private fun RemoteModelSetting(active: RemoteModelConfig?, onUse: (RemoteModelCo
                     Text(id, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Button(enabled = chosen != null, onClick = { chosen?.let { onUse(RemoteModelConfig(normalizeBaseUrl(url), key, it, contextText.toIntOrNull() ?: 0)) } }) { Text("Use this model") }
+            Button(enabled = chosen in models && canEdit && !busy, onClick = {
+                val model = chosen ?: return@Button
+                val connection = saveConnection(baseUrl ?: return@Button, model)
+                onUse(RemoteModelConfig(connection.baseUrl, connection.apiKey, model, connection.contextTokens))
+            }) { Text("Use this model") }
         }
         message?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
         }

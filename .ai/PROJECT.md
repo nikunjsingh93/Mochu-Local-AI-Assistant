@@ -14,7 +14,7 @@ Main features:
 - **Voice** input and read-aloud replies. Mochu can be the phone's **default digital assistant** (2.4.1): the side button or assistant gesture opens a voice chat.
 - **Code:** build web, React and Python apps and export them as APKs.
 - **Local API server** (OpenAI-compatible) for other devices on the same Wi-Fi, with **tool calling** (2.3.0).
-- **Home-server models** from Ollama, LM Studio and similar.
+- **Home-server models** from Ollama, LM Studio and similar, with multiple saved OpenAI-compatible APIs.
 - **Smart cards** under answers (new in 2.0).
 - **Combine devices** (experimental, 2.1): one GGUF model split across several phones and tablets with llama.cpp RPC.
 - **Hugging Face search** (2.2.0): find and download any GGUF from the Models tab.
@@ -114,6 +114,8 @@ Paths are under `app/src/main/java/com/nikunj/gemmabuilder/`.
   5. Install on the phones.
 
 ## Important Decisions
+
+- **Saved remote APIs** (`data/RemoteConnections.kt`) keep named connections separately from the active remote model. The first read imports the previous single-server configuration. Each profile keeps its own key, context override and last-used model, including when multiple profiles share the same URL. The Models screen fetches model IDs for the chosen API after Connect and clears those results when the connection or credentials change. Existing remote engine and phone fallback settings still apply to the active model.
 
 - **Repetition detection requires consecutive identical blocks** (`data/Repetition.kt`). Counting occurrences of a shared 40-character snippet falsely stopped valid generated code with similar prefixes. Keep streaming-prefix regression tests alongside tests for actual loops.
 - **Chat image requests include common Spanish phrases** (`imagePromptFrom` in `engine/ImageGenerator.kt`). The parser routes them directly to the image model and retains the Spanish description; it does not translate it. Image models trained mostly on English may interpret it less accurately. This works without loading a chat model or requiring network access.
