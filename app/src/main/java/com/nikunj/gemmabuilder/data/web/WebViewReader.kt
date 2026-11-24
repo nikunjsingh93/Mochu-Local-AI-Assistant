@@ -17,11 +17,13 @@ import kotlin.coroutines.resume
 const val PAGE_EXTRACT_SCRIPT = """
 (function () {
   var root = document.querySelector('main, article, [role=main]') || document.body;
-  if (!root) return JSON.stringify({ title: document.title, text: '' });
+  var structured = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+    .slice(0, 16).map(function (node) { return node.textContent.slice(0, 32000); });
+  if (!root) return JSON.stringify({ title: document.title, text: '', structured: structured });
   var clone = root.cloneNode(true);
   clone.querySelectorAll('script, style, noscript, svg, nav, footer, header, aside, form, iframe, [aria-hidden=true]')
     .forEach(function (n) { n.remove(); });
-  return JSON.stringify({ title: document.title, text: (clone.innerText || '').slice(0, 40000) });
+  return JSON.stringify({ title: document.title, text: (clone.innerText || '').slice(0, 40000), structured: structured });
 })()
 """
 
@@ -91,6 +93,9 @@ fun parseExtractedPage(json: String?, url: String): PageText? {
     return PageText(
         title = obj.optString("title").trim(),
         url = url,
-        text = obj.optString("text").lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+        text = obj.optString("text").lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n"),
+        structuredData = productAndRecipeData(obj.optJSONArray("structured")?.let { array ->
+            (0 until minOf(array.length(), 16)).map { array.optString(it) }
+        }.orEmpty())
     )
 }

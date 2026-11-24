@@ -122,7 +122,7 @@ private fun placePrompt(request: String, page: PageText) =
         "Use null for anything not on the page."
 
 private fun comparePrompt(page: PageText) =
-    "${pageBlock(page, 3500)}\n\nGive this product's name, price and up to 5 key specs from the page. Reply with only this JSON: " +
+    "Page: ${page.title}\n${page.sourceText(3500)}\n\nGive this product's name, price and up to 5 key specs from the page. Reply with only this JSON: " +
         "{\"title\": \"short name\", \"price\": 123.45, \"currency\": \"USD\", \"specs\": {\"Screen\": \"16 in OLED\", \"RAM\": \"16 GB\"}}. " +
         "Use null for the price if it is not on the page."
 
@@ -185,7 +185,7 @@ private fun placeCard(o: JSONObject, page: PageText): String? {
 private fun compareItem(o: JSONObject, page: PageText): JSONObject? {
     val title = o.optString("title").trim().ifBlank { page.title }.take(70)
     val item = JSONObject().put("title", title).put("url", page.url).put("store", hostOf(page.url).removePrefix("www."))
-    number(o, "price")?.takeIf { it > 0 && priceOnPage(it, page.text) }?.let {
+    number(o, "price")?.takeIf { it > 0 && (priceOnPage(it, page.text) || structuredPriceOnPage(it, page)) }?.let {
         item.put("price", it).put("currency", o.optString("currency").uppercase(Locale.US).take(4).ifBlank { "USD" })
     }
     val specs = JSONObject()

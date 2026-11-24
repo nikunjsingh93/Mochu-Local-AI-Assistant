@@ -36,7 +36,7 @@ private const val EXTRACT_SYSTEM = "You extract product data from web pages. Rep
 /** The prompt asking the model for the product name and its current price on [page]. */
 fun productExtractionPrompt(page: PageText, request: String): String =
     "The user asked: \"${request.take(300)}\"\n\n" +
-        "Page: ${page.title}\n${page.text.take(3500)}\n\n" +
+        "Page: ${page.title}\n${page.sourceText(3500)}\n\n" +
         "From this page, give the main product's name and the current price the user asked about. " +
         "If the page also shows a usual price (\"Typical price\", \"List price\", \"Was\"), give it as listPrice. " +
         "Reply with only this JSON: {\"title\": \"short product name\", \"price\": 123.45, \"listPrice\": 150.00, \"currency\": \"USD\"}. " +
@@ -50,7 +50,7 @@ fun parseProductReply(reply: String, page: PageText): ProductInfo? {
     val json = Regex("""\{[^{}]*\}""").find(reply)?.value ?: return null
     val o = runCatching { JSONObject(json) }.getOrNull() ?: return null
     val price = o.optDouble("price", Double.NaN).takeIf { !it.isNaN() && it > 0 } ?: return null
-    if (!priceOnPage(price, page.text)) return null
+    if (!priceOnPage(price, page.text) && !structuredPriceOnPage(price, page)) return null
     val title = o.optString("title").trim().ifBlank { page.title }.take(120)
     val currency = o.optString("currency").trim().uppercase(Locale.US).take(4).ifBlank { "USD" }
     // The usual price must also be on the page and above the current one to count.

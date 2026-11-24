@@ -12,7 +12,13 @@ import java.net.URLEncoder
 
 data class SearchResult(val title: String, val url: String, val snippet: String)
 
-data class PageText(val title: String, val url: String, val text: String)
+data class PageText(val title: String, val url: String, val text: String, val structuredData: String = "") {
+    fun sourceText(limit: Int): String {
+        if (structuredData.isBlank()) return text.take(limit)
+        val structured = "Structured page data:\n" + structuredData.take(limit / 2)
+        return structured + "\n\n" + text.take((limit - structured.length - 2).coerceAtLeast(0))
+    }
+}
 
 /** A mobile Chrome user agent, so sites serve the same pages a phone browser would get. */
 const val WEB_USER_AGENT =
@@ -152,7 +158,8 @@ fun fetchPageText(url: String, timeoutMs: Int = 8_000): PageText? = runCatching 
         .timeout(timeoutMs)
         .followRedirects(true)
         .get()
-    PageText(doc.title().trim(), url, readableText(doc))
+    val structured = productAndRecipeData(doc.select("script[type=application/ld+json]").take(16).map { it.data() })
+    PageText(doc.title().trim(), url, readableText(doc), structured)
 }.getOrNull()
 
 /** Main-content text of a page: drops scripts, navigation, and boilerplate, keeps line structure. */
@@ -303,7 +310,7 @@ fun webResearchPrompt(request: String, pages: List<PageText>, unread: List<Searc
         append("Today's date: ${java.text.SimpleDateFormat("EEEE, MMMM d, yyyy", java.util.Locale.US).format(java.util.Date())}\n\n")
         pages.forEachIndexed { i, page ->
             append("<source id=\"${i + 1}\" title=\"${page.title.replace("\"", "'")}\" url=\"${page.url}\">\n")
-            append(page.text.take(perPage))
+            append(page.sourceText(perPage))
             append("\n</source>\n\n")
         }
         if (unread.isNotEmpty()) {

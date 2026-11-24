@@ -1,5 +1,15 @@
 # Development Handoff
 
+## 2026-11-24: v2.4.4 browser actions and structured page data
+
+- For GitHub issue #5, Browser page options now offer **Act on this page**. An on-device model can suggest a same-origin HTTPS link, a native disclosure section or an eligible search field. The user approves the action and supplies any text. The browser leaves submission manual. Supported WebViews offer **Preload link** during review and per-site storage clearing. Manual sign-in uses the existing WebView session.
+- `BrowserActions.kt`, `BrowserScreen.kt`, `AppShell.kt`, and `BuilderViewModel.kt` implement the actions. `StructuredPageData.kt`, `WebTools.kt`, `WebViewReader.kt`, `TaskRunner.kt`, `PriceTracking.kt`, and `RichCards.kt` carry Product and Recipe JSON-LD into research and Smart Cards. `BrowserPageDataTest.kt` covers parsing, selection and permission filters.
+- Gradle 8.13 `testReleaseUnitTest assembleRelease --offline --console=plain -q` passed with 115 tests. `apksigner verify` passed. A disposable headless Chromium fixture verified search filling without input/change/submit events, native disclosure expansion, and stale-document rejection. Wireless ADB detected the S26, but the phone became awake before the install check, so installation and live WebView testing were paused.
+- Wireless `adb install -r` succeeded on the idle S26. `dumpsys package` confirmed that Mochu 2.4.3 was updated. The device was locked, so the live WebView test is pending.
+- Added the first site-specific workflow for English mobile Wikipedia. The model can suggest opening Minerva's main menu or running a public article search. The menu was checked against Wikipedia's mobile HTML and exercised in an isolated Chromium fixture. The test search returned HTTP 200. Gradle `testReleaseUnitTest assembleRelease --offline --console=plain -q` passed with 116 tests, and `apksigner verify` passed.
+- The phone returned to Gallery during the first live test attempt. When it was idle again, wireless `adb install -r` installed the Wikipedia build and `dumpsys package` confirmed the update. The phone was locked. Next: verify model actions, prerender activation and site-data clearing on the unlocked S26.
+- The v2.4.4 release build passed with versionCode 40 and the release signing certificate. APK SHA-256 starts with `8c4866b2`. [GitHub release](https://github.com/nikunjsingh93/Mochu-Local-AI-Assistant/releases/tag/v2.4.4).
+
 ## 2026-11-24: v2.4.3 saved remote APIs
 
 - The Models screen can save multiple named OpenAI-compatible APIs and connect to any saved API to choose a model. Existing single-server settings migrate automatically. Profiles keep separate keys, context overrides and last-used models. Selecting a model still uses the existing Chat and Code engine path.

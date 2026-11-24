@@ -464,7 +464,7 @@ class TaskRunnerService : Service() {
                     val direct = withContext(Dispatchers.IO) { fetchPageText(target.url) }
                     val page = direct?.takeIf { it.text.length >= 600 && !looksBlocked(it) }
                         ?: if (tooLowOnMemoryForWebView(applicationContext)) null else readWithWebView(applicationContext, target.url)
-                    if (page == null || page.text.length < 200 || looksBlocked(page)) {
+                    if (page == null || (page.text.length < 200 && page.structuredData.isBlank()) || looksBlocked(page)) {
                         steps += ActivityStep(ACTIVITY_SKIP, "Couldn't read ${hostOf(target.url)}", target.url)
                     } else {
                         pages += page.copy(title = page.title.ifBlank { target.title }, url = target.url)

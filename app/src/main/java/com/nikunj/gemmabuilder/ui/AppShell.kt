@@ -326,6 +326,8 @@ fun OnDeviceApp(
                         requestedUrl = state.browserUrl,
                         onRequestedUrlOpened = vm::consumeBrowserUrl,
                         canAsk = state.modelReady && !state.isBusy,
+                        canSuggestAction = state.modelReady && !state.isBusy && state.remoteModel == null,
+                        onSuggestAction = { request, links -> vm.suggestBrowserAction(app, request, links) },
                         onAskAboutPage = { page ->
                             pinnedTab = null
                             vm.askAboutPage(app, page)
